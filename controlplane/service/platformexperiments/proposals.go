@@ -28,7 +28,7 @@ import (
 // experiment file: an agent's token wrote this. One without questions the platform accepts as
 // proposed after planning.auto_accept_seconds unless a person acts first; one with questions
 // waits for a person to answer them. Nothing has run when it is written:
-// the baseline is measured once it is accepted, before any researcher starts.
+// the baseline is measured once it is accepted, before any executor starts.
 type Proposal struct {
 	GoalVersion int `json:"goal_version" doc:"The goal_version of the draft the proposal was planned from. 409 goal_changed once the draft has another goal: read it and propose for it."`
 
@@ -40,7 +40,7 @@ type Proposal struct {
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run: a cap, estimated before anything ran."`
 	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, counted from the moment it starts, once its baseline is declared: a time the goal states is this."`
 	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes the baseline agent needs, from the accept, to measure the baseline and leave its job: few where the repository holds a harness that runs unchanged, more where the harness and its environment are written from nothing. At least planning.min_baseline_minutes and at most planning.baseline_limit_minutes."`
-	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
+	Agents                 []ProposedAgent `json:"agents" doc:"The team proposed, one entry for each agent: one of agent_type researcher is a researcher, which runs no job and steers the work through the hypothesis graph, and any other an executor, which runs the jobs. At least one executor."`
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type,omitempty" doc:"The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now."`
 	AcceleratorKind domain.TypeKind        `json:"accelerator_kind" readOnly:"true" doc:"What accelerator_type counts, which the platform sets: accelerator for devices, cpu for CPU cores, whose budget is CPU core-hours."`
@@ -53,7 +53,7 @@ type Proposal struct {
 
 	MetricReason string             `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string             `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
-	SizingReason string             `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
+	SizingReason string             `json:"sizing_reason" doc:"Why this budget, this long and this team are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
 	OutOfScope   []string           `json:"out_of_scope,omitempty"`
 	Risks        []string           `json:"risks,omitempty"`
 	Questions    []ProposalQuestion `json:"questions,omitempty" doc:"Each decision the goal left open that changes what counts, with the answer the proposal is planned on: among them any bound of a gate that depends on a number nobody has measured yet. A proposal with questions is never accepted by itself: a person confirms or changes each answer on accepting it, and the answers go into the description."`
@@ -68,7 +68,8 @@ type ProposalQuestion struct {
 	Answer   string `json:"answer" doc:"The answer the proposal is planned on, which the person confirms or changes."`
 }
 
-// ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
+// ProposedAgent is one agent of a proposal's team, as POST /platform-experiments/{id}/agents takes
+// it: its agent type gives its role.
 type ProposedAgent struct {
 	AgentType       string         `json:"agent_type,omitempty"`
 	Model           string         `json:"model,omitempty"`
@@ -83,19 +84,19 @@ func refusedProposal(reason, format string, args ...any) error {
 	return refusal.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...))
 }
 
-// MaxProposedResearchers is the most researchers a proposal may name, and a draft's max_agents
+// MaxProposedAgents is the most agents a proposal's team may name, and a draft's max_agents
 // until one is accepted: of the maxAgentSandboxes machines the platform runs for an accepted draft, one
 // is its coordinator's and one its baseline agent's.
-func MaxProposedResearchers(maxAgentSandboxes int) int {
+func MaxProposedAgents(maxAgentSandboxes int) int {
 	return maxAgentSandboxes - 2
 }
 
-// proposedPool is the researchers the agents of a proposal make: an entry for each agent type and
-// model they run on, as each is resolved when the platform creates it (domain.ResolveAgentLaunch).
-func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent) (domain.ResearcherPool, error) {
+// proposedPool is the pool the agents of a proposal make: an entry for each agent type and model
+// they run on, as each is resolved when the platform creates it (domain.ResolveAgentLaunch).
+func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent) (domain.AgentPool, error) {
 	keys := make([]domain.PoolKey, 0, len(agents))
 	for i, agent := range agents {
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.AgentType, agent.Model, agent.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.PoolRole(agent.AgentType), agent.AgentType, agent.Model, agent.Hyperparameters)
 		if err != nil {
 			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
@@ -104,8 +105,19 @@ func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent) (doma
 	return domain.PoolOf(keys), nil
 }
 
-// poolAgents is a researcher of each place of pool, as sandboxedAgents creates them.
-func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
+// proposedExecutors counts the executors of agents: every one but a researcher.
+func proposedExecutors(agents []ProposedAgent) int {
+	n := 0
+	for _, agent := range agents {
+		if domain.PoolRole(agent.AgentType) == domain.AgentRoleExecutor {
+			n++
+		}
+	}
+	return n
+}
+
+// poolAgents is an agent of each place of pool, as sandboxedAgents creates them.
+func poolAgents(pool domain.AgentPool) []ProposedAgent {
 	agents := []ProposedAgent{}
 	for _, e := range pool {
 		for range e.Count {
@@ -118,7 +130,7 @@ func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
 // checkProposal is the mechanical check of a proposal: everything that can be decided from the
 // proposal and the platform's config. It refuses with every problem it finds, so a planner fixes
 // them in one pass. It returns the experiment the proposal states, as validate answers it: with
-// its cost, its length and one place for each researcher. It leaves p as it is stored: every text
+// its cost, its length and one place for each agent of the team. It leaves p as it is stored: every text
 // of it without the whitespace around it, the CPU type where it states no accelerator_type, and
 // the kind of its type.
 func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
@@ -139,8 +151,9 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	if !decoded {
 		refuse("invalid_experiment", "experiment: %s", err)
 	}
-	if most := MaxProposedResearchers(draft.MaxAgentSandboxes); len(p.Agents) == 0 || len(p.Agents) > most {
-		refuse("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
+	executors := proposedExecutors(p.Agents)
+	if most := MaxProposedAgents(draft.MaxAgentSandboxes); executors == 0 || len(p.Agents) > most {
+		refuse("invalid_agents", "agents: propose at least one executor and at most %d agents in all (the draft's max_agents), got %d executors of %d", most, executors, len(p.Agents))
 	}
 	least, limit := max(1, int(s.cfg.MinBaseline.Minutes())), int(s.cfg.BaselineLimit.Minutes())
 	if p.BaselineMinutes < least || p.BaselineMinutes > limit {
@@ -151,12 +164,12 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	if decoded {
 		// An accepted draft starts when it is accepted, whatever its experiment says of a start.
 		experiment.StartsAt = time.Time{}
-		experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, len(p.Agents)
+		experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, executors
 		pool, unresolved := proposedPool(catalog, p.Agents)
 		if err := problems.Add(unresolved); err != nil {
 			return experiment, err
 		}
-		experiment.Researchers = pool
+		experiment.Agents = pool
 		var invalid error
 		experiment, invalid = s.validate(experiment, catalog)
 		if err := problems.Add(invalid); err != nil {
@@ -186,8 +199,10 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 		refuse("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {
-		if _, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.AgentType, agent.Model, agent.Hyperparameters); err != nil {
+		if _, err := domain.ResolveAgentLaunch(catalog, domain.PoolRole(agent.AgentType), agent.AgentType, agent.Model, agent.Hyperparameters); err != nil {
 			refuse("invalid_agents", "agents[%d]: %s", i, err)
+		} else if err := problems.Add(s.checkModel(ctx, fmt.Sprintf("agents[%d].model", i), agent.Model)); err != nil {
+			return experiment, err
 		}
 	}
 	explanations := map[string]*string{"metric_reason": &p.MetricReason, "measurement": &p.Measurement, "sizing_reason": &p.SizingReason}
@@ -396,7 +411,7 @@ type AcceptRequest struct {
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, once its baseline is declared."`
 	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at least planning.min_baseline_minutes and at most planning.baseline_limit_minutes: baseline_due_at is that much later, and moves out by the time the platform spends building and starting the baseline's jobs."`
-	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
+	Agents                 []ProposedAgent `json:"agents" doc:"The team the platform runs, one entry for each agent: one of agent_type researcher is a researcher, any other an executor. At least one executor."`
 	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its description change by a change of the goal (PATCH /platform-experiments/{id} with goal), which the planner plans again."`
 	Answers                []string        `json:"answers,omitempty" doc:"One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the description. Left out for a proposal without questions."`
 }
@@ -455,7 +470,7 @@ func invalidTransition(format string, args ...any) error {
 }
 
 // accept makes the draft id the open platform experiment its proposal describes, at the cost
-// req states, with a sandboxed coordinator, its researchers and the agent that measures its
+// req states, with a sandboxed coordinator, its team and the agent that measures its
 // baseline, in one write. by owns its agents; acceptedBy is the person who accepted, nil when the
 // platform accepts it as proposed.
 func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor, acceptedBy *domain.Actor) (*domain.PlatformExperiment, error) {
@@ -499,7 +514,7 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
 	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, experiment.DefaultQuotaTier
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
-	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Researchers, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Researchers, experiment.DurationHours
+	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Agents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Agents, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
 	pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{}
 	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers
@@ -530,7 +545,7 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	case err != nil:
 		return nil, s.refusal("accept", err)
 	}
-	s.logger.Info("draft accepted", zap.String("id", id), zap.Int("researchers", len(req.Agents)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
+	s.logger.Info("draft accepted", zap.String("id", id), zap.Int("agents", len(req.Agents)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
 	accepted, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil || accepted == nil {
 		return nil, s.refusal("read accepted", errors.Join(err, errors.New("the platform experiment is gone")))
@@ -618,7 +633,7 @@ func (s *Service) AcceptDue(ctx context.Context) error {
 	return nil
 }
 
-// acceptAsProposed accepts the draft id at the cost, length and researchers its proposal states.
+// acceptAsProposed accepts the draft id at the cost, length and team its proposal states.
 func (s *Service) acceptAsProposed(ctx context.Context, id string) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {

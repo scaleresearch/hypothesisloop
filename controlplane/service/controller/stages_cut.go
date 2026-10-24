@@ -105,7 +105,7 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 			continue
 		}
 		// Status is already EVICTED above — the cluster-agent's next reconcile pass removes the
-		// Job on its own. A stage cut still owes the researcher whatever they genuinely ran, same
+		// Job on its own. A stage cut still owes the executor whatever it genuinely ran, same
 		// as every other eviction path — settleAndMark computes that from observed metrics, not
 		// the unused remainder.
 		exp.Status = domain.StatusEvicted

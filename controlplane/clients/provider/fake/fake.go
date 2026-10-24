@@ -32,24 +32,32 @@ type Provider struct {
 	created   int
 	instances map[string]*instance
 	calls     map[string]int
+	networks  map[string]bool
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
 	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume", "Rentable", "Warm",
-	// "StartWarm" or "Get"; name is the instance's, empty for List, Rentable and an id Get does not
-	// find, and for StartWarm the
-	// name it is started under.
+	// "StartWarm", "Get", "Networked", "CreateNetwork", "Networks" or "DeleteNetwork"; name is the
+	// instance's, empty for List, Rentable, Networked, Networks and an id Get does not find, for
+	// StartWarm the name it is started under, and the network's for CreateNetwork and DeleteNetwork.
 	Fail func(method, name string) error
 
 	// Market, when set, is what the vendor has to rent of a spec right now. Unset, there is one
 	// for every instance asked about.
 	Market func(spec provider.Spec) provider.Supply
 
+	// Network, when set, is how many instances of a spec one private network can hold right now.
+	// Unset, it holds any number.
+	Network func(spec provider.Spec, spread bool) provider.Supply
+
+	// Host, when set, is the host Create rents a spec on, as a vendor that names hosts lists it.
+	Host func(spec provider.Spec) string
+
 	// Rents is what Architectures answers, amd64 from New. Create and Warm refuse any other.
 	Rents []string
 }
 
 func New() *Provider {
-	return &Provider{instances: map[string]*instance{}, calls: map[string]int{}, Rents: []string{"amd64"}}
+	return &Provider{instances: map[string]*instance{}, calls: map[string]int{}, networks: map[string]bool{}, Rents: []string{"amd64"}}
 }
 
 func (p *Provider) Architectures() []string { return slices.Clone(p.Rents) }
@@ -66,6 +74,7 @@ var (
 	_ provider.Pauser    = (*Provider)(nil)
 	_ provider.Market    = (*Provider)(nil)
 	_ provider.Warmer    = (*Provider)(nil)
+	_ provider.Networker = (*Provider)(nil)
 	_ provider.Accounted = (*Provider)(nil)
 )
 
@@ -98,13 +107,110 @@ func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error)
 	if err := p.rents(spec); err != nil {
 		return "", err
 	}
+	if spec.Network != "" && !p.networks[spec.Network] {
+		return "", fmt.Errorf("fake: spec %q joins network %q, which does not exist", spec.Name, spec.Network)
+	}
 	p.created++
 	id := fmt.Sprintf("fake-%04d", p.created)
 	p.instances[id] = &instance{
 		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now(), Architecture: spec.Architecture},
 		spec:     spec,
 	}
+	if p.Host != nil {
+		p.instances[id].Host = p.Host(spec)
+	}
+	if spec.Network != "" {
+		p.instances[id].PrivateAddress = fmt.Sprintf("10.0.%d.%d", p.created/256, p.created%256)
+	}
 	return id, nil
+}
+
+// Interface is the one the fake's networks are on.
+func (p *Provider) Interface() string { return "eth0" }
+
+func (p *Provider) Networked(_ context.Context, spec provider.Spec, atMost int, spread bool) (provider.Supply, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("Networked", ""); err != nil {
+		return provider.Supply{}, err
+	}
+	return p.networked(spec, atMost, spread), nil
+}
+
+func (p *Provider) networked(spec provider.Spec, atMost int, spread bool) provider.Supply {
+	if p.Network == nil {
+		return provider.Supply{Count: atMost}
+	}
+	supply := p.Network(spec, spread)
+	supply.Count = max(0, min(atMost, supply.Count))
+	return supply
+}
+
+// CreateNetwork is ErrNoOffer when Network holds fewer instances of a spec than specs has of its
+// size.
+func (p *Provider) CreateNetwork(_ context.Context, name string, specs []provider.Spec, spread bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("CreateNetwork", name); err != nil {
+		return err
+	}
+	if err := provider.ValidateNetworkName(name); err != nil {
+		return fmt.Errorf("fake: %w", err)
+	}
+	if p.networks[name] {
+		return nil
+	}
+	for _, spec := range specs {
+		alike := 0
+		for _, other := range specs {
+			if sameSize(spec, other) {
+				alike++
+			}
+		}
+		if p.networked(spec, alike, spread).Count < alike {
+			return fmt.Errorf("fake: network %q: %w", name, provider.ErrNoOffer)
+		}
+	}
+	p.networks[name] = true
+	return nil
+}
+
+func sameSize(a, b provider.Spec) bool {
+	return a.AcceleratorType == b.AcceleratorType && a.AcceleratorCount == b.AcceleratorCount &&
+		a.CPUMillis == b.CPUMillis && a.MemoryBytes == b.MemoryBytes && a.DiskBytes == b.DiskBytes
+}
+
+func (p *Provider) Networks(_ context.Context, prefix string) ([]string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("Networks", ""); err != nil {
+		return nil, err
+	}
+	var names []string
+	for name := range p.networks {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// DeleteNetwork refuses a network an instance is still on, which the contract has the caller
+// never ask for.
+func (p *Provider) DeleteNetwork(_ context.Context, name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("DeleteNetwork", name); err != nil {
+		return err
+	}
+	for _, i := range p.instances {
+		if i.spec.Network == name {
+			return fmt.Errorf("fake: network %q still has instance %q on it", name, i.Name)
+		}
+	}
+	delete(p.networks, name)
+	return nil
 }
 
 // Warm rents an instance that is starting until Ready makes it warm.

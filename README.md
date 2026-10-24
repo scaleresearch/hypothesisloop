@@ -21,7 +21,7 @@ scheduling details away from the agents. It supports:
 ## UI
 
 The control plane ships a Next.js dashboard for following experiments, hypotheses, jobs and agents.
-The screenshots show a real run: eight researcher agents searching for a better lossless
+The screenshots show a real run: eight agents searching for a better lossless
 point-cloud codec.
 
 <table>
@@ -180,9 +180,9 @@ their own platform token as the password. `hl git-credential` hands git that tok
 address alone. The proxy decides who reads (an agent, the coordinator and the jobs of the platform
 experiment while their run goes on) and who writes (an agent once the experiment is past its draft,
 never its planner), reads the ref updates of every push before the host sees any of it, and refuses
-the push unless each one is the pusher's own branch: `hl/<id>/<agent name>/...` for a researcher or
+the push unless each one is the pusher's own branch: `hl/<id>/<agent name>/...` for an executor or
 a reviewer, `hl/<id>/baseline` and `hl/<id>/baseline-<name>` for a baseline agent, which also
-creates `main` on an empty repository. Nothing pushes a tag or moves or deletes the default branch
+creates `main` on an empty repository. A researcher reads and pushes nothing. Nothing pushes a tag or moves or deletes the default branch
 or another agent's branch. It then reaches the host with a credential it mints for that request.
 
 The App's permissions are stated once, in `controlplane/shared/githost/github/app-manifest.json`:
@@ -236,17 +236,19 @@ export HL_ORG=default HL_PROJECT=default   # where `platform-experiments create`
 
 hl platform-experiments create experiment.yaml             # create an experiment from a file
 hl platform-experiments agents add --platform-experiment PE            # add an agent you run yourself; its token is printed
-hl platform-experiments agents add --platform-experiment PE --hosted   # or have the platform run it
+hl platform-experiments agents add --platform-experiment PE --in-agentsandbox   # or have the platform run it
+hl platform-experiments agents add --platform-experiment PE --role researcher --in-agentsandbox --model openrouter/moonshotai/kimi-k2   # a researcher, on a model of your choice
 hl platform-experiments get --platform-experiment PE       # status, what it waits for, brief, metrics and stages
 hl platform-experiments list                               # yours and the shared ones, one line each
-hl platform-experiments update --baseline-job JOB          # declare the baseline; the run starts once a researcher joined
-hl platform-experiments agents message AGENT --text "..."  # steer an agent (or --all researchers); it wakes with the message
+hl platform-experiments update --baseline-job JOB          # declare the baseline; the run starts once an executor joined
+hl platform-experiments agents message AGENT --text "..."  # steer an agent (or --all, the team); it wakes with the message
 hl platform-experiments agents session --platform-experiment PE AGENT > session.tar.gz   # an agent's stored session
 hl platform-experiments close --reason "..."               # end the experiment
 hl situation                                               # the run now: time, budget, capacity and each agent's work
 hl quota                                                   # your share of the budget and what a new job may still hold
 hl results                                                 # standings on the declared metrics
 hl capacity                                                # live accelerators and CPU cores per cluster
+hl models --search kimi                                    # the models an agent can run on, as <provider>/<model id>; --provider, --json
 hl hypothesis submit --builds-on root --text "..."
 hl hypothesis query 'MATCH (h:Hypothesis)-[:BUILDS_ON]->(:Objective) RETURN h.id, h.text'
 hl hypothesis get HYP                                      # links, jobs, findings, comments and implementations
@@ -254,6 +256,9 @@ hl hypothesis checkout HYP                                 # in a clone: your br
 hl hypothesis link HYP2 --type contradicts --to HYP
 hl hypothesis comment HYP --text "..."
 hl hypothesis status HYP confirmed --against JOB           # the verdict, against a control job
+hl hypothesis merge DUP --into HYP --reason "..."          # a researcher's: fold a duplicate into the hypothesis that states its claim
+hl hypothesis retire HYP --reason "..."                    # a researcher's: take an open idea off the frontier
+hl hypothesis unlink HYP --type contradicts --to HYP2      # remove a link from your own hypothesis, or from any as a researcher
 hl repo init                                               # in a clone: write the experiment's files
 hl repo check                                              # in a clone: check those files fit the experiment
 hl job submit .hypothesisloop/job.yaml --hypothesis HYP --theory "..." --env LR=0.1
@@ -300,43 +305,77 @@ and its `status_reason` says what the experiment waits for and who acts next.
 
 ## Who runs a platform experiment
 
-A platform experiment is run by LLM agents. Hosted agents run Claude through the Claude Agent SDK
-in the platform's agent image. You can also run agents of your own. Each agent has one of four
-roles:
+A platform experiment is run by LLM agents. Hosted agents run Claude Code in the platform's agent
+image, on the model each one is given (see [Models](#models)). You can also run agents of your own.
+Each agent has one of these roles:
 
 - **Planner.** Turns a one-sentence goal into a proposed experiment: it picks the metric and the
   gate, writes the brief and sizes the run. It runs no job.
 - **Baseline agent.** Measures the control with real jobs before the run starts. It is never
   ranked or cut and does not count against `max_agents`.
-- **Coordinator.** Watches the run, keeps the brief current and writes the summary. It holds no
-  quota and runs no job. The platform runs one for an accepted draft and for an experiment
-  created with `coordinator_hosted: true`. Otherwise the experiment's creator does this part
-  with their own token, as the hosted coordinator's
-  [prompt](controlplane/shared/agenttypes/builtin/coordinator.md) describes.
-- **Researchers.** Propose hypotheses, submit jobs and file findings, each with its own identity
-  and share of the budget. They are ranked. The API calls their role `competitor`.
+- **Coordinator.** One per platform experiment. It assembles and steers the team, watches the run,
+  keeps the brief current and writes the summary. It holds no quota and runs no job. The platform
+  runs one for an accepted draft and for an experiment created with `coordinator_in_agentsandbox: true`.
+  Otherwise the experiment's creator does this part with their own token, as the hosted
+  coordinator's [prompt](controlplane/domain/agenttypes/builtin/coordinator.md) describes.
+- **Researcher.** Owns the hypothesis graph: it reads papers, proposes hypotheses, reviews
+  outcomes against their metrics, and merges, retires and unlinks hypotheses. It submits no job,
+  has no quota, is never ranked or cut and has read-only git. It defaults to the coordinator's
+  model when neither it nor its agent type names one.
+- **Executor.** Implements experiments, runs their jobs, checks that each is implemented
+  correctly and reports accurately. It may also propose hypotheses. Executors are ranked and hold
+  the quota. The built-in executor types are `generalist`, `hyperparameter-search`,
+  `architecture-search` and `data-search`, and an org can add its own. The API calls the role
+  `competitor`.
+
+`GET /agent-roles` describes the roles, and `GET /orgs/{id}/agent-types` lists the agent types
+with their role.
 
 An experiment starts in one of two ways:
 
 - **From a sentence** (next section). A planner proposes the experiment, and the platform runs
-  the baseline agent, the coordinator and the researchers.
+  the baseline agent, the coordinator and the team.
 - **Whole** (`hl platform-experiments create FILE`, `POST /platform-experiments`). The request
-  states the experiment. With `coordinator_hosted: true` the platform also runs a coordinator,
-  a baseline agent and the researchers the request lists in `researchers`, created with the
-  experiment. Without it, the owner adds the baseline agent and the researchers
-  (`hl platform-experiments agents add`, with `--hosted` to have the platform run each).
+  states the experiment. With `coordinator_in_agentsandbox: true` the platform also runs a coordinator,
+  a baseline agent and the team the request lists in `agents`, created with the experiment.
+  Without it, the owner adds the baseline agent and the others
+  (`hl platform-experiments agents add`, with `--in-agentsandbox` to have the platform run each and
+  `--role researcher` to add a researcher).
 
 The experiment is `open` until its baseline is declared. Then the run starts by itself, and
-`duration_hours` counts from that moment. `max_agents` caps how many researchers may be at work
-at once. `researchers` is who the run is to keep at work, at most `max_agents` in all: where the
-platform runs them it replaces a researcher that finished or lost its machine with a new one of
-the same agent type, model and hyperparameters while the time and budget left hold a trial, and a
-stage cut lowers the counts so nobody takes a cut researcher's place. Agents are named by role and number (`Researcher 2`, `Baseline 1`) unless the
-request names them.
+`duration_hours` counts from that moment. `max_agents` caps how many executors may be at work at
+once, and researchers are not counted. `agents` is the team the run is to keep at work, an entry
+each agent type and model, `[{agent_type, model, hyperparameters, count}]`. The agent type
+`researcher` makes researchers and any other type makes executors, at most `max_agents` in all.
+Where the platform runs the team it replaces an agent that finished or lost its machine with a new
+one of the same agent type, model and hyperparameters while the time and budget left hold a trial,
+and a stage cut lowers the counts so nobody takes a cut executor's place. Agents are named by role
+and number (`Executor 2`, `Baseline 1`) unless the request names them.
 
-Each researcher has a **flavor** that shapes its instructions: `generalist`,
-`hyperparameter-search`, `architecture-search` or `data-search`. It may also get starting
-hyperparameters.
+An executor's agent type shapes its instructions, and it may also get starting hyperparameters.
+
+### Models
+
+A model is always a reference `<provider>/<model id>`, such as `anthropic/claude-sonnet-5`,
+`openrouter/moonshotai/kimi-k2` or `openai/gpt-6-luna`. Three providers are supported:
+
+| Provider | Models | Credential |
+|---|---|---|
+| `anthropic` | Claude, on the Claude subscription (the default) | `MODEL_ANTHROPIC_OAUTH_TOKEN` |
+| `openrouter` | any model OpenRouter serves that takes tools | `MODEL_OPENROUTER_API_KEY` |
+| `openai` | OpenAI's models, on a ChatGPT subscription | `MODEL_OPENAI_AUTH_JSON`, the `auth.json` of a signed-in Codex CLI, which seeds a token pair the platform renews and keeps in Postgres |
+
+A provider is served while its credential is set. `GET /models` lists every model served, and
+`hl models [--provider P] [--search TEXT] [--json]` searches that list. The UI's model picker
+searches it live. A model that is no served reference is refused with 422 `model_not_served`.
+
+Every provider runs through the same harness, Claude Code. Agents and coordinators call the
+platform's model proxy at `/model/<provider>` with their own platform token. The control plane
+holds the credentials, makes each call and records its tokens and cost for the org, platform
+experiment and agent. The `models:` section of `controlplane/settings/hypothesisloop.yaml` sets
+each provider's catalog and prices, and `agents.default_model` and `agents.coordinator_model`
+name the defaults. Per experiment, `coordinator_model` and each `agents` entry's `model` choose
+the models of its team.
 
 ### From one sentence
 
@@ -357,7 +396,7 @@ the agents read. Its baseline agent's machine starts with the accept. The planne
 up for `planning.planner_kept_minutes` (10) after it answers, so a revision reaches it quickly.
 
 After acceptance the owner can still change the brief and duration
-(`PATCH /platform-experiments/{id}`) and replace researchers. A draft's `status_reason` says where
+(`PATCH /platform-experiments/{id}`) and replace agents. A draft's `status_reason` says where
 it stands (`planning`, `revising`, `accepting`, `proposed` or `declined`) and whose move it is
 (`waits_for`: `owner`, `coordinator` or `platform`).
 
@@ -378,9 +417,9 @@ The platform pays for planning, within the time limits of the `planning` setting
 
 No experiment starts without a declared baseline. While it is `open`:
 
-1. A baseline agent joins. A draft's proposal adds it, and so does `coordinator_hosted: true`.
+1. A baseline agent joins. A draft's proposal adds it, and so does `coordinator_in_agentsandbox: true`.
    Otherwise the owner adds it:
-   `hl platform-experiments agents add --platform-experiment PE --role baseline --hosted`.
+   `hl platform-experiments agents add --platform-experiment PE --role baseline --in-agentsandbox`.
 2. The baseline agent builds the harness the brief describes (or uses the repository's job spec),
    measures the control with a real job and files what it measured. Only baseline jobs run while
    the experiment is open.
@@ -391,23 +430,23 @@ No experiment starts without a declared baseline. While it is `open`:
 
 The platform checks the baseline job: completed, by a baseline agent of this experiment, with a
 finding, reporting every metric and holding every constraint. Its run time sets the default
-estimate for later jobs. The budget must cover one such job per researcher
-(`budget_below_baseline`). What the baseline spent comes out of the budget before the researchers'
+estimate for later jobs. The budget must cover one such job per executor
+(`budget_below_baseline`). What the baseline spent comes out of the budget before the executors'
 shares are split.
 
-The run starts once the baseline is declared, a researcher has joined, and `starts_at` (if set)
+The run starts once the baseline is declared, an executor has joined, and `starts_at` (if set)
 has passed. `ends_at` is `duration_hours` later. While open, `status_reason` names what the start
-waits for (`baseline_required`, `baseline_measuring`, `baseline_undeclared`, `no_researchers`,
+waits for (`baseline_required`, `baseline_measuring`, `baseline_undeclared`, `no_executors`,
 `starts_at_ahead` and others) with the next step to take. An experiment not running by
 `baseline_due_at` closes with `baseline_limit_reached`. A draft's baseline gets the minutes its
 planner estimated, at most `planning.baseline_limit_minutes` (90).
 
-Once running, an experiment whose researchers have all ended reads `researchers_done`. The
-coordinator can add researchers while time and budget remain, or write the summary and close it.
+Once running, an experiment whose executors have all ended reads `executors_done`. The
+coordinator can add executors while time and budget remain, or write the summary and close it.
 An experiment that closes without a summary gets one from the platform.
 
-With 5 or more researchers the run follows its declared `stages`, and the weakest agents are cut
-at each stage boundary. With fewer, the run is one stage and each researcher holds its whole
+With 5 or more executors (`max_agents`) the run follows its declared `stages`, and the weakest agents are cut
+at each stage boundary. With fewer, the run is one stage and each executor holds its whole
 share from the start.
 
 ## YAML files
@@ -415,7 +454,7 @@ share from the start.
 An experiment, a hypothesis and a job can each be written as a YAML file. An experiment's
 repository keeps the experiment and the job as `.hypothesisloop/experiment.yaml` and
 `.hypothesisloop/job.yaml`. `hl repo init` writes them into a clone and `hl repo check` says what
-is left to fill in. Annotated examples live in `controlplane/settings/examples/`. The minimum each
+is left to fill in. Annotated examples live in `cli/reference/`. The minimum each
 needs:
 
 **Platform experiment** (`hl platform-experiments create experiment.yaml`)
@@ -424,12 +463,15 @@ needs:
 name: my-platform-experiment
 description: what this research program is investigating
 budget_accelerator_hours: 10
-max_agents: 2             # researchers at work at once
-researchers:              # optional: who the platform starts and keeps at work
+max_agents: 2             # executors at work at once
+agents:                   # optional: the team the platform starts and keeps at work
+  - agent_type: researcher            # defaults to the coordinator's model when neither it nor its type names one
+    count: 1
   - agent_type: generalist
+    model: anthropic/claude-sonnet-5
     count: 2
 duration_hours: 24        # counted from the start of the run; 30 days at most
-coordinator_hosted: true  # optional: the platform runs the coordinator and a baseline agent
+coordinator_in_agentsandbox: true  # optional: the platform runs the coordinator and a baseline agent
 metrics:
   - key: val_accuracy
     direction: maximize
@@ -476,6 +518,49 @@ This reads as 4 units of the built-in type `hypothesisloop.dev/cpu=core`. Cores 
 numbers. Budget, quota and cost count a core-hour like an accelerator-hour at a rate of 1.0, so
 the budget of a CPU experiment reads as CPU hours. Every cluster offers its cores with nothing to
 configure. A rented cluster takes accelerator jobs only.
+
+A job that spans several nodes states `num_nodes` for identical nodes, with the resources of one
+node, or `groups` for nodes of different shapes, such as a learner beside many actors:
+
+```yaml
+job:
+  num_nodes: 2              # identical nodes; accelerator_count, cpu, memory and storage are per node
+  accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+  accelerator_count: 8
+  cpu: 32
+  memory: 128Gi
+  storage: 20Gi
+  max_retries: 1            # restarts of the whole gang
+```
+
+```yaml
+job:
+  accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+  groups:                   # replaces num_nodes and the per-node resources
+    - {name: learner, replicas: 1, accelerator_count: 8, cpu: 32, memory: 128Gi, storage: 20Gi, command: ["bash", "learner.sh"]}
+    - {name: actor, replicas: 16, cpu: 4, memory: 8Gi, storage: 4Gi, command: ["bash", "actor.sh"]}
+```
+
+The job is gang scheduled: admitted whole or not at all, with one quota holder and one
+admission. It completes once every node succeeds, and one node failing fails the whole job.
+`max_retries` (default 0) is how many times the whole gang starts again, so 2 allows 3 attempts.
+Every node gets `HYPOTHESISLOOP_RANK`, `HYPOTHESISLOOP_WORLD_SIZE`, `HYPOTHESISLOOP_MASTER_ADDR`
+and `HYPOTHESISLOOP_MASTER_PORT`, and the unprefixed `RANK`, `WORLD_SIZE`, `MASTER_ADDR` and
+`MASTER_PORT` that `torch.distributed` reads. Every rank but rank 0 reaches rank 0 at
+`MASTER_ADDR:MASTER_PORT`, so rank 0 listens on all interfaces, as torch does by default. Rank
+and world size count nodes. With several
+accelerators per node, start one process per device with
+`torchrun --nnodes=$WORLD_SIZE --node_rank=$RANK --nproc_per_node=$HYPOTHESISLOOP_ACCELERATOR_COUNT --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT`.
+Kubernetes clusters run such a job, and so does rented compute whose provider has a private
+network (vast.ai first). A gang there runs whole or not at all on one private network, with
+its ranks starting as their machines boot, so the framework's rendezvous timeout must cover the
+cluster's startup time (`startup_seconds` in `hl capacity`). A private network holds instances of
+one shape, so there every group of a job needs the same accelerators and size, and a job whose
+groups need different shapes waits with `capacity_unavailable` naming them. The platform sets
+`NCCL_SOCKET_IFNAME` and `GLOO_SOCKET_IFNAME`.
+Bare-metal nodes run single-node jobs only. A multi-node job waits with `no_multi_node_cluster`
+while no cluster can run it, and with `capacity_unavailable` while a rented cluster has no
+private network that holds it.
 
 Every job states `cpu`, `memory` and `storage`, per node. A job holds what it states. A job that
 asks for more than any cluster has is refused with 422 `exceeds_cluster_capacity`. A job without
@@ -538,15 +623,26 @@ runs it whenever the agent ends its turn.
 - **Inspectable eviction reasons.** Every evicted job carries a specific reason, so completed,
   failed, cancelled and evicted runs can always be told apart.
 - **Cross-agent visibility.** Agents query the hypothesis graph with read-only Cypher and read the
-  jobs and findings behind each hypothesis before submitting. With 5 or more researchers, stage
+  jobs and findings behind each hypothesis before submitting. With 5 or more executors, stage
   boundaries cut the weakest agents and pass their budget to the rest. People can add ideas to the
   same graph from the UI.
-- **Agent roles.** Researchers are ranked. A baseline or reviewer runs jobs, spends quota and
+- **Agent roles.** Executors are ranked. A baseline or reviewer runs jobs, spends quota and
   reports metrics the same way, without being ranked or cut, so a control can run on the same
-  hardware.
+  hardware. A researcher curates the hypothesis graph and runs no job.
+- **Graph curation.** A researcher merges an open duplicate into the hypothesis that states its
+  claim (`hl hypothesis merge`), retires an open idea with a reason (`hl hypothesis retire`) and
+  removes a link (`hl hypothesis unlink`). A hypothesis is `open`, `confirmed`, `refuted`,
+  `inconclusive`, `merged` (with `merged_into`) or `retired` (with `status_reason`). The last two
+  give no verdict, take comments only and take no job. A merge moves the links that pointed at
+  the duplicate. Merging or retiring a hypothesis with a job queued or running is refused with
+  `hypothesis_in_flight`, and anyone but a researcher with `researcher_only`. Removing a link emits a
+  `hypothesis.unlink` event.
 - **Gang scheduling.** A distributed job is admitted whole or not at all, stops as a whole when
   one node fails, and restarts as a whole. A job with different node shapes (a learner beside many
-  actors) is still one job with one quota holder.
+  actors) is still one job with one quota holder. Kubernetes clusters and rented compute with a private
+  network (vast.ai first) run multi-node jobs. Bare-metal nodes run single-node jobs only, and a
+  multi-node job waits with `no_multi_node_cluster` while no connected cluster that takes its
+  org's jobs can run it.
 - **Durable data between jobs.** Each job gets a writable space of its own and a readable one
   across the experiment, so a later job reads what an earlier one wrote wherever either ran. No
   agent can overwrite another's data.
@@ -575,11 +671,12 @@ proposed with that whole history in view.
 The loop is built from six parts:
 
 - **Platform experiment**, the objective. It holds a budget, the metrics that define success, a
-  maximum number of researchers and the root of its hypothesis graph. Agents are added to it or
-  created when a draft is accepted, and submit jobs once it starts.
+  maximum number of executors and the root of its hypothesis graph. Agents are added to it or
+  created when a draft is accepted, and executors submit jobs once it starts.
 - **Hypothesis**, the claim. A research idea placed in the experiment's graph: it builds on the
   objective or on hypotheses it refines, and can contradict or relate to others. Agents read the
   graph, then register an idea (or get back the existing one) before any job runs against it.
+  Researchers keep the graph tidy by merging, retiring and unlinking.
 - **Job**, the test. One training or evaluation run, submitted with a hypothesis, a theory and its
   resources (accelerators, CPU, memory, storage, and optionally several nodes or node groups). Any
   agent may run any hypothesis on a branch of its own: `hl hypothesis checkout HYP` creates
@@ -616,9 +713,10 @@ HypothesisLoop has two kinds of deployable parts:
     vendor (vast.ai, Fly.io or E2B) and releases it when the job ends. The agent-launcher beside
     it runs the platform's hosted agents. Settings live in `runtime/cloud/settings/`. No hosted
     agent's machine holds the model credential: its harness makes every model call through the
-    control plane's model proxy, `/model/anthropic` on the API, with its own platform token. The
-    control plane makes the call with `models.anthropic.oauth_token` and records each call's
-    tokens for its org, platform experiment and agent (`GET /platform-experiments/{id}/model-usage`).
+    control plane's model proxy, `/model/<provider>` on the API, with its own platform token. The
+    control plane makes the call with that provider's credential (`MODEL_<PROVIDER>_...`, see
+    [Models](#models)) and records each call's tokens and cost for its org, platform experiment and
+    agent (`GET /platform-experiments/{id}/model-usage`).
 
   Runtime agents call the control plane; the control plane never connects into them.
 
@@ -697,7 +795,7 @@ the same way, so the rest of the system never depends on which one it is:
 | sign-in service | `IDENTITY_PROVIDER`, UI `NEXT_PUBLIC_IDENTITY_PROVIDER` | `auth.identity_providers` (any OIDC issuer) | `supabase` |
 | git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` (in `.env`, the local git server) |
 | hosted agent sandboxes | `SANDBOX_PROVIDER` | `sandbox.provider` | `fly`, `e2b` |
-| models of hosted agents | `MODEL_PROVIDER` | `models.provider` (control-service makes their calls) | `anthropic` |
+| models of hosted agents | `MODEL_ANTHROPIC_OAUTH_TOKEN`, `MODEL_OPENROUTER_API_KEY`, `MODEL_OPENAI_AUTH_JSON` | `models.<provider>` (control-service makes their calls; a provider is served while its credential is set) | `anthropic`, `openrouter`, `openai` |
 | rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | `cloud_compute[].provider` | `vast` |
 | the platform's own clusters | `OWNED_COMPUTE_CLUSTERS` | (registered clusters) | `k8s`, `bare-metal` |
 

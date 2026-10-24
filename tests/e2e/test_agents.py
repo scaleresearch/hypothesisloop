@@ -40,8 +40,9 @@ def test_agents_join_and_leave_through_the_api_and_act_only_as_themselves(api: A
     own = api.add_agents(pe_id)[0]
     assert not own["in_agentsandbox"] and own["token"].startswith("hls_") and "instance" not in own, own
     assert own["agent_type"] == "generalist" and not own.get("model") and own["agent_id"].startswith("ag-"), own
-    named = api.add_agents(pe_id, name=f"named-{run_id}", agent_type="data-search", model="another-model-1")[0]
-    assert (named["agent_type"], named["model"]) == ("data-search", "another-model-1"), named
+    served = api.get_json("/models")["coordinator_model"]
+    named = api.add_agents(pe_id, name=f"named-{run_id}", agent_type="data-search", model=served)[0]
+    assert (named["agent_type"], named["model"]) == ("data-search", served), named
 
     for body, status, reason in (
         ({"agent_type": "no-such-type"}, 422, None),
@@ -88,20 +89,20 @@ def test_creating_a_platform_experiment_adds_no_agent_and_names_no_model_without
     r = _run(api, name, sandboxed_agents=3)
     assert r.status_code == 422, f"a create that asks for agents: {r.status_code} {r.text}"
     assert not [pe for pe in api.get_json("/platform-experiments", params={"q": name, "limit": 50}) if pe["name"] == name]
-    r = _run(api, f"model-{run_id}", coordinator_model="some-model")
+    r = _run(api, f"model-{run_id}", coordinator_model=api.get_json("/models")["coordinator_model"])
     assert r.status_code == 422, f"a model with no coordinator: {r.status_code} {r.text}"
 
 
 def test_a_coordinator_closes_its_platform_experiment_through_hl(api: API, pe_id: str):
     as_coordinator = api.as_caller(admin.token(f"coordinator:{pe_id}"), api.org_id, api.project_id)
-    researcher = api.add_agents(pe_id)[0]
+    executor = api.add_agents(pe_id)[0]
     api.declare_baseline_and_wait_running(pe_id)
-    # Its only researcher finishes, with time and quota left, so it says what stops it: nobody is
+    # Its only executor finishes, with time and quota left, so it says why it stops: nobody is
     # left to submit a job, and with no coordinator the platform runs, the run waits for its owner.
-    api.as_caller(researcher["token"], api.org_id, api.project_id).hl(
-        "platform-experiments", "agents", "finish", "--reason", "nothing left to try", "--blocker", "the test has no idea left")
+    api.as_caller(executor["token"], api.org_id, api.project_id).hl(
+        "platform-experiments", "agents", "finish", "--reason", "the test has no idea left", "--because", "nothing_left")
     done = api.get_json(f"/platform-experiments/{pe_id}")
-    assert (done["status"], done["status_reason"]["reason"], done["status_reason"]["waits_for"]) == ("running", "researchers_done", "owner"), done
+    assert (done["status"], done["status_reason"]["reason"], done["status_reason"]["waits_for"]) == ("running", "executors_done", "owner"), done
     as_coordinator.hl("platform-experiments", "summary", "--platform-experiment", pe_id, "--text", "why it is closed")
     as_coordinator.hl("platform-experiments", "close", "--platform-experiment", pe_id)
     closed = api.get_json(f"/platform-experiments/{pe_id}")
@@ -161,7 +162,7 @@ def test_an_agent_and_a_coordinator_keep_their_own_session_and_only_their_org_re
         assert r.status_code == 200 and r.content == stored, f"the org's own caller GET the session of {whose}: {r.status_code}"
 
     empty = call("PUT", first["agent_id"], first["agent_id"], b"")
-    assert (empty.status_code, empty.json()["reason"]) == (400, "invalid_request"), f"an empty session: {empty.status_code} {empty.text}"
+    assert (empty.status_code, empty.json()["reason"]) == (422, "invalid_request"), f"an empty session: {empty.status_code} {empty.text}"
     assert call("PUT", first["agent_id"], first["agent_id"], b"x" * ((32 << 20) + 1)).status_code == 413
 
 

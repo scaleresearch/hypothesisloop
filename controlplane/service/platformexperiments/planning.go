@@ -90,8 +90,8 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues, b
 	if launch.DefaultModel == "" {
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
 	}
-	if MaxProposedResearchers(launch.MaxAgentSandboxes) < 1 {
-		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_agentsandboxes_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one researcher", launch.MaxAgentSandboxes)
+	if MaxProposedAgents(launch.MaxAgentSandboxes) < 1 {
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_agentsandboxes_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one executor", launch.MaxAgentSandboxes)
 	}
 	if err := requireAgentSandbox(launch.AgentSandbox); err != nil {
 		return nil, err
@@ -118,8 +118,8 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues, b
 		GoalVersion:           1,
 		Continues:             continues,
 		Actor:                 &by,
-		MaxAgents:             MaxProposedResearchers(launch.MaxAgentSandboxes),
-		Researchers:           domain.ResearcherPool{},
+		MaxAgents:             MaxProposedAgents(launch.MaxAgentSandboxes),
+		Agents:                domain.AgentPool{},
 		Metrics:               []domain.MetricDefinition{},
 		ReportIntervalSeconds: settings.ReportIntervalSeconds,
 		PlanningEndsAt:        now.Add(planning.Limit),

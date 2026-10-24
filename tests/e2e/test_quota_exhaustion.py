@@ -13,7 +13,7 @@ the order matters:
 
 Overrun is produced honestly rather than by waiting out a large budget: the job is submitted with a
 small estimated_duration_hours (what admission reserves against) while its workload is told to run
-far longer (HYPOTHESISLOOP_DURATION_SECONDS), so observed cost climbs past the estimate on a
+far longer (RUN_SECONDS), so observed cost climbs past the estimate on a
 timescale a test can watch.
 """
 from __future__ import annotations
@@ -65,7 +65,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
         pe_id,
         agent,
         hours=job_hours,
-        job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(OVERRUN_SECONDS)}},
+        job_overrides={"env": {"RUN_SECONDS": str(OVERRUN_SECONDS)}},
     )
 
     running = eventually(

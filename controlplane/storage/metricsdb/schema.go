@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // physicalTable holds the rows of every metric table, each a logical table on it.
@@ -129,9 +132,10 @@ var metricTables = []*table{
 
 // The tables written through SQL, for what is not a number. job_logs and job_phase_detail keep
 // one row per (experiment_id, ts), the latest a job's current read. phase_message, not message:
-// GreptimeDB's SQL parser reserves message. model_usage holds one row per model call a sandboxed
-// agent made through the model proxy; append_mode keeps two calls of one agent on one model in the
-// same millisecond as two rows, where a primary key and a timestamp would keep the last.
+// GreptimeDB's SQL parser reserves message. model_calls holds one row per model call a sandboxed
+// agent made through the model proxy, with its cost; append_mode keeps two calls of one agent on
+// one model in the same millisecond as two rows, where a primary key and a timestamp would keep
+// the last.
 var sqlTables = []*table{
 	newTable("job_logs", "WITH (ttl = '30d')",
 		tag("experiment_id"), field("cluster_name", "string"), field("lines_json", "string"), timeIndex("ts")),
@@ -139,11 +143,13 @@ var sqlTables = []*table{
 		tag("experiment_id"), field("cluster_name", "string"), field("reason", "string"), field("phase_message", "string"),
 		field("restart_count", "bigint"), field("scheduled_nodes", "bigint"),
 		field("attempt", "bigint"), timeIndex("ts")),
-	newTable("model_usage", "WITH (append_mode = 'true')",
-		tag("org_id"), tag("platform_experiment_id"), tag("agent_id"), tag("provider"), tag("model"),
-		field("input_tokens", "bigint"), field("output_tokens", "bigint"),
-		field("cache_creation_input_tokens", "bigint"), field("cache_read_input_tokens", "bigint"), timeIndex("ts")),
+	modelCalls,
 }
+
+var modelCalls = newTable("model_calls", "WITH (append_mode = 'true')",
+	tag("org_id"), tag("platform_experiment_id"), tag("agent_id"), tag("provider"), tag("model"),
+	field("input_tokens", "bigint"), field("output_tokens", "bigint"),
+	field("cache_creation_input_tokens", "bigint"), field("cache_read_input_tokens", "bigint"), field("cost_usd", "double"), timeIndex("ts"))
 
 // physical is the table every metric table lives on. Its tags are the union of theirs, which
 // GreptimeDB adds as it creates them, beside the two it keys rows by.
@@ -166,9 +172,11 @@ func schema() []*table {
 	return slices.Concat([]*table{physical()}, metricTables, sqlTables)
 }
 
-// EnsureSchema creates every table the registry declares, then refuses unless the store holds
-// exactly those tables with exactly their columns. Run once at startup by control-service alone.
-func (s *Store) EnsureSchema(ctx context.Context) error {
+// EnsureSchema creates every table the registry declares, moves the model calls of a store from
+// before model_calls into it, priced at anthropic where they were recorded with no cost
+// (moveModelUsage), then refuses unless the store holds exactly those tables with exactly their
+// columns. Run once at startup by control-service alone.
+func (s *Store) EnsureSchema(ctx context.Context, anthropic domain.ModelCatalog) error {
 	tables := schema()
 	want := map[string]bool{}
 	for _, t := range tables {
@@ -178,6 +186,9 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 		for _, c := range t.columns {
 			want[t.name+"."+c.name+" "+c.dataType+" "+c.semantic] = true
 		}
+	}
+	if err := s.moveModelUsage(ctx, anthropic); err != nil {
+		return fmt.Errorf("metricsdb.EnsureSchema: %w", err)
 	}
 	rows, err := s.querySQLRows(ctx, `SELECT table_name, column_name, data_type, semantic_type FROM information_schema.columns WHERE table_schema = 'public'`)
 	if err != nil {
@@ -206,3 +217,56 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	}
 	return nil
 }
+
+// moveModelUsage copies every call of model_usage, the table a store from before model_calls
+// holds them in, into model_calls, and drops model_usage. A call recorded with no cost, all of
+// them anthropic's, is priced at anthropic, and one of a model anthropic does not price is refused
+// before anything is copied. GreptimeDB updates no row in place and deletes none of an append_mode
+// table, so the calls move to a table of their own; a move cut short leaves model_usage, and the
+// next start drops the partial model_calls and moves them again.
+func (s *Store) moveModelUsage(ctx context.Context, anthropic domain.ModelCatalog) error {
+	rows, err := s.querySQLRows(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'model_usage'`)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	if err := s.execSQL(ctx, `ALTER TABLE model_usage ADD COLUMN IF NOT EXISTS "cost_usd" DOUBLE NULL`); err != nil {
+		return fmt.Errorf("move model_usage: %w", err)
+	}
+	unpriced, err := s.querySQLRows(ctx, `SELECT DISTINCT model FROM model_usage WHERE cost_usd IS NULL ORDER BY model`)
+	if err != nil {
+		return fmt.Errorf("move model_usage: %w", err)
+	}
+	var unknown []string
+	price := "CASE model"
+	for _, r := range unpriced {
+		model, _ := r[0].(string)
+		p, ok := anthropic[model]
+		if !ok {
+			unknown = append(unknown, model)
+			continue
+		}
+		price += fmt.Sprintf(" WHEN %s THEN (input_tokens * %s + output_tokens * %s + cache_creation_input_tokens * %s + cache_read_input_tokens * %s) / 1e6",
+			sqlQuote(model), usd(p.InputUSDPerMTok), usd(p.OutputUSDPerMTok), usd(p.CacheWriteUSDPerMTok), usd(p.CacheReadUSDPerMTok))
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("move model_usage: it holds calls recorded with no cost of %s, which models.anthropic.catalog does not price: add each with its price", strings.Join(unknown, ", "))
+	}
+	price += " END"
+	if len(unpriced) == 0 {
+		price = "NULL"
+	}
+	columns := "org_id, platform_experiment_id, agent_id, provider, model, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens"
+	for _, step := range []string{
+		`DROP TABLE IF EXISTS model_calls`,
+		modelCalls.create,
+		`INSERT INTO model_calls (` + columns + `, cost_usd, ts) SELECT ` + columns + `, COALESCE(cost_usd, ` + price + `), ts FROM model_usage`,
+		`DROP TABLE model_usage`,
+	} {
+		if err := s.execSQL(ctx, step); err != nil {
+			return fmt.Errorf("move model_usage: %w", err)
+		}
+	}
+	return nil
+}
+
+func usd(perMTok float64) string { return strconv.FormatFloat(perMTok, 'g', -1, 64) }

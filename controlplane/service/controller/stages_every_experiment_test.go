@@ -106,7 +106,7 @@ func TestReconcileAdvancesTheLadderOfEveryRunningPlatformExperimentNotOnlyTheFir
 		})
 	}
 
-	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, metricsdb.New(srv.URL)).WithResearcherKeeper(keptNothing{})
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, metricsdb.New(srv.URL)).WithAgentKeeper(keptNothing{})
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}
@@ -126,7 +126,7 @@ func (wholeBudget) RunBudget(_ context.Context, pe *domain.PlatformExperiment) (
 	return pe.BudgetAcceleratorHours, nil
 }
 
-// A run started with fewer researchers than a cut needs has one stage (domain.RunStages). No
+// A run started with fewer executors than a cut needs has one stage (domain.RunStages). No
 // boundary is ahead of it, so nothing is advanced and no stage.boundary event, which a stage
 // advance alone writes, is sent, though its whole window has elapsed.
 func TestASingleStageRunCrossesNoBoundary(t *testing.T) {
@@ -141,7 +141,7 @@ func TestASingleStageRunCrossesNoBoundary(t *testing.T) {
 		CreatedAt:    now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-time.Hour),
 	}}}
 
-	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, metricsdb.New(srv.URL)).WithResearcherKeeper(keptNothing{})
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, metricsdb.New(srv.URL)).WithAgentKeeper(keptNothing{})
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}

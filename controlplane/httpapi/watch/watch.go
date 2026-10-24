@@ -124,6 +124,7 @@ type Handler struct {
 
 type experimentLookup interface {
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
+	GetAgentSignup(ctx context.Context, platformExperimentID, agentID string) (*domain.AgentSignup, error)
 }
 
 // NewHandler returns a handler over changes. Start must be called once to begin listening. Its
@@ -186,6 +187,9 @@ type subscription struct {
 	after      int64
 	scope      domain.TenantScope
 	withShared bool
+	// graph is set for the filter of an agent that keeps the whole graph, a researcher: every
+	// hypothesis change others make concerns it, since what it curates is mostly theirs.
+	graph bool
 }
 
 // open admits the caller of r and resolves what it subscribes to, answering the refusal itself.
@@ -239,7 +243,16 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 		auth.WriteError(w, h.logger, err)
 		return nil, subscription{}, false
 	}
-	return h.fromHead(ctx, w, subscription{filter: filter, after: after})
+	graph := false
+	if filter.AgentID != "" {
+		signup, err := h.experiments.GetAgentSignup(ctx, filter.PlatformExperimentID, filter.AgentID)
+		if err != nil {
+			auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: read the agent's signup", err, zap.String("agent_id", filter.AgentID)))
+			return nil, subscription{}, false
+		}
+		graph = signup != nil && signup.Role == domain.SignupRoleResearcher
+	}
+	return h.fromHead(ctx, w, subscription{filter: filter, after: after, graph: graph})
 }
 
 // project admits an account to the stream of a project, the platform experiments its listing
@@ -281,9 +294,10 @@ func (h *Handler) read(ctx context.Context, sub subscription, after int64, limit
 			kept = append(kept, c)
 		}
 	}
-	kept, err = h.concerning(ctx, filter, kept)
-	if err != nil {
-		return Page{}, err
+	if !sub.graph {
+		if kept, err = h.concerning(ctx, filter, kept); err != nil {
+			return Page{}, err
+		}
 	}
 	return Page{Changes: kept, Next: next, CaughtUp: caughtUp}, nil
 }

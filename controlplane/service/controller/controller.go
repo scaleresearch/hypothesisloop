@@ -49,14 +49,14 @@ type QuotaService interface {
 	// reservations — see platformexperiments.Service.GetObservedAgentQuota. The controller
 	// terminates work, and a termination is a verdict on what actually happened.
 	GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
-	// RunBudget is the budget less what measuring the baseline spent: what the researchers' shares are carved from.
+	// RunBudget is the budget less what measuring the baseline spent: what the executors' shares are carved from.
 	RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error)
 }
 
-// ResearcherKeeper keeps the researchers of a running platform experiment at work as its pool
-// says, adding those it wants beyond the ones at work (platformexperiments.Service.KeepResearchers).
-type ResearcherKeeper interface {
-	KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error
+// AgentKeeper keeps the team of a running platform experiment at work as its pool
+// says, adding those it wants beyond the ones at work (platformexperiments.Service.KeepAgents).
+type AgentKeeper interface {
+	KeepAgents(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage — see
@@ -75,7 +75,7 @@ type Controller struct {
 
 	stagesStore StagesStore
 	observed    ObservedState
-	researchers ResearcherKeeper
+	agentKeeper AgentKeeper
 
 	silenceMultiplier     float64
 	defaultReportInterval time.Duration
@@ -169,9 +169,9 @@ func (c *Controller) WithStagesStore(s StagesStore, metrics *metricsdb.Store) *C
 	return c
 }
 
-// WithResearcherKeeper has every pass keep the researchers of each running platform experiment.
-func (c *Controller) WithResearcherKeeper(k ResearcherKeeper) *Controller {
-	c.researchers = k
+// WithAgentKeeper has every pass keep the team of each running platform experiment.
+func (c *Controller) WithAgentKeeper(k AgentKeeper) *Controller {
+	c.agentKeeper = k
 	return c
 }
 
@@ -183,8 +183,8 @@ func (c *Controller) WithReconcileInterval(d time.Duration) *Controller {
 
 // Check refuses a controller that was not fully wired, before Run is handed to anything.
 func (c *Controller) Check() error {
-	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.researchers == nil || c.logger == nil {
-		return fmt.Errorf("controller: store, quota, settler, stages store, researcher keeper and logger are required")
+	if c.store == nil || c.quota == nil || c.settler == nil || c.stagesStore == nil || c.agentKeeper == nil || c.logger == nil {
+		return fmt.Errorf("controller: store, quota, settler, stages store, agent keeper and logger are required")
 	}
 	if c.observed == nil {
 		return fmt.Errorf("controller: the metrics store is required")

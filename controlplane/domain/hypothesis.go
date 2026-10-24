@@ -34,6 +34,10 @@ type Hypothesis struct {
 	// value. The verdict is the owning agent's, or anyone's on a hypothesis no agent owns, and
 	// this says who gave it: the agent itself, or the person or API key acting for it.
 	StatusActor *Actor `json:"status_actor,omitempty"`
+	// MergedInto and StatusReason are a researcher's curation: the hypothesis a merged one is
+	// tested under, and why it was merged or retired.
+	MergedInto   string `json:"merged_into,omitempty" doc:"Set on a merged hypothesis: the one that states its claim and holds its links."`
+	StatusReason string `json:"status_reason,omitempty" doc:"Why a researcher merged or retired it."`
 }
 
 // Implementation is one agent's code for a hypothesis: the branch it checked out or its jobs ran
@@ -65,13 +69,26 @@ const (
 	HypothesisConfirmed    = platformapi.HypothesisConfirmed
 	HypothesisRefuted      = platformapi.HypothesisRefuted
 	HypothesisInconclusive = platformapi.HypothesisInconclusive
+	HypothesisMerged       = platformapi.HypothesisMerged
+	HypothesisRetired      = platformapi.HypothesisRetired
 )
 
 // HypothesisStatuses is every status of a hypothesis, the open one first.
 var HypothesisStatuses = platformapi.HypothesisStatuses
 
-// ValidHypothesisStatus reports whether s is one of the four recognized statuses.
+// VerdictStatuses are the statuses a verdict sets (platformapi).
+var VerdictStatuses = platformapi.VerdictStatuses
+
+// ValidHypothesisStatus reports whether s is a status of a hypothesis.
 func ValidHypothesisStatus(s HypothesisStatus) bool { return slices.Contains(HypothesisStatuses, s) }
+
+// ValidVerdictStatus reports whether s is a status a verdict sets.
+func ValidVerdictStatus(s HypothesisStatus) bool { return slices.Contains(VerdictStatuses, s) }
+
+// Curated reports whether h was merged or retired, after which it takes no job, link or verdict.
+func (h *Hypothesis) Curated() bool {
+	return h.Status == HypothesisMerged || h.Status == HypothesisRetired
+}
 
 // LinkType is the API's own (platformapi).
 type LinkType = platformapi.LinkType
@@ -139,9 +156,13 @@ const (
 	HypothesisActionRemove  HypothesisAction = "remove"
 	HypothesisActionLink    HypothesisAction = "link"
 	HypothesisActionComment HypothesisAction = "comment"
+	HypothesisActionMerge   HypothesisAction = "merge"
+	HypothesisActionRetire  HypothesisAction = "retire"
+	HypothesisActionUnlink  HypothesisAction = "unlink"
 )
 
-var HypothesisActions = []HypothesisAction{HypothesisActionEdit, HypothesisActionRemove, HypothesisActionLink, HypothesisActionComment}
+var HypothesisActions = []HypothesisAction{HypothesisActionEdit, HypothesisActionRemove, HypothesisActionLink, HypothesisActionComment,
+	HypothesisActionMerge, HypothesisActionRetire, HypothesisActionUnlink}
 
 // GraphEdge is one edge of a platform experiment's hypothesis graph, with who created it and when.
 type GraphEdge struct {

@@ -55,6 +55,10 @@ const (
 	RankOffset    = "HYPOTHESISLOOP_RANK_OFFSET"
 )
 
+// DistributedMasterPort is the rendezvous port MasterPort names on every node of a job that spans
+// several. It is fixed: the nodes of one job reach one another at addresses no other job has.
+const DistributedMasterPort = 29500
+
 // The names torch.distributed and torchrun read, which the platform sets beside their
 // HYPOTHESISLOOP_ ones on a job that spans several nodes.
 const (
@@ -65,6 +69,13 @@ const (
 	TorchLocalRank  = "LOCAL_RANK"
 )
 
+// The network interfaces NCCL and Gloo open their sockets on, which a runtime whose nodes reach
+// one another on an interface of their own sets to it.
+const (
+	NCCLSocketInterface = "NCCL_SOCKET_IFNAME"
+	GlooSocketInterface = "GLOO_SOCKET_IFNAME"
+)
+
 // Reserved reports whether name is one the platform sets on a job, which the job's own env and
 // secret_env may not.
 func Reserved(name string) bool {
@@ -73,7 +84,8 @@ func Reserved(name string) bool {
 		ExperimentID, AgentID, ProjectID, CodeRef, ConfigHash, DataRef, APIURL, AcceleratorType,
 		AcceleratorCount, DurationSeconds, Attempt, CPUs, OMPNumThreads, TraceParent, Token, GitURL,
 		StopGrace, WorldSize, MasterAddr, MasterPort, Rank, Group, GroupRank, GroupReplicas,
-		RankOffset, TorchWorldSize, TorchMasterAddr, TorchMasterPort, TorchRank, TorchLocalRank:
+		RankOffset, TorchWorldSize, TorchMasterAddr, TorchMasterPort, TorchRank, TorchLocalRank,
+		NCCLSocketInterface, GlooSocketInterface:
 		return true
 	}
 	return false

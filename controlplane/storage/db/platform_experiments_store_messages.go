@@ -15,8 +15,8 @@ import (
 var (
 	// ErrAgentEnded is a message to an agent that finished or was cut: nothing would read it.
 	ErrAgentEnded = errors.New("the agent's run has ended")
-	// ErrNoResearcherAtWork is a message to every researcher when none is at work.
-	ErrNoResearcherAtWork = errors.New("no researcher is at work")
+	// ErrNoAgentAtWork is a message to every agent of the team when none is at work.
+	ErrNoAgentAtWork = errors.New("no agent of the team is at work")
 	// ErrNoCoordinator is a message to the coordinator of a platform experiment the platform hosts
 	// none for.
 	ErrNoCoordinator = errors.New("the platform hosts no coordinator for it")
@@ -37,10 +37,10 @@ func (e *MessagesRateLimited) Error() string {
 }
 
 // SendAgentMessages stores text as a message from sender to the agent of to, or with to empty to
-// every researcher at work, and returns them, or stores none: domain.ErrPlatformExperimentClosed once the
+// every executor and researcher at work, and returns them, or stores none: domain.ErrPlatformExperimentClosed once the
 // platform experiment closed, domain.ErrNotSignedUp for an agent not in it, ErrAgentEnded for one that
-// finished or was cut, ErrNoResearcherAtWork, and *MessagesRateLimited for an agent the same
-// sender sent domain.MaxAgentMessagesPerHour in the last hour. To every researcher, those the
+// finished or was cut, ErrNoAgentAtWork, and *MessagesRateLimited for an agent the same
+// sender sent domain.MaxAgentMessagesPerHour in the last hour. To every agent, those the
 // sender may not message yet are returned as refused and the rest are sent, and only when none is
 // is it *MessagesRateLimited, for the first of them. Each is told as agent.message.
 func (s *Store) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) (sent []domain.AgentMessage, refused []MessagesRateLimited, err error) {
@@ -68,9 +68,9 @@ SELECT s.agent_id, (`+runEndSQL+`) <> '',
         WHERE m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id AND m.sender = $5
           AND m.created_at > now() - interval '1 hour')
 FROM experiment_signups s
-WHERE s.platform_experiment_id = $1 AND s.role <> $2 AND (cardinality($3::text[]) = 0 AND s.role = $4 OR s.agent_id = ANY($3))
+WHERE s.platform_experiment_id = $1 AND s.role <> $2 AND (cardinality($3::text[]) = 0 AND s.role = ANY($4) OR s.agent_id = ANY($3))
 ORDER BY s.signed_up_at, s.agent_id
-FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(domain.SignupRoleCompetitor), from)
+FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, []string{string(domain.SignupRoleCompetitor), string(domain.SignupRoleResearcher)}, from)
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
 		}
@@ -115,7 +115,7 @@ FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(do
 			return &refused[0]
 		}
 		if len(kept) == 0 {
-			return ErrNoResearcherAtWork
+			return ErrNoAgentAtWork
 		}
 
 		messages = make([]domain.AgentMessage, len(kept))

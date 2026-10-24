@@ -57,7 +57,7 @@ func guaranteedJob(id string, status domain.ExperimentStatus) *domain.Experiment
 }
 
 func exhaustionController(store *exhaustionStore, quota *domain.AgentQuota) *Controller {
-	return New(store, observedQuota{quota: quota}, zap.NewNop()).WithSettler(settledNothing{}).WithResearcherKeeper(keptNothing{})
+	return New(store, observedQuota{quota: quota}, zap.NewNop()).WithSettler(settledNothing{}).WithAgentKeeper(keptNothing{})
 }
 
 // Exhaustion fired at 99% of the budget: an agent with 100 accelerator-hours lost its running

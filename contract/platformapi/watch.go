@@ -76,6 +76,7 @@ const (
 	EventHypothesisNew     = "hypothesis.new"
 	EventHypothesisStatus  = "hypothesis.status"
 	EventHypothesisLink    = "hypothesis.link"
+	EventHypothesisUnlink  = "hypothesis.unlink"
 	EventFindingNew        = "finding.new"
 	EventCommentNew        = "comment.new"
 	// EventAgentCut says the run ended for one agent. stage.boundary already says the ladder
@@ -85,11 +86,11 @@ const (
 	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
 	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentFinished = "agent.finished"
-	// EventAgentReplaced says the platform added a researcher in the place of one that finished
-	// or lost its machine for good, keeping its platform experiment's researchers. It is the new
-	// researcher's own, so no rival is woken by it; whoever steers the run sees every one.
+	// EventAgentReplaced says the platform added an agent in the place of one that finished
+	// or lost its machine for good, keeping its platform experiment's team. It is the new
+	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentReplaced = "agent.replaced"
-	// EventAgentIdle says no job of a researcher of a running platform experiment ran on
+	// EventAgentIdle says no job of an executor of a running platform experiment ran on
 	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
 	// first notice of a stretch and IdleContinues on each after it.
@@ -100,7 +101,7 @@ const (
 	// own (CoordinatorRecipient), and whoever steers the run.
 	EventAgentInstructions = "agent.instructions"
 	// EventCapacityIdle says the capacity of a running platform experiment with time left holds
-	// places beyond its queued jobs, whether or not its researchers have jobs in flight and
+	// places beyond its queued jobs, whether or not its executors have jobs in flight and
 	// whatever the best stands at against the target. It is the run's, so it reaches whoever
 	// steers the run and no agent's own stream. Its values are those of agent.idle.
 	EventCapacityIdle = "capacity.idle"

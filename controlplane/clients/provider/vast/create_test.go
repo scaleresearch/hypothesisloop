@@ -47,6 +47,7 @@ func gpuSettings() Settings {
 		MinReliability:  0.98,
 		Regions:         []string{"SE", "NL"},
 		VerifiedOnly:    true,
+		PrivateNetworks: true,
 		Accelerators: []Accelerator{
 			{Product: "NVIDIA GeForce RTX 3060", GPUName: "RTX 3060"},
 			{Product: "NVIDIA GeForce RTX 4090", GPUName: "RTX 4090", MinGPURAMMB: 24000},

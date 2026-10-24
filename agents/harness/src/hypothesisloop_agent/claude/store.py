@@ -86,7 +86,7 @@ class Store:
         """The session to resume and the prompt that opens the next connection, as persisted.
 
         The session resumed is the newest one stored: the one in flight once its transcript holds
-        what the turn did, else the one saved at the last result. A researcher that lost its
+        what the turn did, else the one saved at the last result. An executor that lost its
         first turn began again from nothing, and the session in flight holds more than the saved one.
         A session id beside a handoff means the replacement session already produced a result, so it
         is resumed and the bridge is not injected twice.

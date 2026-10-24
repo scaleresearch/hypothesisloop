@@ -27,44 +27,81 @@ type Waiting struct {
 // market is asked about, for the jobs queued between two passes.
 const demandMargin = 2
 
-// wanted is how many waiting jobs each shape on each architecture could take, by marketKey. A job
-// counts on every shape that takes it, as admission may place it on any of them.
-func (e *Executor) wanted(ctx context.Context) (map[string]int, error) {
+// demand is one read of what waits for the cluster, by marketKey: how many nodes of waiting jobs
+// each shape on each architecture could take, and the gangs among them. err says why it could
+// not be read.
+type demand struct {
+	wanted map[string]int
+	gangs  map[string]gang
+	err    error
+}
+
+// gang is what the waiting jobs that span several nodes ask of one shape on one architecture: the
+// most nodes of it one of them needs on one private network, and whether any of them needs each
+// on a host of its own.
+type gang struct {
+	nodes  int
+	spread bool
+}
+
+// demanded reads what waits once per view. A job counts on every shape that takes it, as
+// admission may place it on any of them, with the nodes of each group the shape takes.
+func (e *Executor) demanded(ctx context.Context, v *view) *demand {
+	if v.demand != nil {
+		return v.demand
+	}
+	d := &demand{wanted: map[string]int{}, gangs: map[string]gang{}}
+	v.demand = d
 	waiting, err := e.demand.Waiting(ctx)
 	if err != nil {
-		return nil, err
+		d.err = err
+		return d
 	}
-	wanted := map[string]int{}
 	for _, w := range waiting {
 		for _, shape := range e.shapes {
-			if e.takes(shape, w.Architecture, w) {
-				wanted[marketKey(shape.Name, w.Architecture)]++
+			key := marketKey(shape.Name, w.Architecture)
+			nodes := e.takes(shape, w.Architecture, w)
+			d.wanted[key] += nodes
+			if nodes > 0 && w.Job.Nodes() > 1 {
+				g := d.gangs[key]
+				d.gangs[key] = gang{nodes: max(g.nodes, nodes), spread: g.spread || spreads(w.Job)}
 			}
 		}
 	}
-	return wanted, nil
+	return d
 }
 
-// takes says a slot of shape on arch is one admission could place w on, by the rule it places
-// by: one node, exactly the shape's accelerators of its type (none for a job on cores), the slot's
-// labels under the job's node selector, and every quantity the job names within the shape.
-func (e *Executor) takes(shape Shape, arch string, w Waiting) bool {
-	if w.Job.Nodes() != 1 || !slices.Contains(e.architectures, arch) {
-		return false
-	}
-	group := w.Job.NodeGroups()[0]
-	devices := group.AcceleratorCount
-	if w.AcceleratorType.Kind() == clusterapi.TypeKindCPU {
-		devices = 0
+// takes is how many of w's nodes admission could place on slots of shape on arch, by the rule it
+// places by: the nodes of every group with exactly the shape's accelerators of its type (none for
+// a job on cores), the slot's labels under the job's node selector, and every quantity the group
+// names within the shape. A job that spans several nodes is taken only where a private network
+// can join them.
+func (e *Executor) takes(shape Shape, arch string, w Waiting) int {
+	if (w.Job.Nodes() > 1 && e.network == nil) || !slices.Contains(e.architectures, arch) {
+		return 0
 	}
 	labels := slot{shape: shape, architecture: arch}.labels(e.imageNeeds)
-	if shape.Accelerators != devices || (devices > 0 && !w.AcceleratorType.MatchesLabels(labels)) {
-		return false
-	}
 	for key, value := range w.Job.NodeSelector {
 		if labels[key] != value {
-			return false
+			return 0
 		}
+	}
+	nodes := 0
+	for _, group := range w.Job.NodeGroups() {
+		if holdsGroup(shape, labels, w.AcceleratorType, group) {
+			nodes += group.Replicas
+		}
+	}
+	return nodes
+}
+
+func holdsGroup(shape Shape, labels map[string]string, acceleratorType clusterapi.AcceleratorType, group clusterapi.JobGroup) bool {
+	devices := group.AcceleratorCount
+	if acceleratorType.Kind() == clusterapi.TypeKindCPU {
+		devices = 0
+	}
+	if shape.Accelerators != devices || (devices > 0 && !acceleratorType.MatchesLabels(labels)) {
+		return false
 	}
 	for _, q := range []struct {
 		quantity string

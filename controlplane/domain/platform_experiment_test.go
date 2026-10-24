@@ -91,7 +91,7 @@ func TestTheRunEndsItsDurationAfterItStartsWhateverTheBaselineTook(t *testing.T)
 	waiting := PlatformExperiment{Status: PlatformExpRunning, StartsAt: started, DurationHours: 1.0 / 3}
 	waiting.SetClosesAt(started.Add(5 * time.Minute))
 	if !waiting.EndsAt.Equal(started.Add(20*time.Minute)) || !waiting.AgentsDueAt.Equal(started.Add(5*time.Minute)) {
-		t.Errorf("waiting for a researcher: got = ends %v, agents due %v, want the end 20 minutes after the run started", waiting.EndsAt, waiting.AgentsDueAt)
+		t.Errorf("waiting for an executor: got = ends %v, agents due %v, want the end 20 minutes after the run started", waiting.EndsAt, waiting.AgentsDueAt)
 	}
 	if got := ClockStart(time.Time{}, accepted); !got.Equal(accepted) {
 		t.Errorf("no starts_at stated: got = %v, want the moment it opens", got)

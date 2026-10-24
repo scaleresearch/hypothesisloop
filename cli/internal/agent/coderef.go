@@ -43,7 +43,7 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 	hypothesis, _ := metadata["hypothesis_id"].(string)
 	switch {
 	case hypothesis == "" && !gitrefs.IsBaselineAgentBranch(pe, branch):
-		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s) or, to check its code as a researcher would, on %s-check. Every other job names its hypothesis with --hypothesis ID", gitrefs.BaselineBranch(pe), gitrefs.BaselineBranch(pe), gitrefs.BaselineBranch(pe))
+		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s) or, to check its code as an executor would, on %s-check. Every other job names its hypothesis with --hypothesis ID", gitrefs.BaselineBranch(pe), gitrefs.BaselineBranch(pe), gitrefs.BaselineBranch(pe))
 	case !gitrefs.IsExperimentBranch(pe, branch):
 		on := "detached"
 		if branch != "" {

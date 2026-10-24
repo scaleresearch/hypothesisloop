@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Key is one variable of the environment a program reads: where its settings file is, or a secret
@@ -44,7 +47,9 @@ var (
 	MetricsDBURL                    = Key{"METRICS_DB_URL", "the address of the metrics store"}
 	GraphDBURL                      = Key{"GRAPH_DB_URL", "the bolt address of the hypothesis graph"}
 	AuthSigningSecret               = Key{"AUTH_SIGNING_SECRET", fmt.Sprintf("the secret every hls_ token is derived from, at least %d characters", MinSigningSecretLength)}
-	ModelAnthropicOAuthToken        = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every model call of a sandboxed agent is made with"}
+	ModelAnthropicOAuthToken        = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every call of a sandboxed agent to an anthropic model is made with"}
+	ModelOpenRouterAPIKey           = Key{"MODEL_OPENROUTER_API_KEY", "the OpenRouter API key every call of a sandboxed agent to an openrouter model is made with"}
+	ModelOpenAIAuthJSON             = Key{"MODEL_OPENAI_AUTH_JSON", "the auth.json of a Codex CLI signed in with ChatGPT, whose tokens seed the ones every call of a sandboxed agent to an openai model is made with"}
 	ObjectStoreMinIOSecretAccessKey = ProviderKey(SectionObjectStore, ObjectStoreProviderMinIO, "SECRET_ACCESS_KEY", "the secret key of object_store.minio.access_key_id")
 	GitHostGitHubAppPrivateKey      = ProviderKey(SectionGitHost, GitHostProviderGitHub, "APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github")
 	GitHostGitHubClientSecret       = ProviderKey(SectionGitHost, GitHostProviderGitHub, "CLIENT_SECRET", "the client secret of git_host.github.client_id")
@@ -72,10 +77,10 @@ func IsKey(name string) bool {
 	return false
 }
 
-// The secret of each provider that has one, by the provider's name in the settings. A provider
-// that is not listed takes none.
+// The secret of each provider that has one, by the provider's name in the settings or in a model
+// reference. A provider that is not listed takes none.
 var (
-	modelKeys       = map[string]Key{ModelProviderAnthropic: ModelAnthropicOAuthToken}
+	modelKeys       = map[string]Key{domain.ModelProviderAnthropic: ModelAnthropicOAuthToken, domain.ModelProviderOpenRouter: ModelOpenRouterAPIKey, domain.ModelProviderOpenAI: ModelOpenAIAuthJSON}
 	objectStoreKeys = map[string]Key{ObjectStoreProviderMinIO: ObjectStoreMinIOSecretAccessKey}
 )
 
@@ -95,7 +100,8 @@ var Programs = []Program{ProgramControlService, ProgramMetricsService, ProgramAd
 func (s *Settings) Needs(p Program) []Key {
 	switch p {
 	case ProgramControlService:
-		keys := []Key{DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, modelKeys[s.Models.Provider], objectStoreKeys[s.ObjectStore.Provider]}
+		keys := append([]Key{DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret}, s.defaultModelKeys()...)
+		keys = append(keys, objectStoreKeys[s.ObjectStore.Provider])
 		keys = append(keys, s.gitHostKeys()...)
 		if s.Sandbox != nil {
 			keys = append(keys, AccountKey(SectionSandbox, s.Sandbox.Provider))
@@ -114,6 +120,35 @@ func (s *Settings) Needs(p Program) []Key {
 		return keys
 	}
 	panic(fmt.Sprintf("config: %q is not a program that loads the settings", p))
+}
+
+// Optional is the keys p reads under these settings when they are set, beside those it needs: the
+// credential of each model provider no default model is of, which serves that provider.
+func (s *Settings) Optional(p Program) []Key {
+	if p != ProgramControlService {
+		return nil
+	}
+	var keys []Key
+	for _, provider := range domain.ModelProviders {
+		if key := modelKeys[provider]; !slices.Contains(s.defaultModelKeys(), key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// defaultModelKeys is the credential of the provider of each default model of the agents section:
+// every agent and coordinator that names no model runs on one. Any other provider's is optional,
+// and the provider is served only while it is set.
+func (s *Settings) defaultModelKeys() []Key {
+	var keys []Key
+	for _, model := range []string{s.Agents.DefaultModel, s.Agents.CoordinatorModel} {
+		ref, err := domain.ParseModelRef(model)
+		if key := modelKeys[ref.Provider()]; err == nil && !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 func (s *Settings) gitHostKeys() []Key {

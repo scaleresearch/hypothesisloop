@@ -66,6 +66,9 @@ type Graph interface {
 	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, []domain.SimilarHypothesis, error)
 	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec) (*graphdb.LinkResult, error)
 	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus) (*domain.Hypothesis, bool, error)
+	Merge(ctx context.Context, dupID, intoID string, actor domain.Actor, reason string) (*domain.Hypothesis, bool, error)
+	Retire(ctx context.Context, id string, actor domain.Actor, reason string) (*domain.Hypothesis, bool, error)
+	Unlink(ctx context.Context, fromID string, spec domain.LinkSpec) (bool, []domain.Link, error)
 	EditText(ctx context.Context, id, text string) (*domain.Hypothesis, error)
 	Remove(ctx context.Context, id string) error
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
@@ -94,6 +97,8 @@ type Service struct {
 // experiment open and announces the write's changes (db.Store.Around).
 type Changes interface {
 	Around(ctx context.Context, platformExperimentID string, fn func(domain.Announcer) error) error
+	// AroundHypothesis is Around holding the lock a job is submitted on hypothesisID under.
+	AroundHypothesis(ctx context.Context, platformExperimentID, hypothesisID string, fn func(domain.Announcer) error) error
 }
 
 // New returns a new registry Service, which announces hypothesis changes through changes.

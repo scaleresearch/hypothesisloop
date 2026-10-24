@@ -49,9 +49,9 @@ func TestAgentsRemoveAndList(t *testing.T) {
 		t.Errorf("finish printed %q, want %q", stdout.String(), want)
 	}
 	stdout.Reset()
-	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "quota spent", "--blocker", "the build has no network"}, &stdout, &stderr); code != 0 ||
-		!reflect.DeepEqual((*got)[1].Body, map[string]any{"reason": "quota spent", "blocker": "the build has no network"}) {
-		t.Fatalf("finish with a blocker: exit %d, request %+v, want the blocker sent", code, (*got)[1])
+	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "the build has no network", "--because", "blocked"}, &stdout, &stderr); code != 0 ||
+		!reflect.DeepEqual((*got)[1].Body, map[string]any{"reason": "the build has no network", "because": "blocked"}) {
+		t.Fatalf("finish saying why: exit %d, request %+v, want because sent", code, (*got)[1])
 	}
 	stdout.Reset()
 	if code := run([]string{"platform-experiments", "agents", "finish", "--reason", "baseline measured by job-2", "--baseline", "job-2"}, &stdout, &stderr); code != 0 ||
@@ -93,10 +93,10 @@ func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 	}
 }
 
-// The coordinator and the owner message one agent or every researcher, and the owner the
+// The coordinator and the owner message one agent or every agent of the team, and the owner the
 // coordinator; hl refuses an agent's
 // token and a message that names neither before anything is sent.
-func TestAgentsMessageSendsToOneAgentOrEveryResearcher(t *testing.T) {
+func TestAgentsMessageSendsToOneAgentOrTheTeam(t *testing.T) {
 	got := clitest.RecordingServer(t, func(_ int, r clitest.Recorded) any {
 		return map[string]any{"messages": []map[string]any{{"agent_id": "ag-1", "from": "coordinator", "text": "try warmup"}}}
 	})

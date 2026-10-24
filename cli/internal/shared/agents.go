@@ -37,23 +37,28 @@ func AgentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment, while it is open; once per agent. While it
-runs, the coordinator or the owner adds a researcher in a place max_agents leaves free, with a
-share of what the researchers left unspent; the platform itself replaces a researcher of the
-experiment's researchers that finished or lost its machine. The first form creates one; the
+runs, the coordinator or the owner adds an agent in a place max_agents leaves free, an executor
+with a share of what the executors left unspent; the platform itself replaces an agent of the
+experiment's agents entries that finished or lost its machine. The first form creates one; the
 second joins a registered one again under its id (a removed agent), or prints a self-run agent's
-token again. max_agents counts the researchers (role competitor) at work. A reviewer re-checks others' claims and records agreement or dispute; like a
-baseline agent it is not ranked, cut or counted.
+token again. max_agents counts the executors (role competitor) at work. --role researcher adds
+a researcher: it keeps the hypothesis graph (proposes, reviews, merges, retires and relinks),
+runs no job, has no quota and a read-only clone, runs the built-in researcher type and defaults
+to the coordinator's model when neither --model nor its type names one; it is not ranked, cut or
+counted. A reviewer re-checks others' claims and records agreement or dispute; like a baseline
+agent it is not ranked, cut or counted.
+The agent types an org has, each with its role, are GET /orgs/{id}/agent-types.
 --in-agentsandbox: the platform runs the agent, starting a baseline agent's machine at once and any
 other's at the start of the run (its status_reason says what the start waits for). Without --in-agentsandbox the line printed
 carries the agent's token: run the agent with it as HL_TOKEN and the API's address as API_URL,
 from an env file the container reads, never a command line.`, stderr)
 	agent := fs.String("agent", "", "join this registered agent instead of creating a new one")
 	sandboxed := fs.Bool("in-agentsandbox", false, "the platform runs the agent")
-	agentType := fs.String("agent-type", "", "the agent type the agent runs, by id; omitted, generalist")
+	agentType := fs.String("agent-type", "", "the agent type the agent runs, by id; omitted, the built-in type of its role")
 	hyperparameters := fs.String("hyperparameters", "", "the direction you give the agent, a JSON object of any keys: the approach it explores")
-	model := fs.String("model", "", "the model the agent runs on; omitted, its agent type's")
+	model := fs.String("model", "", "the model the agent runs on, a <provider>/<model id> hl models lists; omitted, its agent type's, and for a researcher the coordinator's")
 	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
-	role := fs.String("role", "", "competitor (default), baseline or reviewer")
+	role := fs.String("role", "", "competitor (default; an executor), baseline, reviewer or researcher")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
 	named := command.ExperimentFlag(fs)
 	if err := command.ParseNone(fs, args); err != nil {
@@ -140,21 +145,21 @@ func AgentsMessage(c *apiclient.Client, args []string, stdout, stderr io.Writer)
    or: hl platform-experiments agents message [--platform-experiment PE] --all --text T
    or: hl platform-experiments agents message [--platform-experiment PE] --coordinator --text T
 
-Tells the agent, or every researcher at work, something directly: it is woken at once with
+Tells the agent, or every executor and researcher at work, something directly: it is woken at once with
 "message from the coordinator: T" (or the owner), as agent.message, and is told it again after a
 restart until it was delivered. Use it to steer; a fact about a hypothesis goes in a comment.
 --coordinator tells the sandboxed coordinator, from a person or a key, the same way (409
 no_coordinator where none is sandboxed). At most 1500 bytes. A recipient is sent at most 6 messages
 an hour by the coordinator and 6 by the owner, counted apart: past that it is refused (429
-rate_limited) with when the next can go. With --all, researchers at their limit are
-skipped and the rest are sent: one line per message sent, then one line per researcher refused
+rate_limited) with when the next can go. With --all, agents at their limit are
+skipped and the rest are sent: one line per message sent, then one line per agent refused
 (agent_id, reason, retry_after) and a note on stderr; refused whole only when none could be sent.
 Refused for an agent that finished or was cut (409 agent_ended). Prints one line per message
 sent. hl platform-experiments agents messages reads what was sent before. --text-file FILE, or - for
 stdin, gives T in place of --text T.`, stderr)
 	named := command.ExperimentFlag(fs)
 	message := command.NewTextFlag(fs, "text", "what the agent is told")
-	all := fs.Bool("all", false, "every researcher at work")
+	all := fs.Bool("all", false, "every executor and researcher at work")
 	coordinator := fs.Bool("coordinator", false, "the sandboxed coordinator")
 	operands, err := command.ParseOperands(fs, args, "agent")
 	if err != nil {

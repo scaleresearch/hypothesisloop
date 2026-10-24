@@ -20,7 +20,7 @@ import (
 
 // heldToBaseline holds pe, as it would be stored, to the job it names as its baseline: the job
 // must have done what a baseline does (checkBaseline) and the budget must hold a trial of it for
-// each researcher (budgetCoversTrials), and with ownJobs no other job of its agent beat it
+// each executor (budgetCoversTrials), and with ownJobs no other job of its agent beat it
 // (strongerOwnJob). It sets on pe the estimate of a job that states none and answers the block
 // the description is given. It is the one check of a declaration, whoever declares.
 func (s *Service) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment, ownJobs bool) (string, error) {
@@ -169,7 +169,7 @@ func (s *Service) undeclared(ctx context.Context, pe *domain.PlatformExperiment,
 }
 
 // StartIfReady starts the open platform experiment id when nothing is missing, in the request
-// that supplied what was: a declared baseline or a researcher. One that still waits is left open.
+// that supplied what was: a declared baseline or an executor. One that still waits is left open.
 // The sweep starts what only time brings: a starts_at that arrives.
 func (s *Service) StartIfReady(ctx context.Context, id string) error {
 	pe, err := s.stored(ctx, id)
@@ -191,10 +191,10 @@ func (s *Service) StartIfReady(ctx context.Context, id string) error {
 	return nil
 }
 
-// maxAgentsReached refuses a researcher past max_agents, which counts the researchers at work and
+// maxAgentsReached refuses an executor past max_agents, which counts the executors at work and
 // nothing else.
 func maxAgentsReached(limit int) error {
-	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) are at work. One that finished, was cut, was replaced or lost its machine with no restart left no longer counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
+	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many executors (agents of role competitor) are at work. One that finished, was cut, was replaced or lost its machine with no restart left no longer counts, and researchers, agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
 }
 
 func maxAgentSandboxesReached(limit int) string {
@@ -293,9 +293,9 @@ func (s *Service) RequireActive(ctx context.Context, platformExpID, agentID stri
 
 // notStartable says why the open platform experiment pe, whose roster is signups, is not started
 // at now, as a refusal whose reason is what the experiment answers as its status_reason, or nil
-// when it is to be started. With no refusal it returns what the researchers share (RunBudget).
+// when it is to be started. With no refusal it returns what the executors share (RunBudget).
 func (s *Service) notStartable(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) (float64, error) {
-	// Every researcher starts from the baseline and is ranked against it, so none starts, and
+	// Every executor starts from the baseline and is ranked against it, so none starts, and
 	// no machine is rented for one, before it is measured and declared.
 	if pe.BaselineJobID == "" {
 		return 0, refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and the platform starts the run only once it has", pe.ID))
@@ -304,20 +304,20 @@ func (s *Service) notStartable(ctx context.Context, pe *domain.PlatformExperimen
 		return 0, refusal.Refuse(http.StatusConflict, "starts_at_ahead", fmt.Sprintf("platform experiment %s has its baseline and starts at its starts_at, %s", pe.ID, pe.StartsAt.UTC().Format(time.RFC3339)))
 	}
 	if !slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return signup.SharesBudget() }) {
-		return 0, noResearchers(pe.ID)
+		return 0, noExecutors(pe.ID)
 	}
 	runBudget, err := s.RunBudget(ctx, pe)
 	if err != nil {
 		return 0, err
 	}
 	if runBudget <= 0 {
-		return 0, refusal.Refuse(http.StatusConflict, "budget_spent", fmt.Sprintf("measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share: its owner raises budget_accelerator_hours", pe.BudgetAcceleratorHours))
+		return 0, refusal.Refuse(http.StatusConflict, "budget_spent", fmt.Sprintf("measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the executors to share: its owner raises budget_accelerator_hours", pe.BudgetAcceleratorHours))
 	}
 	return runBudget, nil
 }
 
-func noResearchers(id string) error {
-	return refusal.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --in-agentsandbox --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
+func noExecutors(id string) error {
+	return refusal.Refuse(http.StatusConflict, "no_executors", fmt.Sprintf("platform experiment %s has its baseline and no executor to share its budget: add one with `hl platform-experiments agents add --in-agentsandbox --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
 }
 
 // start makes the open pe running and allocates each agent that shares the budget its quota. It
@@ -334,19 +334,19 @@ func (s *Service) start(ctx context.Context, pe *domain.PlatformExperiment, now 
 	}
 	started, quotas, err := s.store.StartPlatformExperimentTx(ctx, pe.ID, s.cfg.AgentsDue, func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
 		if len(participants) == 0 {
-			return nil, nil, noResearchers(pe.ID)
+			return nil, nil, noExecutors(pe.ID)
 		}
-		researchers := 0
+		executors := 0
 		for _, p := range participants {
 			if p.Role == domain.SignupRoleCompetitor {
-				researchers++
+				executors++
 			}
 		}
 		// The ladder is decided here, from the roster the start transaction reads, and stored
 		// with the start. Only its first stage's share of the budget is released now; each later
 		// stage releases its own at the boundary it starts (see controller.applyCut), which stops
 		// one agent exhausting the budget before the ladder has cut anyone.
-		stages := domain.RunStages(pe.Stages, researchers)
+		stages := domain.RunStages(pe.Stages, executors)
 		exploreFrac := stages[0].ReleaseFrac()
 		// Every signed-up agent participates or the start fails. Skipping the ones that could not
 		// be resolved used to mean a transient database error permanently disinherited an agent:

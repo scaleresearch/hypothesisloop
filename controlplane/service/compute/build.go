@@ -2,24 +2,51 @@ package compute
 
 import (
 	"fmt"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
-// buildSpec compiles exp into the instance to rent, without its name.
-func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) {
+// rank is one node of a job as it is rented: the instance to rent, without its name or where it
+// meets the others, and where it stands among them, the node at index of group, whose first rank
+// is offset.
+type rank struct {
+	spec   provider.Spec
+	group  clusterapi.JobGroup
+	offset int
+	index  int
+}
+
+// buildRanks compiles exp into one rank per node, in rank order.
+func (e *Executor) buildRanks(exp *clusterapi.DesiredJob) ([]rank, error) {
 	// EffectiveJob, never exp.Job: an admitted experiment's literal quantities and graces are in
 	// exp.ResolvedJob.
-	spec := exp.EffectiveJob()
-	if spec.Nodes() > 1 {
-		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job asks for %d nodes, and a job on this cluster is one rented instance", spec.Nodes())}
+	job := exp.EffectiveJob()
+	arch := job.NodeSelector[clusterapi.NodeArchitectureLabel]
+	if arch == "" {
+		return nil, fmt.Errorf("cloudcompute: experiment %s names no architecture in its node selector (%s)", exp.ID, clusterapi.NodeArchitectureLabel)
 	}
-	group := spec.NodeGroups()[0]
+	var ranks []rank
+	for _, group := range job.NodeGroups() {
+		spec, err := e.buildSpec(exp, job, group, arch)
+		if err != nil {
+			return nil, err
+		}
+		offset := len(ranks)
+		for index := range group.Replicas {
+			ranks = append(ranks, rank{spec: spec, group: group, offset: offset, index: index})
+		}
+	}
+	return ranks, nil
+}
+
+// buildSpec compiles one node of group into the instance to rent.
+func (e *Executor) buildSpec(exp *clusterapi.DesiredJob, job clusterapi.JobSpec, group clusterapi.JobGroup, arch string) (provider.Spec, error) {
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
 		if quantity == "" {
 			return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s has no resolved %s in desired state", exp.ID, name)
@@ -37,12 +64,8 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudcompute: parse storage %q: %w", group.Storage, err)
 	}
-	arch := spec.NodeSelector[clusterapi.NodeArchitectureLabel]
-	if arch == "" {
-		return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s names no architecture in its node selector (%s)", exp.ID, clusterapi.NodeArchitectureLabel)
-	}
 
-	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, func(url string) string { return url })
+	env, err := workloadenv.Merged(exp, job, group, e.apiURL, func(url string) string { return url })
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudcompute: %w", err)
 	}
@@ -62,7 +85,7 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 		Image:            exp.Image,
 		ImageLogin:       login,
 		Architecture:     arch,
-		Command:          workloadenv.Command(exp, spec, group),
+		Command:          workloadenv.Command(exp, job, group),
 		Env:              env,
 		AcceleratorType:  acceleratorType,
 		AcceleratorCount: accelerators,
@@ -70,4 +93,24 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 		MemoryBytes:      memory.Value(),
 		DiskBytes:        storage.Value(),
 	}, nil
+}
+
+// onNetwork is r's spec on network, where it meets the others at masterAddr over the network's
+// interface, as a node of a job that spans several on k8s is told.
+func (r rank) onNetwork(job clusterapi.JobSpec, network, masterAddr, iface string) provider.Spec {
+	spec := r.spec
+	spec.Network = network
+	spec.Env = maps.Clone(r.spec.Env)
+	for _, v := range workloadenv.Gang(job, r.group, r.offset, r.index, masterAddr) {
+		spec.Env[v.Name] = v.Value
+	}
+	spec.Env[jobenv.NCCLSocketInterface] = iface
+	spec.Env[jobenv.GlooSocketInterface] = iface
+	return spec
+}
+
+// spreads says whether no two of job's nodes may share a host, which they may not unless the job
+// says otherwise.
+func spreads(job clusterapi.JobSpec) bool {
+	return job.Topology == nil || job.Topology.SpreadAcrossHosts == nil || *job.Topology.SpreadAcrossHosts
 }

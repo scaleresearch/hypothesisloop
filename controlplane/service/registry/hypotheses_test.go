@@ -78,15 +78,18 @@ func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error
 	return &domain.Agent{ID: id}, nil
 }
 
-// GetAgentSignup signs every agent up as a researcher, but the one named baseline-agent, and
-// the one named agent-elsewhere not at all.
+// GetAgentSignup signs every agent up as an executor, but the one named baseline-agent as the
+// baseline, those named researcher-* as researchers, and the one named agent-elsewhere not at all.
 func (s *poolStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
 	if agentID == "agent-elsewhere" {
 		return nil, nil
 	}
 	role := domain.SignupRoleCompetitor
-	if agentID == "baseline-agent" {
+	switch {
+	case agentID == "baseline-agent":
 		role = domain.SignupRoleBaseline
+	case strings.HasPrefix(agentID, "researcher-"):
+		role = domain.SignupRoleResearcher
 	}
 	return &domain.AgentSignup{AgentID: agentID, Role: role}, nil
 }
@@ -198,7 +201,7 @@ func agentActor(id string) domain.Actor { return domain.Actor{Kind: domain.Actor
 var adaActor = domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 
 // fakeGraph is the hypothesis graph reduced to the rules the registry relies on it for: dedup on
-// (platform_experiment_id, normalized text), and the owner rule on status and links. Link
+// (platform_experiment_id, normalized text), and the owner rule on status. Link
 // validation itself is the graph store's and is tested against Memgraph in storage/graphdb.
 type fakeGraph struct {
 	Graph
@@ -256,9 +259,6 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor dom
 	h, ok := g.rows[fromID]
 	if !ok {
 		return nil, graphdb.ErrNotFound
-	}
-	if h.AgentID != "" && h.AgentID != agentID {
-		return nil, graphdb.ErrNotOwner
 	}
 	key := fromID + string(spec.Type) + spec.To
 	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Later: true,
@@ -331,6 +331,10 @@ func (p *pendingChanges) ChangeUnlessAnnounced(_ context.Context, c domain.Chang
 	return nil
 }
 
+func (r *recordedEvents) AroundHypothesis(ctx context.Context, pe, _ string, fn func(domain.Announcer) error) error {
+	return r.Around(ctx, pe, fn)
+}
+
 func (r *recordedEvents) Around(_ context.Context, pe string, fn func(domain.Announcer) error) error {
 	if r.closed[pe] {
 		return fmt.Errorf("%w: %s", domain.ErrPlatformExperimentClosed, pe)
@@ -399,17 +403,19 @@ func TestRegisteringAnAgentRowWithAHumanRowsTextReturnsTheExistingHumanRow(t *te
 }
 
 // Agents run jobs against human ideas, so a human idea gets settled — and with no owner to settle
-// it, the row would sit open forever and the pool would lie about what is still unresolved. The
-// rule is therefore the owner predicate read literally: nobody owns it, so whoever tested it may
-// record the verdict, with the findings underneath as the record of who earned it.
-func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
+// it, the row would sit open forever and the pool would lie about what is still unresolved. Nobody
+// owns it, so the agent that tested it records the verdict, with the findings underneath as the
+// record of who earned it.
+func TestSetHypothesisStatusLetsTheAgentThatTestedItSettleAnUnownedHumanRow(t *testing.T) {
 	store := newPoolStore()
 	svc := poolService(store)
 	human, _, _, _, err := svc.RegisterHypothesis(context.Background(), "", adaActor, "pe-1", "warmup helps", buildOnRoot, nil)
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	store.jobs = []*domain.Experiment{jobOn("job-1", human.ID, domain.StatusFailed)}
+	job := jobOn("job-1", human.ID, domain.StatusFailed)
+	job.AgentID = "agent-1"
+	store.jobs = []*domain.Experiment{job}
 
 	settled, err := svc.SetHypothesisStatus(context.Background(), human.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 	if err != nil {
@@ -420,6 +426,38 @@ func TestSetHypothesisStatusLetsAnyAgentSettleAnUnownedHumanRow(t *testing.T) {
 	}
 	if settled.AgentID != "" {
 		t.Errorf("agent_id after settling: got = %v, want it to stay unowned", settled.AgentID)
+	}
+}
+
+// A researcher's idea is no agent's, and anyone set its verdict: the researcher that reviews the
+// evidence, an executor that never tested it, a person with no agent. A researcher gives none, an
+// agent gives one only on what a job of its own on it shows, and with no agent named one no agent
+// owns is only reopened, as the coordinator does.
+func TestOnlyTheAgentThatTestedAnUnownedHypothesisSetsItsVerdict(t *testing.T) {
+	store := newPoolStore()
+	svc := poolService(store)
+	ctx := context.Background()
+	idea := registered(t, svc, "researcher-1", "warmup helps")
+	queued := jobOn("job-q", idea.ID, domain.StatusQueued)
+	queued.AgentID = "agent-2"
+	failed := jobOn("job-1", idea.ID, domain.StatusFailed)
+	failed.AgentID = "agent-1"
+	store.jobs = []*domain.Experiment{queued, failed}
+	inconclusive := Verdict{Status: domain.HypothesisInconclusive}
+	_, err := svc.SetHypothesisStatus(ctx, idea.ID, "researcher-1", agentActor("researcher-1"), inconclusive)
+	requireRefusal(t, "a researcher's verdict", err, http.StatusForbidden, platformapi.ReasonResearcherGivesNoVerdict)
+	_, err = svc.SetHypothesisStatus(ctx, idea.ID, "researcher-1", agentActor("researcher-1"), Verdict{Status: domain.HypothesisOpen})
+	requireRefusal(t, "a researcher reopening", err, http.StatusForbidden, platformapi.ReasonResearcherGivesNoVerdict)
+	_, err = svc.SetHypothesisStatus(ctx, idea.ID, "agent-2", agentActor("agent-2"), inconclusive)
+	requireRefusal(t, "a verdict of an agent whose job did not run", err, http.StatusForbidden, platformapi.ReasonVerdictNeedsOwnJob)
+	_, err = svc.SetHypothesisStatus(ctx, idea.ID, "", adaActor, inconclusive)
+	requireRefusal(t, "a verdict of no agent", err, http.StatusForbidden, platformapi.ReasonVerdictNeedsOwnJob)
+	if h, err := svc.SetHypothesisStatus(ctx, idea.ID, "agent-1", agentActor("agent-1"), inconclusive); err != nil || h.Status != domain.HypothesisInconclusive {
+		t.Fatalf("the verdict of the agent that tested it: got = %v, %v, want inconclusive", h, err)
+	}
+	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1"}
+	if h, err := svc.SetHypothesisStatus(ctx, idea.ID, "", coordinator, Verdict{Status: domain.HypothesisOpen}); err != nil || h.Status != domain.HypothesisOpen {
+		t.Errorf("the coordinator reopening it: got = %v, %v, want open", h, err)
 	}
 }
 
@@ -466,7 +504,7 @@ func TestAddHypothesisCommentAcceptsAnAgentsNoteOnAHumanSubmittedRow(t *testing.
 	}
 }
 
-// Researchers were told to post the literature as a comment on the objective, and each try was
+// Executors were told to post the literature as a comment on the objective, and each try was
 // 404: the objective is no hypothesis node. It holds comments under its platform experiment's
 // id, the id that names it in every link and in the baseline's jobs, and a platform experiment
 // that does not exist holds none.
@@ -628,8 +666,8 @@ func TestARetryAfterAFailedCommitAnnouncesWhatTheFailureLost(t *testing.T) {
 	}
 }
 
-// Linking from another agent's hypothesis would put words in its mouth; the registry passes the
-// graph's refusal through as the owner error the HTTP layer turns into 403.
+// Linking from another agent's hypothesis would put words in its mouth; the registry refuses it
+// with the owner error the HTTP layer turns into 403.
 func TestAddingALinkFromAnotherAgentsHypothesisIsRefused(t *testing.T) {
 	svc := poolService(newPoolStore())
 	a, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)

@@ -165,9 +165,9 @@ func newAccountsWorld(t *testing.T) *world {
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	registerAccounts(doc, accounts.NewService(w.store, w.store, liveness{connected: map[string]bool{w.clusterA: true}, contacts: func() map[string]metricsdb.ClusterContact { return w.contacts }}, time.Minute, testSigningSecret, testRuntimeAddresses, []string{testPlatformCluster}, testLimits, doc.Access, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
-	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
+	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleExecutor, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
-	registerAgentTypes(doc, accounts.NewAgentTypes(w.agentTypes, doc.Access, zap.NewNop()))
+	registerAgentTypes(doc, accounts.NewAgentTypes(w.agentTypes, testModels, doc.Access, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -309,7 +309,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 		{"read the org's agent type through another org", func(w *world) request { return request{"GET", "/orgs/" + w.orgB + "/agent-types/" + w.ownType, nil} },
 			map[string]int{"owner": notFound, "member": notFound, "outsider": notFound, "org-key": notFound, "project-key": notFound, "foreign-key": notFound, "staff": notFound, "staff-user": notFound}},
 		{"create an agent type", func(w *world) request {
-			return request{"POST", "/orgs/" + w.orgA + "/agent-types", name{"name": "new", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}}
+			return request{"POST", "/orgs/" + w.orgA + "/agent-types", name{"name": "new", "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}}
 		},
 			map[string]int{"owner": created, "member": forbidden, "outsider": notFound, "org-key": created, "project-key": forbidden, "foreign-key": notFound, "staff": created, "staff-user": created}},
 		{"edit the org's agent type", func(w *world) request {

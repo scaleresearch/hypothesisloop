@@ -5,11 +5,13 @@ gang that fails or retries says so in its status and in what each attempt report
 """
 from __future__ import annotations
 
+import json
+import re
 import time
 
 import pytest
 
-from conftest import TEST_CPU_ACCH_RATE, make_agent
+from conftest import DEFAULT_ORG, TEST_CPU_ACCH_RATE, make_agent
 from support.api import ENDED
 from support.wait import eventually
 
@@ -31,7 +33,7 @@ def gang(num_nodes: int, max_retries: int = 0, **env: str) -> dict:
     return {
         "command": ["python", "-u", "train_distributed.py"], "max_retries": max_retries, "num_nodes": num_nodes,
         "topology": {"spread_across_hosts": False},
-        "env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(GANG_RUN_SECONDS), **env},
+        "env": {"RUN_SECONDS": str(GANG_RUN_SECONDS), **env},
     }
 
 
@@ -48,7 +50,7 @@ def groups(max_retries: int = 0, **env: str) -> dict:
         "command": ["python", "-u", "train_distributed.py"], "max_retries": max_retries,
         "cpu": None, "memory": None, "storage": None,
         "topology": {"spread_across_hosts": False},
-        "env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(GANG_RUN_SECONDS), **env},
+        "env": {"RUN_SECONDS": str(GANG_RUN_SECONDS), **env},
         "groups": [
             {"name": "trainer", "replicas": 1, "cpu": str(TRAINER_CORES), "memory": "128Mi", "storage": "512Mi"},
             {"name": "worker", "replicas": WORKER_REPLICAS, "cpu": "1", "memory": "64Mi", "storage": "256Mi"},
@@ -58,6 +60,19 @@ def groups(max_retries: int = 0, **env: str) -> dict:
 
 def _ended(api, job_id, deadline, description):
     return eventually(description, lambda: api.experiment(job_id), accept=lambda e: e["status"] in ENDED, deadline=deadline)
+
+
+RANK_HEADER = re.compile(r"^--- rank (\d+)( failed, exit (\d+))? \((group ([^,]+), )?(pod|instance) [^)]+\) ---$")
+
+
+def _rank_headers(api, job_id) -> list[re.Match]:
+    """The rank section headers of a gang's reported log tail, in the order the tail has them."""
+    return [m for m in map(RANK_HEADER.match, json.loads(api.logs(job_id, n=200))) if m]
+
+
+def _multi_node_hosts(api) -> int:
+    """The most hosts of a cluster of the default org that runs a job over several nodes."""
+    return max((c["hosts"] for c in api.capacity(DEFAULT_ORG)["clusters"] if c["multi_node"]), default=0)
 
 
 def test_a_gang_forms_one_process_group_and_is_billed_for_every_node(api, experiment, run_id, deadline):
@@ -86,13 +101,19 @@ def test_a_failing_rank_ends_the_whole_gang(api, experiment, run_id, deadline):
     agent = make_agent(api, run_id, "gang-fail")
     pe_id = experiment("distributed-gang-fail", [agent], budget=5.0, metrics=DIST_METRICS)
 
-    job_id = api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides=gang(3, HYPOTHESISLOOP_DURATION_SECONDS="600", FAIL_RANK="2"))
+    job_id = api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides=gang(3, RUN_SECONDS="600", FAIL_RANK="2"))
     eventually(f"{job_id} to start", lambda: api.experiment(job_id),
                accept=lambda e: e["status"] in ("RUNNING", "FAILED"), reject=lambda e: e["status"] in ENDED - {"FAILED"}, deadline=deadline)
     started = time.monotonic()
     final = _ended(api, job_id, deadline, f"{job_id} to end after a rank fails")
     assert final["status"] == "FAILED", f"the gang ended {final['status']} after a rank failed, want FAILED"
     assert time.monotonic() - started < 150, "the surviving ranks ran on after rank 2 died"
+
+    # The tail has a section per rank whose pod still exists, and the failed rank's is at its very
+    # end, where the failure cause and hl job logs read. The other ranks' pods may be gone by then.
+    headers = eventually(f"{job_id}'s log tail to show the failed rank", lambda: _rank_headers(api, job_id),
+                         accept=lambda h: bool(h) and h[-1].group(1) == "2", deadline=deadline)
+    assert headers[-1].group(3) == "3", f"rank 2's section reads {headers[-1].group(0)!r}, want it failed with exit 3"
 
 
 def test_a_gang_retry_restarts_every_rank_and_bills_every_attempt(api, experiment, run_id, deadline):
@@ -139,13 +160,18 @@ def test_a_failing_worker_ends_the_trainer_of_its_groups(api, experiment, run_id
     agent = make_agent(api, run_id, "groups-fail")
     pe_id = experiment("distributed-groups-fail", [agent], budget=5.0, metrics=DIST_METRICS)
 
-    job_id = api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides=groups(HYPOTHESISLOOP_DURATION_SECONDS="600", FAIL_RANK="3"))
+    job_id = api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides=groups(RUN_SECONDS="600", FAIL_RANK="3"))
     eventually(f"{job_id} to start", lambda: api.experiment(job_id),
                accept=lambda e: e["status"] in ("RUNNING", "FAILED"), reject=lambda e: e["status"] in ENDED - {"FAILED"}, deadline=deadline)
     started = time.monotonic()
     final = _ended(api, job_id, deadline, f"{job_id} to end after a worker fails")
     assert final["status"] == "FAILED", f"the grouped gang ended {final['status']} after a worker died, want FAILED"
     assert time.monotonic() - started < 150, "the trainer ran on after its worker died"
+
+    headers = eventually(f"{job_id}'s log tail to show the failed worker", lambda: _rank_headers(api, job_id),
+                         accept=lambda h: bool(h) and h[-1].group(1) == "3", deadline=deadline)
+    assert headers[-1].group(3) == "3" and headers[-1].group(5) == "worker", \
+        f"the last section reads {headers[-1].group(0)!r}, want rank 3 of group worker failed with exit 3"
 
 
 def test_each_node_of_a_gang_is_told_its_own_accelerators(api, experiment, run_id, deadline, accelerator):
@@ -165,3 +191,63 @@ def test_each_node_of_a_gang_is_told_its_own_accelerators(api, experiment, run_i
                           accept=lambda v: v is not None, deadline=deadline)
     assert per_node == pytest.approx(2.0), f"HYPOTHESISLOOP_ACCELERATOR_COUNT reads {per_node}, want 2: the pod is told the job's total"
     api.file_finding(job_id, "distributed e2e: per-node accelerator count is true of the pod.")
+
+
+def test_a_spread_gang_with_more_ranks_than_hosts_is_refused_and_told_how_to_run(api, experiment, run_id):
+    """A gang that needs a host per rank on a cluster with fewer hosts never runs, so it is refused
+    at submit, naming the hosts it needs and the setting that lets its ranks share them."""
+    hosts = _multi_node_hosts(api)
+    if hosts == 0:
+        pytest.skip("no cluster of the default org runs multi-node jobs")
+    agent = make_agent(api, run_id, "gang-few-hosts")
+    pe_id = experiment("distributed-gang-few-hosts", [agent], budget=5.0, metrics=DIST_METRICS)
+
+    body = api.submission_body_for_id(api._job_id(), pe_id, agent)
+    body["job"].update({**gang(hosts + 1), "topology": {"spread_across_hosts": True}})
+    refused = api.post_experiment_body(body)
+    assert refused.status_code == 422, f"a spread gang of {hosts + 1} ranks on {hosts} hosts: {refused.status_code} {refused.text}"
+    answer = refused.json()
+    assert answer["reason"] == "exceeds_cluster_capacity", answer
+    assert f"{hosts + 1} hosts" in answer["message"] and "topology.spread_across_hosts: false" in answer["message"], answer["message"]
+
+    stacked = api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides=gang(hosts + 1))
+    assert api.experiment(stacked)["status"] not in ENDED - {"COMPLETED"}, "the same gang with its ranks on shared hosts was not taken"
+    api.cancel_job(stacked)
+
+
+@pytest.mark.timeout(600)
+def test_a_torch_gloo_gang_all_reduces(api, experiment, run_id, deadline):
+    """torch.distributed over gloo, the way a real job forms its process group: env:// reads the
+    variables the runtime sets, and gloo connects every pair of ranks, not only rank 0's port."""
+    agent = make_agent(api, run_id, "gang-torch")
+    pe_id = experiment("distributed-gang-torch", [agent], budget=5.0, metrics=DIST_METRICS)
+
+    install = "pip install -q --root-user-action=ignore torch --index-url https://download.pytorch.org/whl/cpu"
+    job_id = api.submit_job(pe_id, agent, hours=0.1, job_overrides={
+        **gang(2), "command": ["sh", "-c", f"{install} && exec python -u train_distributed_torch.py"],
+        "memory": "2Gi", "storage": "4Gi"})
+    final = _ended(api, job_id, deadline, f"torch gang {job_id} to end")
+    assert final["status"] == "COMPLETED", f"the torch gang ended {final['status']} ({final.get('eviction_reason')})"
+    reduced = eventually("the torch gang's world_reduced_sum", lambda: api.metric_max(job_id, "world_reduced_sum"),
+                         accept=lambda v: v is not None, deadline=deadline)
+    assert reduced == pytest.approx(1.0), f"gloo all_reduce = {reduced}, want 1 (0+1)"
+
+
+def test_cancelling_a_running_gang_ends_it_and_releases_what_it_held(api, experiment, run_id, deadline):
+    """A cancel of a running gang ends every rank of it: the job reads CANCELLED through hl, and
+    what it held of its agent's quota is released, so nothing of it is left holding anything."""
+    agent = make_agent(api, run_id, "gang-cancel")
+    pe_id = experiment("distributed-gang-cancel", [agent], budget=5.0, metrics=DIST_METRICS)
+
+    job_id = api.submit_job(pe_id, agent, hours=JOB_HOURS, job_overrides=gang(2, RUN_SECONDS="600"))
+    eventually(f"{job_id} to run", lambda: api.experiment(job_id), accept=lambda e: e["status"] == "RUNNING",
+               reject=lambda e: e["status"] in ENDED, deadline=deadline)
+    assert api.quota_field(pe_id, agent, "held_acch") > 0, "a running gang holds nothing of its agent's quota"
+
+    cancelled = json.loads(api.hl("job", "cancel", job_id))
+    assert cancelled["status"] == "CANCELLED", cancelled
+    final = eventually(f"{job_id} to read ended through hl", lambda: json.loads(api.hl("job", "status", job_id)),
+                       accept=lambda e: e["status"] in ENDED, deadline=deadline)
+    assert final["status"] == "CANCELLED", f"the cancelled gang ended {final['status']}"
+    eventually(f"what {job_id} held to be released", lambda: api.quota_field(pe_id, agent, "held_acch"),
+               accept=lambda held: held == pytest.approx(0), deadline=deadline)

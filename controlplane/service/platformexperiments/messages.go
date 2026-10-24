@@ -17,7 +17,7 @@ import (
 // SendMessageRequest is the body of POST /platform-experiments/{id}/messages.
 type SendMessageRequest struct {
 	AgentID     string `json:"agent_id,omitempty" doc:"The agent to send it to. Exactly one of agent_id, all and coordinator."`
-	All         bool   `json:"all,omitempty" doc:"Send it to every researcher (role competitor) at work: none that finished or was cut."`
+	All         bool   `json:"all,omitempty" doc:"Send it to every agent of the team at work, executors (role competitor) and researchers: none that finished or was cut."`
 	Coordinator bool   `json:"coordinator,omitempty" doc:"Send it to the sandboxed coordinator, from a person or a key."`
 	Text        string `json:"text" minLength:"1" doc:"What the agent is told, at most 1500 bytes."`
 }
@@ -29,7 +29,7 @@ type RefusedMessage struct {
 	RetryAfter time.Time `json:"retry_after" doc:"When the next message can be sent to it."`
 }
 
-// SendMessage sends text from by to the agent named, with all to every researcher at work that by
+// SendMessage sends text from by to the agent named, with all to every executor and researcher at work that by
 // may message now and names the rest as refused, or with coordinator to the sandboxed coordinator.
 func (s *Service) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []RefusedMessage, error) {
 	written := strings.TrimSpace(req.Text)
@@ -83,8 +83,8 @@ func (s *Service) SendMessage(ctx context.Context, platformExpID string, req Sen
 		return nil, nil, refuseSignup(http.StatusNotFound, "not_signed_up", "%s of platform experiment %s: hl platform-experiments agents list names its agents", err.Error(), platformExpID)
 	case errors.Is(err, db.ErrAgentEnded):
 		return nil, nil, refuseSignup(http.StatusConflict, "agent_ended", "%s, it finished or was cut, and nothing reads a message to it", err.Error())
-	case errors.Is(err, db.ErrNoResearcherAtWork):
-		return nil, nil, refuseSignup(http.StatusConflict, "no_researcher_at_work", "every researcher of platform experiment %s finished or was cut, or none joined", platformExpID)
+	case errors.Is(err, db.ErrNoAgentAtWork):
+		return nil, nil, refuseSignup(http.StatusConflict, "no_agent_at_work", "every executor and researcher of platform experiment %s finished or was cut, or none joined", platformExpID)
 	case err != nil:
 		return nil, nil, fmt.Errorf("platform_experiments.SendMessage: %w", err)
 	}

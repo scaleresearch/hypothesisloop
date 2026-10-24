@@ -6,9 +6,9 @@ import (
 
 func TestAnImplementationBranchIsNamedByItsAgentAndItsHypothesis(t *testing.T) {
 	for _, tc := range []struct{ agent, text, id, want string }{
-		{"Researcher 1", "FP16 at batch 32", "0198c2d4-aaaa-7bbb-8ccc-000000a1b2c3", "hl/pe-1234/researcher-1/fp16-at-batch-32-a1b2c3"},
-		{"Researcher 2", "  Warmup: 5% of steps, then cosine decay to zero over the whole remaining run", "hyp-0198c2d4aaaa7bbb8ccc000000d4e5f6",
-			"hl/pe-1234/researcher-2/warmup-5-of-steps-then-cosine-decay-to-z-d4e5f6"},
+		{"Executor 1", "FP16 at batch 32", "0198c2d4-aaaa-7bbb-8ccc-000000a1b2c3", "hl/pe-1234/executor-1/fp16-at-batch-32-a1b2c3"},
+		{"Executor 2", "  Warmup: 5% of steps, then cosine decay to zero over the whole remaining run", "hyp-0198c2d4aaaa7bbb8ccc000000d4e5f6",
+			"hl/pe-1234/executor-2/warmup-5-of-steps-then-cosine-decay-to-z-d4e5f6"},
 		{"Ada", "?!", "hyp-0198c2d4aaaa7bbb8ccc000000d4e5f6", "hl/pe-1234/ada/d4e5f6"},
 	} {
 		got, err := implementationBranch("pe-1234", tc.agent, tc.text, tc.id)

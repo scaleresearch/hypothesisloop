@@ -13,6 +13,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
@@ -91,8 +93,44 @@ func TestMaxAgentsStillRejectsACompetitorOnceTheFieldIsFull(t *testing.T) {
 
 	err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-3", Role: domain.SignupRoleCompetitor})
 	var refused *refusal.Refusal
-	if !errors.As(err, &refused) || refused.Reason != "max_agents_reached" || !strings.Contains(refused.Message, "researchers (agents of role competitor)") || !strings.Contains(refused.Message, "baseline") {
-		t.Fatalf("err = %v, want max_agents_reached saying that researchers count and a baseline agent does not", err)
+	if !errors.As(err, &refused) || refused.Reason != "max_agents_reached" || !strings.Contains(refused.Message, "executors (agents of role competitor)") || !strings.Contains(refused.Message, "researchers, agents of role baseline") {
+		t.Fatalf("err = %v, want max_agents_reached saying that executors count and researchers and a baseline agent do not", err)
+	}
+}
+
+// A researcher steers the field and is no part of it: max_agents full of executors leaves it room.
+func TestAResearcherJoinsAFieldFullOfExecutors(t *testing.T) {
+	store := &signupStore{
+		pe:     &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 2},
+		byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 2},
+	}
+	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-r", Role: domain.SignupRoleResearcher}); err != nil || store.insertedFor != domain.SignupRoleResearcher {
+		t.Fatalf("researcher signup: err = %v, inserted %s, want it signed up", err, store.insertedFor)
+	}
+}
+
+// quotaStore answers an agent with no quota, of role.
+type quotaStore struct {
+	signupStore
+	role domain.SignupRole
+}
+
+func (f *quotaStore) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
+	return nil, nil
+}
+
+func (f *quotaStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	return &domain.AgentSignup{AgentID: agentID, Role: f.role}, nil
+}
+
+// A researcher submits no job, so it holds no quota, and its read of one says so as a planner's does.
+func TestAResearcherHasNoQuota(t *testing.T) {
+	store := &quotaStore{role: domain.SignupRoleResearcher}
+	store.pe = &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning}
+	_, err := newSignupTestService(t, store).AgentQuota(context.Background(), "agent-r", "pe-1", auth.Principal{})
+	var refused *refusal.Refusal
+	if !errors.As(err, &refused) || refused.GetStatus() != http.StatusNotFound || refused.Reason != platformapi.ReasonResearcherHasNoQuota {
+		t.Fatalf("err = %v, want 404 researcher_has_no_quota", err)
 	}
 }
 
@@ -410,7 +448,7 @@ func (s *priorRunsStore) RunsToRank(context.Context, []string) ([]db.RunToRank, 
 	return s.runs, nil
 }
 
-// Each prior run's best is its leading researcher's, as results ranks it, and every prior run is
+// Each prior run's best is its leading executor's, as results ranks it, and every prior run is
 // read together, by one query of the metrics store for their bests and one for their constraints
 // when any declares one.
 func TestPriorRunsAreRankedAsResultsRanksThemAndReadTogether(t *testing.T) {
@@ -444,7 +482,7 @@ func TestPriorRunsAreRankedAsResultsRanksThemAndReadTogether(t *testing.T) {
 		t.Errorf("pe-a = %+v, want c1's 50 on score: the baseline agent ranks nowhere", got[0])
 	}
 	if got[1].Metric != "loss" || got[1].Best != nil {
-		t.Errorf("pe-b = %+v, want no best: nobody who reported it is a researcher", got[1])
+		t.Errorf("pe-b = %+v, want no best: nobody who reported it is an executor", got[1])
 	}
 	if got[2].Metric != "" || got[2].Best != nil {
 		t.Errorf("pe-c = %+v, want neither metric nor best", got[2])

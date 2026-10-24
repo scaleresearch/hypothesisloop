@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ var (
 // registryAs serves the registry's operations to one caller over a store and graph the test
 // keeps, holding one hypothesis of agent-1 and one of agent-2 in pe-1 and one in pe-other.
 type registryAs struct {
+	svc                    *registry.Service
 	store                  *poolStore
 	graph                  *fakeGraph
 	events                 *recordedEvents
@@ -51,15 +53,17 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 		}
 		return hyp
 	}
-	fixture := &registryAs{store: store, graph: graph, events: events, router: authtest.Router(authtest.As(caller)),
+	fixture := &registryAs{svc: svc, store: store, graph: graph, events: events, router: authtest.Router(authtest.As(caller)),
 		own: seed("agent-1", "pe-1", "warmup helps"), rivals: seed("agent-2", "pe-1", "dropout hurts"), elsewhere: seed("agent-9", "pe-other", "decay hurts")}
 	unowned, _, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture.unowned, fixture.seeded = unowned, len(fixture.graph.rows)
-	for _, h := range []*domain.Hypothesis{fixture.own, fixture.rivals, unowned} {
-		store.jobs = append(store.jobs, jobOn("job-"+h.ID, h.ID, domain.StatusFailed))
+	for agent, h := range map[string]*domain.Hypothesis{"agent-1": fixture.own, "agent-2": fixture.rivals, "": unowned} {
+		job := jobOn("job-"+h.ID, h.ID, domain.StatusFailed)
+		job.AgentID = cmp.Or(agent, "agent-1")
+		store.jobs = append(store.jobs, job)
 	}
 	registerRegistry(NewDoc(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
 	return fixture
@@ -221,7 +225,7 @@ func TestAClosedPlatformExperimentTakesNoHypothesisWriteFromAnyone(t *testing.T)
 			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/links", map[string]any{"type": "related", "to": f.rivals.ID})
 		},
 		"POST /hypotheses/{id}/status": func(f *registryAs) *httptest.ResponseRecorder {
-			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/status", map[string]any{"status": "refuted", "despite": enoughSaid})
+			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/status", map[string]any{"status": "open"})
 		},
 		"POST /hypotheses/{id}/comments": func(f *registryAs) *httptest.ResponseRecorder {
 			return f.do(t, http.MethodPost, "/hypotheses/"+url.PathEscape(f.unowned.ID)+"/comments", map[string]any{"text": "a note"})
@@ -270,8 +274,8 @@ func TestRegisteringAnExistingClaimLeavesWhoRegisteredIt(t *testing.T) {
 	}
 }
 
-// A verdict is the owning agent's, or anyone's on a hypothesis no agent owns, and who gave it is
-// the credential that sent it.
+// A verdict is the owning agent's, or on a hypothesis no agent owns that of an agent whose job
+// tested it, and who gave it is the credential that sent it.
 func TestAVerdictIsGivenByTheCredentialThatSentIt(t *testing.T) {
 	adaNamed := domain.Actor{Kind: domain.ActorUser, ID: "user-ada", Name: "Ada Lovelace"}
 	agent := domain.Actor{Kind: domain.ActorAgent, ID: "agent-1", Name: "agent-1"}
@@ -282,18 +286,21 @@ func TestAVerdictIsGivenByTheCredentialThatSentIt(t *testing.T) {
 		want   int
 		actor  domain.Actor
 	}{
-		"an agent on its own, named":              {registryAgent, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, agent},
-		"an agent on its own, naming nobody":      {registryAgent, func(f *registryAs) string { return f.own.ID }, nil, 200, agent},
-		"an agent on a rival's, as the rival":     {registryAgent, func(f *registryAs) string { return f.rivals.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
-		"an agent on a rival's, as itself":        {registryAgent, func(f *registryAs) string { return f.rivals.ID }, nil, 403, domain.Actor{}},
-		"an agent on one nobody owns":             {registryAgent, func(f *registryAs) string { return f.unowned.ID }, nil, 200, agent},
-		"a person for the owning agent":           {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, adaNamed},
-		"a person for an agent that does not own": {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
-		"a person naming nobody on an agent's":    {ada, func(f *registryAs) string { return f.own.ID }, nil, 403, domain.Actor{}},
-		"a person on one nobody owns":             {ada, func(f *registryAs) string { return f.unowned.ID }, nil, 200, adaNamed},
-		"a person stating who they are":           {ada, func(f *registryAs) string { return f.unowned.ID }, map[string]any{"author": "Mallory"}, 422, domain.Actor{}},
-		"a key for the owning agent":              {keyOne, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
-		"a staff token on one nobody owns":        {staffToken, func(f *registryAs) string { return f.unowned.ID }, nil, 200, domain.Actor{Kind: domain.ActorStaff, Name: "staff"}},
+		"an agent on its own, named":                              {registryAgent, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, agent},
+		"an agent on its own, naming nobody":                      {registryAgent, func(f *registryAs) string { return f.own.ID }, nil, 200, agent},
+		"an agent on a rival's, as the rival":                     {registryAgent, func(f *registryAs) string { return f.rivals.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
+		"an agent on a rival's, as itself":                        {registryAgent, func(f *registryAs) string { return f.rivals.ID }, nil, 403, domain.Actor{}},
+		"an agent on one nobody owns":                             {registryAgent, func(f *registryAs) string { return f.unowned.ID }, nil, 200, agent},
+		"a person for the owning agent":                           {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, adaNamed},
+		"a person for an agent that does not own":                 {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
+		"a person naming nobody on an agent's":                    {ada, func(f *registryAs) string { return f.own.ID }, nil, 403, domain.Actor{}},
+		"a person on one nobody owns":                             {ada, func(f *registryAs) string { return f.unowned.ID }, nil, 403, domain.Actor{}},
+		"a person for the agent that tested one nobody owns":      {ada, func(f *registryAs) string { return f.unowned.ID }, map[string]any{"agent_id": "agent-1"}, 200, adaNamed},
+		"a person for an agent that did not test one nobody owns": {ada, func(f *registryAs) string { return f.unowned.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
+		"a person stating who they are":                           {ada, func(f *registryAs) string { return f.unowned.ID }, map[string]any{"author": "Mallory"}, 422, domain.Actor{}},
+		"a key for the owning agent":                              {keyOne, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, domain.Actor{Kind: domain.ActorKey, ID: "key-1", Name: "laptop"}},
+		"a staff token on one nobody owns":                        {staffToken, func(f *registryAs) string { return f.unowned.ID }, nil, 403, domain.Actor{}},
+		"a staff token for the agent that tested one nobody owns": {staffToken, func(f *registryAs) string { return f.unowned.ID }, map[string]any{"agent_id": "agent-1"}, 200, domain.Actor{Kind: domain.ActorStaff, Name: "staff"}},
 	} {
 		f := newRegistryAs(t, tc.caller)
 		f.store.actorNames = map[string]string{"user-ada": "Ada Lovelace", "key-1": "laptop"}

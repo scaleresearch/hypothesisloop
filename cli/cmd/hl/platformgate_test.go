@@ -178,7 +178,7 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 }
 
 // hl hypothesis checkout read the roster, which an agent's token may not call, and its tests
-// answered the roster to any token: every researcher of two runs was refused its own branch.
+// answered the roster to any token: every agent of two runs was refused its own branch.
 // Each command an agent is briefed to run is sent here as an agent, and none may ask the
 // platform for what an agent's token is refused or the platform does not serve.
 func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {

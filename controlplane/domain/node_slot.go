@@ -11,9 +11,9 @@ import "github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 // for all of it, accelerators included, so one job fills it and a job without accelerators never
 // holds a slot that has them. A slot with no accelerators offers its cores as units of CPUType:
 // it takes a job on CPU whose cores fit in it, resolved to all of them, count included.
-// Admission writes the label into the admitted job's resolved node selector, so the runtime
-// rents exactly the slot the control plane counted the job against and decides no placement of
-// its own.
+// Admission writes the slot of each node of the job into its resolved job (JobSpec.Slots), so the
+// runtime rents exactly the slots the control plane counted the job against and decides no
+// placement of its own.
 //
 // Labels under NodeLabelReservedPrefix are the platform's: a submitted node selector may not
 // name one.
@@ -22,5 +22,8 @@ const (
 	NodeSlotLabel             = clusterapi.NodeSlotLabel
 	NodeSlotAcceleratorsLabel = clusterapi.NodeSlotAcceleratorsLabel
 	NodeSlotNoOfferLabel      = clusterapi.NodeSlotNoOfferLabel
+	NodeSlotNetworkLabel      = clusterapi.NodeSlotNetworkLabel
+	NodeSlotNoNetworkLabel    = clusterapi.NodeSlotNoNetworkLabel
+	NodeSlotStartupLabel      = clusterapi.NodeSlotStartupLabel
 	NodeImageNeedsLabel       = clusterapi.NodeImageNeedsLabel
 )

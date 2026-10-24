@@ -1,7 +1,12 @@
-"""Signup roles, end to end. Ported 1:1 from tests/scenarios/agent-roles.sh: a signup is
-competitor (ranked, cut-eligible), baseline (the declared control) or reviewer (re-checks other
-agents' claims); only competitor is ranked or cut. Covers the paths that differ from the default
-flow:
+"""Signup roles, end to end. A signup is competitor (an executor: runs jobs, ranked,
+cut-eligible), researcher (steers the work through the hypothesis graph and runs no job), baseline
+(the declared control) or reviewer (re-checks other agents' claims); only competitor is ranked or
+cut. The team of a platform experiment is its agents list, whose entries' agent types give their
+roles. Covers the paths that differ from the default flow:
+  - GET /agent-roles lists every role with what its agents do.
+  - only executors count toward max_agents, in the agents list and at signup.
+  - a researcher submits no job, holds no quota, pushes nothing and still reads the repository.
+  - a researcher runs on the coordinator's model unless it names one.
   - an unrecognized role is refused at signup with reason=unknown_role, never defaulted.
   - baseline/reviewer signups do not consume max_agents, the field being measured.
   - the baseline posts the best ranking-metric value and is still absent from standings; rank 1
@@ -27,9 +32,10 @@ from __future__ import annotations
 import uuid
 
 import pytest
+import requests
 
 from conftest import make_agent
-from support.api import ENDED, branch
+from support.api import API, ENDED, branch
 from support.stages import BUDGET, REPORT_INTERVAL_SECONDS, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
@@ -44,7 +50,7 @@ CUT_ANCHORS = [0.30, 0.40, 0.50, 0.60, 0.70]
 
 
 def _env(seconds: int, baseline: str | None = None) -> dict:
-    env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(seconds)}
+    env = {"RUN_SECONDS": str(seconds)}
     if baseline is not None:
         env["HYPOTHESISLOOP_BASELINE"] = baseline
     return env
@@ -249,3 +255,120 @@ def test_repeat_signup_of_a_member_succeeds_once_running_and_full(api, experimen
 
     r = api.signup(pe_id, make_agent(api, run_id, "repeat-newcomer"))
     assert r.status_code == 409 and r.json()["reason"] == "max_agents_reached", f"newcomer after start: HTTP {r.status_code} {r.text}"
+
+
+def _create(api: API, name: str, **more) -> requests.Response:
+    return api.post("/platform-experiments", {
+        "project_id": api.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0,
+        "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "duration_hours": 24, **more,
+    })
+
+
+def test_the_roles_are_listed_with_what_their_agents_do(api):
+    roles = api.get_json("/agent-roles")
+    assert [r["role"] for r in roles] == ["executor", "researcher", "baseline", "coordinator", "planner"], roles
+    by_role = {r["role"]: r for r in roles}
+    assert all(r["name"] and r["description"] for r in roles), roles
+    assert (by_role["executor"]["signup_role"], by_role["executor"]["in_team"], by_role["executor"]["org_types"]) == ("competitor", True, True)
+    researcher = by_role["researcher"]
+    assert (researcher["agent_type"], researcher["signup_role"], researcher["in_team"], researcher["org_types"]) == ("researcher", "researcher", True, False), researcher
+    types = {t["id"]: t["role"] for t in api.get_json(f"/orgs/{api.org_id}/agent-types")}
+    assert types.get("researcher") == "researcher" and types.get("generalist") == "executor", types
+
+
+def test_only_executors_count_toward_max_agents(api, run_id):
+    # The team is one list: two researchers and one executor fit max_agents 1, two executors do not.
+    r = _create(api, f"roles-team-{run_id}", max_agents=1, agents=[{"agent_type": "researcher", "count": 2}, {"agent_type": "generalist", "count": 1}])
+    assert r.status_code == 201, f"a team of two researchers and one executor under max_agents 1: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    api.created_platform_experiments.append(pe_id)
+    try:
+        stored = api.get_json(f"/platform-experiments/{pe_id}")
+        assert [(e["agent_type"], e["count"]) for e in stored["agents"]] == [("researcher", 2), ("generalist", 1)], stored["agents"]
+        r = _create(api, f"roles-team-over-{run_id}", max_agents=1, agents=[{"agent_type": "generalist", "count": 2}])
+        assert (r.status_code, r.json().get("reason")) == (422, "invalid_agents"), f"two executors under max_agents 1: {r.status_code} {r.text}"
+
+        # At signup too: the one place max_agents gives is the executor's, and researchers join beside it.
+        executor = api.add_agents(pe_id)[0]
+        researchers = api.add_agents(pe_id, 2, role="researcher")
+        assert all((a["role"], a["agent_type"]) == ("researcher", "researcher") for a in researchers), researchers
+        r = api.post(f"/platform-experiments/{pe_id}/agents", {})
+        assert (r.status_code, r.json().get("reason")) == (409, "max_agents_reached"), f"a second executor: {r.status_code} {r.text}"
+        assert api.signup_role(pe_id, executor["agent_id"]) == (200, "competitor")
+    finally:
+        api.close_platform_experiment(pe_id)
+
+
+def test_a_researcher_runs_no_job_holds_no_quota_and_pushes_nothing(api, pe, run_id, tmp_path):
+    pe_id = pe("roles-researcher", 1.0, 2)
+    executor = api.add_agents(pe_id, quota_tier="guaranteed")[0]
+    researcher = api.add_agents(pe_id, role="researcher")[0]
+    api.declare_baseline_and_wait_running(pe_id)
+    as_researcher = api.as_caller(researcher["token"], api.org_id, api.project_id)
+
+    # Its job is refused before anything of it is read, whatever it names.
+    job_id = api._job_id()
+    body = api.submission_body_for_id(job_id, pe_id, executor["agent_id"])
+    body["metadata"] |= {"agent_id": researcher["agent_id"]}
+    r = as_researcher.post_experiment_body(body)
+    assert (r.status_code, r.json().get("reason")) == (422, "researcher_submits_no_job"), f"{r.status_code} {r.text}"
+    assert api.get(f"/experiments/{job_id}").status_code == 404, "the refused job was stored"
+
+    r = as_researcher.get(f"/platform-experiments/{pe_id}/quotas/{researcher['agent_id']}")
+    assert (r.status_code, r.json().get("reason")) == (404, "researcher_has_no_quota"), f"{r.status_code} {r.text}"
+    assert researcher["agent_id"] not in {q["agent_id"] for q in api.platform_experiment_quotas(pe_id)}
+    assert executor["agent_id"] in {q["agent_id"] for q in api.platform_experiment_quotas(pe_id)}
+
+    # It clones the repository through the git proxy and pushes nothing, not even a branch of its own name.
+    read = as_researcher.get_json(f"/platform-experiments/{pe_id}")
+    cloned = as_researcher.git(read, tmp_path, "clone", read["repository_url"], "work")
+    assert cloned.returncode == 0, cloned.stderr
+    work = tmp_path / "work"
+    own = f"hl/{pe_id}/researcher-1/e2e-{run_id}"
+    assert as_researcher.git(read, work, "checkout", "-b", own).returncode == 0
+    (work / "e2e.txt").write_text(f"pushed by {run_id}\n")
+    assert as_researcher.git(read, work, "add", "e2e.txt").returncode == 0
+    assert as_researcher.git(read, work, "commit", "-m", f"e2e {run_id}").returncode == 0
+    denied = as_researcher.git(read, work, "push", "origin", own)
+    assert denied.returncode != 0 and "read-only" in denied.stderr, f"a researcher pushed: {denied.stderr}"
+    assert as_researcher.git(read, work, "fetch", "origin").returncode == 0, "the researcher lost its read"
+
+
+def test_a_researcher_runs_on_the_coordinators_model_unless_it_names_one(api, pe):
+    pe_id = pe("roles-researcher-model", 1.0, 1)
+    researcher = api.add_agents(pe_id, role="researcher")[0]
+    models = api.get_json("/models")
+    type_model = api.get_json(f"/orgs/{api.org_id}/agent-types/researcher")["current"]["settings"].get("model") or ""
+    got = api.as_caller(researcher["token"]).get_json(f"/platform-experiments/{pe_id}/agents/{researcher['agent_id']}/instructions")
+    assert got["role"] == "researcher" and got["agent_type"] == "researcher", got
+    assert got["settings"]["model"] == (type_model or models["coordinator_model"]), (
+        f"a researcher naming no model runs on {got['settings']['model']}, want its type's or the coordinator default {models['coordinator_model']}"
+    )
+    executor = api.add_agents(pe_id)[0]
+    got = api.as_caller(executor["token"]).get_json(f"/platform-experiments/{pe_id}/agents/{executor['agent_id']}/instructions")
+    assert got["role"] == "executor", got
+
+
+@pytest.mark.real_providers
+@pytest.mark.exclusive
+def test_a_team_spec_starts_its_researcher_beside_its_executor_on_the_coordinators_model(api: API, sandbox_repository: str, run_id: str):
+    """Each agent of the team is rented at the sandbox provider, so this runs only with
+    make e2e RENT=1."""
+    coordinator_model = api.get_json("/models")["coordinator_model"]
+    r = _create(api, f"roles-team-sandboxed-{run_id}", max_agents=1, coordinator_in_agentsandbox=True, coordinator_model=coordinator_model,
+                repository=sandbox_repository, branch="main",
+                agents=[{"agent_type": "researcher", "count": 1}, {"agent_type": "generalist", "count": 1}])
+    assert r.status_code == 201, f"create: {r.status_code} {r.text}"
+    pe_id = r.json()["id"]
+    api.created_platform_experiments.append(pe_id)
+    try:
+        team = [a for a in api.agents(pe_id) if a["role"] != "baseline"]
+        assert sorted((a["role"], a["agent_type"]) for a in team) == [("competitor", "generalist"), ("researcher", "researcher")], team
+        assert all(a["in_agentsandbox"] for a in team), team
+        researcher = next(a for a in team if a["role"] == "researcher")
+        got = api.get_json(f"/platform-experiments/{pe_id}/agents/{researcher['agent_id']}/instructions")
+        assert got["settings"]["model"] == coordinator_model, f"the researcher runs on {got['settings']['model']}, want the coordinator's {coordinator_model}"
+        counted = api.get_json(f"/platform-experiments/{pe_id}")["agents_at_work"]
+        assert [e["agent_type"] for e in counted["pool"]] == ["researcher", "generalist"], counted
+    finally:
+        api.close_platform_experiment(pe_id)

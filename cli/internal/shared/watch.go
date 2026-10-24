@@ -31,7 +31,7 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 (not_admitted_message).`, stderr)
 	experiment := fs.String("experiment", "", "watch every event of one job (domain.Experiment id)")
 	platformExperiment := fs.String("platform-experiment", "", "platform experiment to watch (default the token's unless --experiment is set)")
-	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and description, others' comments, findings and links on its hypotheses, and others' comments on the objective (default the token's agent unless --experiment or --all is set)")
+	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and description, others' comments, findings and links on its hypotheses (a researcher's: every hypothesis change others make), and others' comments on the objective (default the token's agent unless --experiment or --all is set)")
 	all := fs.Bool("all", false, "watch the whole platform experiment instead of one agent's resources")
 	decisions := fs.Bool("decisions", false, "with --all, leave out what needs no decision: a job being queued, admitted or started, and a queue reason that waiting clears")
 	kinds := fs.String("kinds", "", "comma-separated event kinds instead of every kind; see GET /watch/kinds")

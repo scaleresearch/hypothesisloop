@@ -21,14 +21,14 @@ func testTypeSettings() domain.AgentTypeSettings {
 }
 
 // orgWithExperiment is a new org, a platform experiment of it with max_agents 10, and its own
-// researcher type.
+// executor type.
 func orgWithExperiment(t *testing.T, pool *Pool) (orgID, peID string, custom *domain.CurrentAgentType) {
 	t.Helper()
 	accounts := NewStore(pool, 3)
 	_, orgID = newTestUserHome(t, accounts)
 	peID = "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, peID, defaultProjectOf(t, accounts, orgID).ID)
-	custom, err := NewStore(pool, 3).Create(context.Background(), orgID, "Tuner", "Tunes the knobs.", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
+	custom, err := NewStore(pool, 3).Create(context.Background(), orgID, "Tuner", "Tunes the knobs.", domain.AgentRoleExecutor, testPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
 	if err != nil {
 		t.Fatalf("create: got = %v, want = nil", err)
 	}
@@ -92,7 +92,7 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 	pool := builtDatabase(t)
 	ctx := context.Background()
 	store := NewStore(pool, 3)
-	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
+	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleExecutor, Prompt: testPrompt, Settings: testTypeSettings()}
 	seed := func(release int, b domain.BuiltinAgentType) Seeded {
 		t.Helper()
 		seeded, err := NewStore(pool, 3).SeedBuiltins(ctx, release, []domain.BuiltinAgentType{b}, testRules)
@@ -257,11 +257,11 @@ func TestAnOrgsTypesAndTheirEditsAreBounded(t *testing.T) {
 	orgID, _, custom := orgWithExperiment(t, pool)
 	var limit *AgentTypeLimit
 	for n := 1; n < domain.MaxOrgAgentTypes; n++ {
-		if _, err := store.Create(ctx, orgID, fmt.Sprintf("Type %d", n), "", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), *testActor); err != nil {
+		if _, err := store.Create(ctx, orgID, fmt.Sprintf("Type %d", n), "", domain.AgentRoleExecutor, testPrompt, testTypeSettings(), *testActor); err != nil {
 			t.Fatalf("type %d: %v", n+1, err)
 		}
 	}
-	if _, err := store.Create(ctx, orgID, "One too many", "", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), *testActor); !errors.As(err, &limit) || !limit.Types {
+	if _, err := store.Create(ctx, orgID, "One too many", "", domain.AgentRoleExecutor, testPrompt, testTypeSettings(), *testActor); !errors.As(err, &limit) || !limit.Types {
 		t.Errorf("type %d: got = %v, want the limit on types", domain.MaxOrgAgentTypes+1, err)
 	}
 	for n := 1; n < domain.MaxAgentTypeEditsAnHour; n++ {
@@ -283,7 +283,7 @@ func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 	store := NewStore(pool, 3)
 	pes := NewStore(pool, 3)
 	orgID, peID, custom := orgWithExperiment(t, pool)
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET researchers = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'model', 'm', 'count', 1)) WHERE id = $1`, peID, custom.ID); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET agents = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'model', 'm', 'count', 1)) WHERE id = $1`, peID, custom.ID); err != nil {
 		t.Fatal(err)
 	}
 	var inUse *AgentTypeInUse
@@ -323,7 +323,7 @@ func TestAWriteNamingATypeHoldsItAgainstAnArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := agentTypeTx(ctx, tx, peID, custom.ID, domain.AgentRoleResearcher); err != nil {
+	if _, err := agentTypeTx(ctx, tx, peID, custom.ID, domain.AgentRoleExecutor); err != nil {
 		t.Fatal(err)
 	}
 	archive, err := pool.pool.Begin(ctx)
@@ -365,14 +365,14 @@ func TestAnAgentRunsAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 		t.Errorf("another org's type: got = %v, want ErrUnknownAgentType", err)
 	}
 	if _, err := spawn(domain.SignupRoleBaseline, custom.ID, ""); !errors.Is(err, ErrUnknownAgentType) {
-		t.Errorf("a researcher type for a baseline agent: got = %v, want ErrUnknownAgentType", err)
+		t.Errorf("an executor type for a baseline agent: got = %v, want ErrUnknownAgentType", err)
 	}
 	baseline, err := spawn(domain.SignupRoleBaseline, "", "")
 	if err != nil || signupOf(t, pes, peID, baseline).AgentType != "baseline" {
 		t.Errorf("a baseline agent naming no type: got = %v, want the built-in baseline", err)
 	}
 	src, err := pes.AgentInstructions(ctx, peID, own)
-	if err != nil || src == nil || src.Role != domain.AgentRoleResearcher || src.Version.Prompt != testPrompt || src.Model != "m" || src.Hyperparameters != nil || src.Rules == "" || src.RulesVersion < 1 {
+	if err != nil || src == nil || src.Role != domain.AgentRoleExecutor || src.Version.Prompt != testPrompt || src.Model != "m" || src.Hyperparameters != nil || src.Rules == "" || src.RulesVersion < 1 {
 		t.Errorf("what its instructions are composed from: got = %+v, %v", src, err)
 	}
 	if src, err := pes.AgentInstructions(ctx, peID, "ag-nobody"); err != nil || src != nil {
@@ -401,7 +401,7 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 	if err := pes.FinishAgent(ctx, peID, finished, "done"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET researchers = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'count', 3)) WHERE id = $1`, peID, custom.ID); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET agents = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'count', 3)) WHERE id = $1`, peID, custom.ID); err != nil {
 		t.Fatal(err)
 	}
 	since := cursorNow(t, pool)
@@ -422,8 +422,8 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 		}
 	}
 	pe, err := pes.GetPlatformExperiment(ctx, peID)
-	if err != nil || len(pe.Researchers) != 1 || pe.Researchers[0].Model != "" {
-		t.Errorf("the pool: got = %+v, %v, want its entry still naming no model", pe.Researchers, err)
+	if err != nil || len(pe.Agents) != 1 || pe.Agents[0].Model != "" {
+		t.Errorf("the pool: got = %+v, %v, want its entry still naming no model", pe.Agents, err)
 	}
 
 	instructions := map[string]bool{platformapi.EventAgentInstructions: true}

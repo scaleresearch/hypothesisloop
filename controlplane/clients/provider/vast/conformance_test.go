@@ -20,11 +20,12 @@ import (
 //	CLOUD_COMPUTE_HYPOTHESISLOOP_VAST_API_KEY=... go test ./controlplane/clients/provider/vast -run Conformance -v -timeout 45m
 //
 // VAST_CONFORMANCE_GPU="<driver product name>=<vendor gpu name>", for example
-// "NVIDIA GeForce RTX 3060=RTX 3060", adds the run on that GPU, and VAST_CONFORMANCE_HOLD=1 the
-// thirty minute hold. VAST_CONFORMANCE_EXCLUDED_MACHINES="124592,31" keeps the run off machines
-// known to fail to start instances; without it each check has a one in five chance of drawing a
-// broken machine that is among the five cheapest. One run per account at a time: a run starts by destroying what an aborted
-// earlier run left under the suite's prefix.
+// "NVIDIA GeForce RTX 3060=RTX 3060", adds the run on that GPU, VAST_CONFORMANCE_HOLD=1 the
+// thirty minute hold, and VAST_CONFORMANCE_NETWORK=1 the check of a private network of two
+// instances. VAST_CONFORMANCE_EXCLUDED_MACHINES="124592,31" keeps the run off machines known to
+// fail to start instances; without it each check has a one in five chance of drawing a broken
+// machine that is among the five cheapest. One run per account at a time: a run starts by
+// destroying what an aborted earlier run left under the suite's prefix.
 func conformanceOptions() providertest.Options {
 	return providertest.Options{
 		Template: provider.Spec{
@@ -79,6 +80,13 @@ func TestConformanceGPU(t *testing.T) {
 
 func TestConformanceMarket(t *testing.T) {
 	providertest.RunMarket(t, conformanceProvider(t, nil), conformanceOptions())
+}
+
+func TestConformanceNetwork(t *testing.T) {
+	if os.Getenv("VAST_CONFORMANCE_NETWORK") == "" {
+		t.Skip("VAST_CONFORMANCE_NETWORK is not set")
+	}
+	providertest.RunNetwork(t, conformanceProvider(t, nil), conformanceOptions())
 }
 
 func TestConformanceHold(t *testing.T) {

@@ -21,8 +21,9 @@ from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
 
-# The most cores one job may ask for, more than a node of any cluster the suite runs on has.
-UNAVAILABLE_CORES = 64
+# More cores than a node of any cluster the suite runs on has, and no more than the default
+# project compute limit (32 AccH/h) holds, so the job is refused for capacity and not for the limit.
+UNAVAILABLE_CORES = int(32 / TEST_CPU_ACCH_RATE)
 
 
 def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, experiment, run_id):
@@ -31,6 +32,8 @@ def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, 
 
     quota_before = api.quota_field(pe_id, agent, "used_guaranteed_acch")
     # No node has that many cores, so no wait admits this job.
+    largest = max((c.get("per_node") or {}).get("cpu_cores_max", 0) for c in api.capacity()["clusters"])
+    assert largest < UNAVAILABLE_CORES, f"a node has {largest} cores, so {UNAVAILABLE_CORES} fit one"
     body = api.submission_body_for_id(api._job_id(), pe_id, agent)
     body["job"] |= cpu_job(UNAVAILABLE_CORES)
     refused = api.post_experiment_body(body)

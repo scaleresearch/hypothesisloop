@@ -35,8 +35,9 @@ var (
 // error wraps a *graphdb.SimilarError listing them, unless actor is a signed-in person: theirs is
 // registered and similar lists them.
 //
-// agentID is the agent whose hypothesis it is, empty for one no agent owns. actor is the
-// credential registering it.
+// agentID is the agent whose hypothesis it is, empty for one no agent owns, and a researcher's is
+// stored as one no agent owns. actor is the credential registering it. hypothesis.new names
+// agentID as the agent that registered it, a researcher included, so its own watch leaves it out.
 func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, similar []domain.SimilarHypothesis, err error) {
 	found, err := s.store.PlatformExperimentExists(ctx, platformExperimentID)
 	if err != nil {
@@ -45,6 +46,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 	if !found {
 		return nil, nil, false, nil, fmt.Errorf("%w: %s", ErrUnknownPlatformExperiment, platformExperimentID)
 	}
+	registrant := agentID
 	if agentID != "" {
 		if err := s.requireAgent(ctx, agentID); err != nil {
 			return nil, nil, false, nil, fmt.Errorf("registry.RegisterHypothesis: %w", err)
@@ -59,6 +61,11 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if signup.Role == domain.SignupRoleBaseline {
 			return nil, nil, false, nil, ErrBaselineRegistersNoHypothesis
 		}
+		// A researcher's idea is for the executors to take: no agent owns it, so whoever tests
+		// it settles it, and it holds no quota and no standings.
+		if signup.Role == domain.SignupRoleResearcher {
+			agentID = ""
+		}
 	}
 
 	err = s.changes.Around(ctx, platformExperimentID, func(a domain.Announcer) error {
@@ -71,7 +78,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 			return err
 		}
 		return announce(ctx, a, !alreadyExisted, domain.Change{Kind: platformapi.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
-			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID})
+			PlatformExperimentID: h.PlatformExperimentID, AgentID: registrant})
 	})
 	var held *graphdb.SimilarError
 	if errors.As(err, &held) {
@@ -132,9 +139,9 @@ func itemActors(items []*domain.HypothesisListItem) []*domain.Actor {
 }
 
 // AddHypothesisLink adds one outgoing link from an existing hypothesis on behalf of its registering
-// agent, or of anyone when no agent owns it. Re-adding an existing link changes nothing. Returns
-// the hypothesis's outgoing links. agentID is the agent whose link it is, empty when no agent
-// owns it, and actor the credential adding it.
+// agent, of anyone when no agent owns it, or of a researcher of its platform experiment.
+// Re-adding an existing link changes nothing. Returns the hypothesis's outgoing links. agentID is
+// the agent whose link it is, empty when no agent owns it, and actor the credential adding it.
 func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, actor domain.Actor, spec domain.LinkSpec) ([]domain.Link, error) {
 	if agentID != "" {
 		if err := s.requireAgent(ctx, agentID); err != nil {
@@ -147,6 +154,15 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 	}
 	if from == nil {
 		return nil, fmt.Errorf("registry.AddHypothesisLink: %w: %s", ErrHypothesisNotFound, id)
+	}
+	if from.AgentID != "" && from.AgentID != agentID {
+		researcher, err := s.isResearcher(ctx, from.PlatformExperimentID, agentID)
+		if err != nil {
+			return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
+		}
+		if !researcher {
+			return nil, fmt.Errorf("registry.AddHypothesisLink: %w: hypothesis %s belongs to agent %s; register your own hypothesis that builds_on it instead", ErrHypothesisNotOwner, id, from.AgentID)
+		}
 	}
 	var result *graphdb.LinkResult
 	err = s.changes.Around(ctx, from.PlatformExperimentID, func(a domain.Announcer) error {
@@ -324,18 +340,29 @@ func (s *Service) addActivity(ctx context.Context, items []*domain.HypothesisLis
 	return nil
 }
 
+var (
+	// ErrResearcherGivesNoVerdict is a verdict asked by a researcher.
+	ErrResearcherGivesNoVerdict = errors.New("a researcher gives no verdict: the agent that tested a hypothesis settles it. " +
+		"Comment on it with what its jobs show or lack (hl hypothesis comment ID), and the coordinator reopens a verdict its jobs do not carry")
+	// ErrVerdictNeedsOwnJob is a verdict on a hypothesis no agent owns from an agent that ran no
+	// job on it, or one other than open from no agent.
+	ErrVerdictNeedsOwnJob = errors.New("no agent owns this hypothesis, so only an agent that ran a job on it, completed or failed, " +
+		"gives its verdict: run one (hl job submit FILE --hypothesis ID), or name with agent_id the agent whose job tested it")
+)
+
 // SetHypothesisStatus sets a hypothesis's status on behalf of callerAgentID: the owning agent's
-// own verdict on its own claim, or anyone's on a hypothesis no agent owns, for which
-// callerAgentID may be empty (see domain.HypothesisStatus). Ownership is checked in the same
-// graph transaction as the write. actor is the credential giving the verdict, kept on the
-// hypothesis as its status_actor.
+// own verdict on its own claim, or on a hypothesis no agent owns the verdict of an agent that ran
+// a job of its own on it that completed or failed. With no agent named (the coordinator or a
+// person) one no agent owns is only reopened. A researcher gives no verdict. Ownership is
+// checked in the same graph transaction as the write. actor is the credential giving the
+// verdict, kept on the hypothesis as its status_actor.
 //
 // A confirmed or refuted verdict is given only with the evidence for it (see supported), and
 // what it rests on is kept as a comment on the hypothesis, the agent's when one is named and
 // written by actor.
 func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, verdict Verdict) (*domain.Hypothesis, error) {
 	status := verdict.Status
-	if !domain.ValidHypothesisStatus(status) {
+	if !domain.ValidVerdictStatus(status) {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: invalid status %q", status)
 	}
 	current, err := s.graph.GetHypothesis(ctx, id)
@@ -344,6 +371,21 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	}
 	if current == nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w: %s", ErrHypothesisNotFound, id)
+	}
+	researcher, err := s.isResearcher(ctx, current.PlatformExperimentID, callerAgentID)
+	if err != nil {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+	}
+	if researcher {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", ErrResearcherGivesNoVerdict)
+	}
+	if current.Curated() {
+		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", &graphdb.CuratedError{Hypothesis: current, Refused: "takes no verdict"})
+	}
+	if current.AgentID == "" {
+		if err := s.testedBy(ctx, current, callerAgentID, status); err != nil {
+			return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
+		}
 	}
 	// Whose verdict it is comes first and is the graph's to refuse, in the write below: the
 	// evidence is asked only of an agent that may give the verdict at all.
@@ -374,7 +416,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 			return err
 		}
 		return announce(ctx, a, changed, domain.Change{Kind: platformapi.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
-			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID})
+			PlatformExperimentID: h.PlatformExperimentID, AgentID: callerAgentID})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
@@ -390,6 +432,28 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 	}
 	return h, nil
+}
+
+// testedBy refuses with ErrVerdictNeedsOwnJob a verdict of status on h, which no agent owns,
+// unless agentID ran a job on it that completed or failed, or no agent is named and h is reopened.
+// A job's agent and its end never change, so the answer holds until the write.
+func (s *Service) testedBy(ctx context.Context, h *domain.Hypothesis, agentID string, status domain.HypothesisStatus) error {
+	if agentID == "" {
+		if status == domain.HypothesisOpen {
+			return nil
+		}
+		return ErrVerdictNeedsOwnJob
+	}
+	jobs, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
+	if err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		if job.AgentID == agentID && (job.Status == domain.StatusCompleted || job.Status == domain.StatusFailed) {
+			return nil
+		}
+	}
+	return ErrVerdictNeedsOwnJob
 }
 
 // Changer is who asks to edit or remove a hypothesis: the signed-in person behind the request,

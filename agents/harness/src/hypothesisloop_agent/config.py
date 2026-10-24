@@ -22,8 +22,10 @@ COORDINATOR = platform.ROLE_COORDINATOR
 # The agent of a draft: it plans the experiment the others will later run in.
 PLANNER = platform.ROLE_PLANNER
 BASELINE = platform.ROLE_BASELINE
+EXECUTOR = platform.ROLE_EXECUTOR
+# Keeps the hypothesis graph and runs no job.
 RESEARCHER = platform.ROLE_RESEARCHER
-_AGENT_ROLES = (RESEARCHER, BASELINE, PLANNER)
+_AGENT_ROLES = (EXECUTOR, RESEARCHER, BASELINE, PLANNER)
 
 
 def token_scope(token: str) -> tuple[str, str, str]:
@@ -98,6 +100,10 @@ def measures_baseline(cfg) -> bool:
     return cfg.role == BASELINE
 
 
+def researches(cfg) -> bool:
+    return cfg.role == RESEARCHER
+
+
 def submits_jobs(cfg) -> bool:
-    """A researcher or a baseline agent: whoever has jobs of its own to wait for."""
-    return not coordinates(cfg) and not plans(cfg)
+    """An executor or a baseline agent: whoever has jobs of its own to wait for."""
+    return cfg.role in (EXECUTOR, BASELINE)

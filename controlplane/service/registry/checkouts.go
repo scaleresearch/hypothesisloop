@@ -2,12 +2,14 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
 // Checkout is what a checkout of a hypothesis answers: the branch recorded and who else works on
@@ -20,9 +22,13 @@ type Checkout struct {
 	Warning      string                    `json:"warning,omitempty" doc:"Set when working is not empty: who already has it and what to weigh."`
 }
 
-// CheckOut records that agentID, an agent of the hypothesis's platform experiment, checked hyp
-// out on branch, so the agents and the coordinator see who works on it before a job does. Another
-// agent on it is said in a warning: two approaches to one idea can both be worth running.
+// ErrChecksOutNothing is a checkout by an agent whose role submits no job.
+var ErrChecksOutNothing = errors.New("a researcher runs no job, so it checks out no hypothesis: register the idea for an executor to take, or comment on it")
+
+// CheckOut records that agentID, an agent of the hypothesis's platform experiment that submits
+// jobs, checked hyp out on branch, so the agents and the coordinator see who works on it before a
+// job does. A merged or retired hypothesis is refused. Another agent on it is said in a warning:
+// two approaches to one idea can both be worth running.
 func (s *Service) CheckOut(ctx context.Context, hyp *domain.Hypothesis, agentID, branch string) (*Checkout, error) {
 	signup, err := s.store.GetAgentSignup(ctx, hyp.PlatformExperimentID, agentID)
 	if err != nil {
@@ -30,6 +36,12 @@ func (s *Service) CheckOut(ctx context.Context, hyp *domain.Hypothesis, agentID,
 	}
 	if signup == nil {
 		return nil, domain.ErrNotSignedUp
+	}
+	if !signup.Role.SubmitsJobs() {
+		return nil, ErrChecksOutNothing
+	}
+	if hyp.Curated() {
+		return nil, &graphdb.CuratedError{Hypothesis: hyp, Refused: "takes no job"}
 	}
 	others, err := s.store.CheckOutHypothesis(ctx, hyp.PlatformExperimentID, hyp.ID, agentID, branch)
 	if err != nil {

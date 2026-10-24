@@ -6,9 +6,10 @@
 # Jobs boot with services.public_api_url, which a rented machine must reach, in the image their
 # platform experiment records. On vast.ai each job runs under a supervisor that stops its own
 # instance when the job ends; the programs it needs in the image are what hl capacity lists as the
-# cluster's image_needs. Each entry names its provider, whose section of the same name follows the
-# keys every entry has, and none of the other providers' sections. Each entry's account key comes
-# from the environment as CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY, its cluster_name in capitals with
+# cluster's image_needs, and every rank of a multi-node job runs under it in the same image.
+# Each entry names its provider, whose section of the same name follows the keys every entry
+# has, and none of the other providers' sections. Each entry's account key comes from the
+# environment as CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY, its cluster_name in capitals with
 # each dash an underscore, so entries on one provider each rent on their own account, or on one
 # account in namespaces of their own.
 cloud_compute:
@@ -28,8 +29,9 @@ cloud_compute:
     # 10 offers at a time, under vast.ai's quota of 20000 offer rows a day.
     reconcile_interval_seconds: 10
     # A push reads the output of every started instance, one after another, and vast.ai takes two
-    # to four seconds to deliver each read. Allow about three seconds per instance the shapes below
-    # can hold: 30 for these six, 60 for twenty.
+    # to four seconds to deliver each read, and a multi-node job's status costs one read per rank.
+    # Allow about three seconds per instance the shapes below can hold: 30 for these six, 60 for
+    # twenty.
     status_interval_seconds: 30
     # How long a job may wait for a machine to rent before it goes back to the queue as no_offer,
     # at no cost and with no failure counted against its agent, and how long a rented machine may
@@ -62,6 +64,10 @@ cloud_compute:
       # instance that is slow to start, with what the host says; a machine that keeps failing to
       # start instances goes here.
       excluded_machines: []
+      # Lets a multi-node job rent all its ranks into one vast.ai overlay, a private network in
+      # one physical cluster. Off: in October 2026 vast.ai accepted overlays but no host brought
+      # one up, so an instance on one never started.
+      private_networks: false
       # Every GPU model a shape below names, under both of its names: product as the NVIDIA
       # driver reports it, which is what the catalog string is made from, and gpu_name as
       # vast.ai's offer search returns it. min_gpu_ram_mb tells apart models vast.ai sells under

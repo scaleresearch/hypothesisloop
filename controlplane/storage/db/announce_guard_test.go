@@ -24,7 +24,7 @@ var announcedInserts = map[string]bool{
 // empty set is every column.
 var announcedUpdates = map[string][]string{
 	"experiments":            {"status", "not_admitted_reason", "underperforming_metric", "held_reason", "same_hypothesis"},
-	"platform_experiments":   {"status", "description", "duration_hours", "coordinator_reason", "researchers_held", "capacity_noticed_at", "goal", "proposed_at"},
+	"platform_experiments":   {"status", "description", "duration_hours", "coordinator_reason", "agents_held", "capacity_noticed_at", "goal", "proposed_at"},
 	"agent_quotas":           {},
 	"experiment_signups":     {"finished_at", "idle_noticed_at"},
 	"environment_waiters":    {"loaded"},
@@ -34,6 +34,10 @@ var announcedUpdates = map[string][]string{
 
 // appendOnly are the tables no write updates or deletes.
 var appendOnly = map[string]bool{"platform_rules": true, "agent_type_events": true, "agent_type_versions": true}
+
+// formatMigrations rewrite rows of append-only tables in place at start: the same value stored in
+// the format of this release, as prefixBareModels makes a bare model the reference to it.
+var formatMigrations = map[string]bool{"prefixBareModels": true}
 
 var (
 	insertInto = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+(\w+)`)
@@ -66,7 +70,7 @@ func TestEveryAnnouncedWriteAnnouncesAndAppendOnlyTablesAreOnlyAppended(t *testi
 	for name, f := range funcs {
 		for _, sql := range f.sql {
 			for _, write := range writesIn(sql) {
-				if write.appendOnly {
+				if write.appendOnly && !formatMigrations[name] {
 					t.Errorf("%s: %s, and the table is append-only", name, write.what)
 				}
 				if write.announced && !announces[name] {

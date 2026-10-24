@@ -29,11 +29,6 @@ const (
 	// says there whether a pod of one may evict a pod of lower priority.
 	PriorityClassGuaranteed = "hypothesisloop-jobs-guaranteed"
 	PriorityClassBurst      = "hypothesisloop-jobs-burst"
-
-	// DistributedMasterPort is the fixed rendezvous port advertised to every rank of a
-	// distributed (NumNodes > 1) job via HYPOTHESISLOOP_MASTER_PORT — fine as a fixed port since
-	// each job gets its own pods/Service, so no cross-job collision is possible.
-	DistributedMasterPort = 29500
 )
 
 type Config struct {

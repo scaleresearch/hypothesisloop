@@ -13,9 +13,9 @@ var ErrInvalidStages = errors.New("stages")
 // per-boundary bookkeeping (one advance row, one cut set) trivially small.
 const MaxStages = 8
 
-// MinResearchersForCut is the field size below which a boundary cuts nobody: a ladder that
+// MinExecutorsForCut is the field size below which a boundary cuts nobody: a ladder that
 // eliminates its way down to one agent has stopped comparing anything.
-const MinResearchersForCut = 5
+const MinExecutorsForCut = 5
 
 // Stage is one rung of the elimination ladder: LengthPct is its share of the experiment (all
 // stages sum to 100), EvictPct the share of surviving agents cut when it ends.

@@ -55,8 +55,10 @@ auth:
 #
 #   image      what every sandboxed agent's machine boots. The sandbox provider must be able to
 #              pull it. A change replaces every running agent's machine.
-#   default_model  the model an agent runs on when it joins without naming one. Written onto the
-#              agent when it joins, so a change moves new agents only.
+#   default_model  the model an agent runs on when it joins without naming one, a reference
+#              <provider>/<model id> as every model the platform stores. Written onto the
+#              agent when it joins, so a change moves new agents only. A researcher that names
+#              none, of a type that names none, defaults to the coordinator's model instead.
 #   coordinator_model  the model a sandboxed coordinator runs on when its create request names none,
 #              a stronger one than default_model since it supervises the whole run. Written onto
 #              the platform experiment when it is created, so a change moves new ones only.
@@ -81,7 +83,7 @@ auth:
 #   max_agentsandboxes_per_platform_experiment  how many machines the platform runs for one platform
 #              experiment: its sandboxed agents of every role and its coordinator. Written onto the
 #              platform experiment when it is created, so a change bounds new ones only.
-#   idle_notice_minutes  how long a researcher of a running platform experiment may go with no
+#   idle_notice_minutes  how long an executor of a running platform experiment may go with no
 #              job of its own created or running since the run started or the last one
 #              ended, and none queued or running, before it and the coordinator are told so
 #              (agent.idle new), and again every idle_notice_minutes while the stretch lasts
@@ -89,45 +91,77 @@ auth:
 #              experiment that its capacity holds places beyond its queued jobs (capacity.idle).
 agents:
   image: REPLACE-WITH-AGENT-IMAGE
-  default_model: claude-sonnet-5
-  coordinator_model: claude-opus-5-5
+  default_model: anthropic/claude-sonnet-5
+  coordinator_model: anthropic/claude-opus-5-5
   boot_limit_seconds: 300
   progress_limit_seconds: 300
   max_new_instances_per_answer: 10
   max_agentsandboxes_per_platform_experiment: 25
   idle_notice_minutes: 10
 
-# Whose models sandboxed agents run on. The control plane holds the provider's credential and makes
-# every model call of a sandboxed agent or coordinator for it at <public_api_url>/model/<provider>,
-# where the agent authenticates with its own platform token. No agent's machine holds the
-# credential, and each call's tokens are recorded for its org, platform experiment and agent.
+# Whose models sandboxed agents run on. The control plane holds each provider's credential and
+# makes every model call of a sandboxed agent or coordinator for it at
+# <public_api_url>/model/<provider>, where the agent authenticates with its own platform token. No
+# agent's machine holds a credential, and each call's tokens and cost are recorded for its org,
+# platform experiment and agent. A model is named <provider>/<model id> everywhere, and
+# GET /models lists every one served. A provider is served while its credential is set, and a
+# model of any other is refused; the providers of agents.default_model and coordinator_model are
+# required.
 #
-#   provider   anthropic: Claude, through Claude Code, with the subscription token
+#   anthropic  Claude, through Claude Code, with the subscription token
 #              MODEL_ANTHROPIC_OAUTH_TOKEN.
-#   catalog    every model a sandboxed agent or coordinator may call, by the name a call states,
-#              with the provider's price in US dollars per million tokens of each kind. A call
-#              naming another model is refused with 403 model_not_served. Claude Code calls the
+#     catalog  every model a call to it may name, by the model id a call states, with
+#              Anthropic's price in US dollars per million tokens of each kind. A call naming
+#              another model is refused with 403 model_not_served. Claude Code calls the
 #              models its subagents and its own small tasks run on as well (its opus, sonnet and
 #              haiku), so those are named too, haiku under the name Claude Code states and the
 #              one the provider answers with. cache_write is the one-hour cache's price, twice
-#              the input's, the cache the agents write. The prices are what a platform
-#              experiment's model budget is spent at, so a model stays here while any run's
-#              recorded usage names it. agents.default_model and coordinator_model are in it.
+#              the input's, the cache the agents write. Each call is priced at it when it is
+#              recorded, and a platform experiment's model budget is spent by those costs. The
+#              anthropic models of agents.default_model and coordinator_model are in it.
+#   openrouter  any model OpenRouter serves that takes tools, through Claude Code pointed at
+#              OpenRouter's Anthropic-compatible API, with the API key MODEL_OPENROUTER_API_KEY.
+#              It takes no settings: its models are OpenRouter's listing at the time, and each
+#              call costs what OpenRouter says it did.
+#   openai     OpenAI's models on a ChatGPT subscription, through the same Claude Code: the
+#              platform translates each Anthropic Messages call to the Responses call the Codex
+#              CLI makes and its answer back, Claude Code's WebSearch to OpenAI's web search.
+#              Its credential is MODEL_OPENAI_AUTH_JSON, the auth.json of a Codex CLI signed in
+#              with ChatGPT (~/.codex/auth.json). That only seeds the tokens: the platform renews
+#              them and keeps the renewed pair in its database, and a changed auth.json replaces
+#              them. Sign the Codex CLI in for the platform alone, since a refresh token renews
+#              once and the CLI's own renewal would end the platform's.
+#     catalog  every model a call to it may name, by the model id a call states, among those
+#              the ChatGPT account lists, with the price a call is counted at in US dollars
+#              per million tokens. The subscription is paid flat, so these are OpenAI's API
+#              prices of the same models (developers.openai.com/api/docs/pricing, Standard
+#              tier), what the model budget is spent at. cache_read is the cached input's price;
+#              cache_write is never counted, as OpenAI caches without a charge, and is stated
+#              like the input. A web search the model makes is not counted.
 #   max_calls_in_flight_per_org  how many model calls the platform makes for one org at once,
-#              so that no org takes the provider's whole allowance of the platform's credential.
+#              so that no org takes a provider's whole allowance of the platform's credential.
 #              One more is refused with 429 model_calls_in_flight, which Claude Code waits out
 #              and retries. An agent makes one call at a time, and each of its subagents one more.
 models:
-  provider: anthropic
   max_calls_in_flight_per_org: 64
-  catalog:
-    claude-opus-5-5:           {input_usd_per_mtok: 4,   output_usd_per_mtok: 20,  cache_write_usd_per_mtok: 8,   cache_read_usd_per_mtok: 0.2}
-    claude-opus-5:             {input_usd_per_mtok: 5,   output_usd_per_mtok: 25,  cache_write_usd_per_mtok: 10,  cache_read_usd_per_mtok: 0.5}
-    claude-sonnet-5-5:         {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.2}
-    claude-sonnet-5:           {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.2}
-    claude-haiku-5-5:          {input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, cache_write_usd_per_mtok: 0.2, cache_read_usd_per_mtok: 0.01}
-    claude-haiku-4-5:          {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
-    claude-haiku-4-5-20251001: {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
+  anthropic:
+    catalog:
+      claude-opus-5-5:           {input_usd_per_mtok: 4,   output_usd_per_mtok: 20,  cache_write_usd_per_mtok: 8,   cache_read_usd_per_mtok: 0.2}
+      claude-opus-5:             {input_usd_per_mtok: 5,   output_usd_per_mtok: 25,  cache_write_usd_per_mtok: 10,  cache_read_usd_per_mtok: 0.5}
+      claude-sonnet-5-5:         {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.2}
+      claude-sonnet-5:           {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.2}
+      claude-haiku-5-5:          {input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, cache_write_usd_per_mtok: 0.2, cache_read_usd_per_mtok: 0.01}
+      claude-haiku-4-5:          {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
+      claude-haiku-4-5-20251001: {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
+  openai:
+    catalog:
+      gpt-6.1-sol:   {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
+      gpt-6-sol:     {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.2}
+      gpt-6-astra:   {input_usd_per_mtok: 10,  output_usd_per_mtok: 50,  cache_write_usd_per_mtok: 10,  cache_read_usd_per_mtok: 1}
+      gpt-6-luna:    {input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, cache_write_usd_per_mtok: 0.1, cache_read_usd_per_mtok: 0.01}
+      gpt-5.6-sol:   {input_usd_per_mtok: 4,   output_usd_per_mtok: 20,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.4}
+      gpt-5.6-terra: {input_usd_per_mtok: 2,   output_usd_per_mtok: 12,  cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.2}
+      gpt-5.6-luna:  {input_usd_per_mtok: 0.2, output_usd_per_mtok: 1.2, cache_write_usd_per_mtok: 0.2, cache_read_usd_per_mtok: 0.02}
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the description and the size and proposes the
@@ -420,7 +454,7 @@ quota:
   default_max_concurrent_accelerators: 64
 
   # What the model calls the platform makes for one platform experiment's agents and coordinator
-  # may cost, in US dollars at the prices of models.catalog: the default of one that states no
+  # may cost, in US dollars as recorded with each call: the default of one that states no
   # model_budget_usd, and the most one may state. Once its calls cost it, every further call is
   # refused with 429 model_budget_spent until its owner raises it. The platform pays the provider,
   # so the most bounds what one platform experiment spends of the platform's credential.

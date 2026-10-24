@@ -8,9 +8,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/chatgpt"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/imagedigest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/openrouter"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -19,6 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -58,7 +61,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 	imageRegistry := newImageRegistry(runCtx, pcfg, logger)
 
-	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent).WithRepositories(gitHost).
+	calledModels, servedModels := modelProviders(runCtx, pcfg, store, logger)
+	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent).WithRepositories(gitHost).WithServedModels(servedModels).
 		WithImages(imageRegistry, store, imagedigest.New(pcfg.PlainHTTPRegistries()...)).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
@@ -81,9 +85,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	watchHandler := watch.NewHandler(store, graph, store, gate.access, logger)
 	watchHandler.Start(runCtx)
 
-	modelProxy, err := modelproxy.New(store, metrics, peSvc,
-		modelproxy.Policy{Models: pcfg.Models.Catalog, MaxInFlightPerOrg: pcfg.Models.MaxCallsInFlightPerOrg},
-		modelproxy.AnthropicUpstream, pcfg.ModelToken, logger)
+	modelProxy, err := modelproxy.New(store, metrics, peSvc, calledModels, modelDefaults(pcfg), pcfg.Models.MaxCallsInFlightPerOrg, logger)
 	if err != nil {
 		logger.Fatal("control-service: configure the model proxy", zap.Error(err))
 	}
@@ -103,7 +105,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Drafts:              platformexperiments.NewDrafts(store, logger),
 		Accounts: accounts.NewService(db.OrgDefaults{Store: store, NewOrgLimit: pcfg.Quota.NewOrgComputeLimit()}, store, metrics, connectedWithin, pcfg.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			platformClusters(pcfg), accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
-		AgentTypes:      accounts.NewAgentTypes(store, gate.access, logger),
+		AgentTypes:      accounts.NewAgentTypes(store, servedModels, gate.access, logger),
+		Models:          servedModels,
 		Repositories:    repos,
 		Scheduler:       jobs,
 		Registry:        registrySvc,
@@ -152,7 +155,6 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 	return graph, nil
 }
 
-// modelDefaults is the platform's model for an agent and for a coordinator that names none.
 func platformClusters(pcfg *hypothesisloopcfg.ControlService) []string {
 	names := make([]string, 0, len(pcfg.CloudCompute))
 	for _, cc := range pcfg.CloudCompute {
@@ -161,8 +163,37 @@ func platformClusters(pcfg *hypothesisloopcfg.ControlService) []string {
 	return names
 }
 
+// modelDefaults is the platform's model for an agent and for a coordinator that names none.
 func modelDefaults(pcfg *hypothesisloopcfg.ControlService) domain.ModelDefaults {
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
+}
+
+// modelProviders is the model providers the platform serves, those whose credential is set, as the
+// model proxy calls them and as GET /models lists their models.
+func modelProviders(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, store *db.Store, logger *zap.Logger) (modelproxy.Providers, *models.Service) {
+	var called modelproxy.Providers
+	var anthropic, openAI domain.ModelCatalog
+	var openRouter models.OpenRouter
+	if token, ok := pcfg.ModelCredentials[domain.ModelProviderAnthropic]; ok {
+		anthropic = pcfg.Models.Anthropic.Catalog
+		called.Anthropic = &modelproxy.Anthropic{URL: modelproxy.AnthropicUpstream, OAuthToken: token, Models: anthropic}
+	}
+	if key, ok := pcfg.ModelCredentials[domain.ModelProviderOpenRouter]; ok {
+		openRouter = openrouter.New(openrouter.URL)
+		called.OpenRouter = &modelproxy.OpenRouter{URL: openrouter.URL, APIKey: key}
+	}
+	if authJSON, ok := pcfg.ModelCredentials[domain.ModelProviderOpenAI]; ok {
+		cred, digest, err := chatgpt.ParseAuthJSON(authJSON)
+		if err != nil {
+			logger.Fatal("control-service: "+hypothesisloopcfg.ModelOpenAIAuthJSON.Name, zap.Error(err))
+		}
+		if err := store.SeedChatGPTCredential(ctx, cred, digest); err != nil {
+			logger.Fatal("control-service: seed the ChatGPT credential", zap.Error(err))
+		}
+		openAI = pcfg.Models.OpenAI.Catalog
+		called.OpenAI = &modelproxy.OpenAI{URL: chatgpt.ResponsesURL, Credentials: chatgpt.NewCredentials(store, chatgpt.TokenURL), Models: openAI}
+	}
+	return called, models.New(anthropic, openRouter, modelDefaults(pcfg)).WithOpenAI(openAI)
 }
 
 // objectStoreKey is the key id the object store the settings name is reached with, from its

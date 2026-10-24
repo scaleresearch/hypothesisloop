@@ -271,6 +271,9 @@ var routes = []route{
 	{method: "PATCH", path: "/hypotheses/{id}", request: "/hypotheses/<hyp>", body: `{"text":"t"}`, rule: scoped(coordinatorAudience, http.StatusForbidden)},
 	{method: "DELETE", path: "/hypotheses/{id}", request: "/hypotheses/<hyp>", rule: scoped(coordinatorAudience, http.StatusForbidden)},
 	{method: "POST", path: "/hypotheses/{id}/links", request: "/hypotheses/<hyp>/links", body: `{"agent_id":"<agent>","type":"related","to":"hyp-own"}`, rule: owned(agentAudience, reached)},
+	{method: "POST", path: "/hypotheses/{id}/merge", request: "/hypotheses/<hyp>/merge", body: `{"agent_id":"<agent>","into":"hyp-own"}`, rule: owned(agentAudience, reached)},
+	{method: "POST", path: "/hypotheses/{id}/retire", request: "/hypotheses/<hyp>/retire", body: `{"agent_id":"<agent>","reason":"r"}`, rule: owned(agentAudience, reached)},
+	{method: "DELETE", path: "/hypotheses/{id}/links/{type}/{to}", request: "/hypotheses/<hyp>/links/related/hyp-own?agent_id=<agent>", rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/hypotheses/{id}/comments", request: "/hypotheses/<hyp>/comments", body: `{"agent_id":"<agent>","text":"t"}`, rule: owned(agentAudience, reached)},
 	{method: "POST", path: "/hypotheses/{id}/checkouts", request: "/hypotheses/<hyp>/checkouts", body: `{"agent_id":"<agent>","branch":"hl/pe/a/idea"}`, rule: owned(agentAudience, reached)},
 	{method: "GET", path: "/hypotheses/{id}/comments", request: "/hypotheses/<hyp>/comments", rule: scoped(agentAudience, reached), sharedRead: true},
@@ -280,6 +283,8 @@ var routes = []route{
 	// ---- watch ----
 	{method: "GET", path: "/watch", request: "/watch?platform_experiment_id=<pe>", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/watch/kinds", rule: listed(agentAudience, http.StatusOK)},
+	{method: "GET", path: "/models", rule: listed(agentAudience, http.StatusOK)},
+	{method: "GET", path: "/agent-roles", rule: listed(agentAudience, http.StatusOK)},
 
 	// ---- agents ----
 	{method: "POST", path: "/agents", body: `{"id":"agent-new","name":"New","org_id":"<org>"}`, rule: inOrgOf(coordinatorAudience, reached)},

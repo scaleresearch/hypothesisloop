@@ -21,21 +21,22 @@ var files embed.FS
 // under the next Release, becomes current like any other change. Raise it by one with every change
 // of a built-in's name, description, prompt or settings, or of the rules: TestReleaseNamesWhatItSeeds
 // keeps the digest of each.
-const Release = 9
+const Release = 10
 
-// researcherFocus marks where builtin/researcher.md, the body every researcher shares, takes the
-// researcher's own builtin/<id>.md.
-const researcherFocus = "{{focus}}"
+// executorFocus marks where builtin/executor.md, the body every executor shares, takes the
+// executor's own builtin/<id>.md.
+const executorFocus = "{{focus}}"
 
 var builtins = []struct {
 	id, name string
 	role     domain.AgentRole
 	effort   string
 }{
-	{domain.DefaultAgentType, "Generalist", domain.AgentRoleResearcher, "high"},
-	{"hyperparameter-search", "Hyperparameter search", domain.AgentRoleResearcher, "high"},
-	{"architecture-search", "Architecture search", domain.AgentRoleResearcher, "high"},
-	{"data-search", "Data search", domain.AgentRoleResearcher, "high"},
+	{domain.DefaultAgentType, "Generalist", domain.AgentRoleExecutor, "high"},
+	{"hyperparameter-search", "Hyperparameter search", domain.AgentRoleExecutor, "high"},
+	{"architecture-search", "Architecture search", domain.AgentRoleExecutor, "high"},
+	{"data-search", "Data search", domain.AgentRoleExecutor, "high"},
+	{domain.ResearcherAgentType, "Researcher", domain.AgentRoleResearcher, "high"},
 	{"baseline", "Baseline", domain.AgentRoleBaseline, "medium"},
 	{domain.PlannerAgentType, "Planner", domain.AgentRolePlanner, "medium"},
 	{domain.CoordinatorAgentType, "Coordinator", domain.AgentRoleCoordinator, "high"},
@@ -81,21 +82,21 @@ func Builtins() ([]domain.BuiltinAgentType, error) {
 	return out, nil
 }
 
-// builtinPrompt is builtin/<id>.md, which for a researcher is its focus set into builtin/researcher.md.
+// builtinPrompt is builtin/<id>.md, which for an executor is its focus set into builtin/executor.md.
 func builtinPrompt(id string, role domain.AgentRole) (string, error) {
 	own, err := files.ReadFile("builtin/" + id + ".md")
 	if err != nil {
 		return "", fmt.Errorf("agenttypes: %w", err)
 	}
-	if role != domain.AgentRoleResearcher {
+	if role != domain.AgentRoleExecutor {
 		return string(own), nil
 	}
-	body, err := files.ReadFile("builtin/researcher.md")
+	body, err := files.ReadFile("builtin/executor.md")
 	if err != nil {
 		return "", fmt.Errorf("agenttypes: %w", err)
 	}
-	if n := strings.Count(string(body), researcherFocus); n != 1 {
-		return "", fmt.Errorf("agenttypes: builtin/researcher.md holds %s %d times, want once", researcherFocus, n)
+	if n := strings.Count(string(body), executorFocus); n != 1 {
+		return "", fmt.Errorf("agenttypes: builtin/executor.md holds %s %d times, want once", executorFocus, n)
 	}
-	return strings.Replace(string(body), researcherFocus, strings.TrimSpace(string(own)), 1), nil
+	return strings.Replace(string(body), executorFocus, strings.TrimSpace(string(own)), 1), nil
 }

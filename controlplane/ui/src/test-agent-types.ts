@@ -1,18 +1,18 @@
-import type { AgentRole, ListedAgentType, OrgRole } from '@/types/api'
+import type { AgentRole, AgentRoleInfo, ListedAgentType, OrgRole } from '@/types/api'
 
 const at = '2026-01-01T00:00:00Z'
 
-export const RESEARCHER_PROMPT = 'You are a researcher.\n\n{{rules}}\n\n## hl commands\n\n{{hl_commands}}\n\nagent_id: {{agent_id}}\nhyperparameters: {{hyperparameters}}\n'
+export const EXECUTOR_PROMPT = 'You are an executor.\n\n{{rules}}\n\n## hl commands\n\n{{hl_commands}}\n\nagent_id: {{agent_id}}\nhyperparameters: {{hyperparameters}}\n'
 
-/** What the API lets a caller of role in the org do to t: an owner copies a researcher or baseline type and changes the org's own until it is archived. */
+/** What the API lets a caller of role in the org do to t: an owner copies an executor or baseline type and changes the org's own until it is archived. */
 export function seenBy(role: OrgRole, t: ListedAgentType): ListedAgentType {
   if (role !== 'owner') return { ...t, actions: [] }
-  const copies = t.role === 'researcher' || t.role === 'baseline'
+  const copies = t.role === 'executor' || t.role === 'baseline'
   return { ...t, actions: [...(t.builtin || t.archived_at ? [] : ['edit', 'archive', 'restore'] as const), ...(copies ? ['duplicate'] as const : [])] }
 }
 
-/** An agent type as the API answers it to an owner of the org. */
-export function agentType(id: string, name: string, role: AgentRole, more: Partial<ListedAgentType> = {}): ListedAgentType {
+/** An agent type as the API answers it to an owner of the org, on model, a reference, or the platform's default. */
+export function agentType(id: string, name: string, role: AgentRole, more: Partial<ListedAgentType> = {}, model = ''): ListedAgentType {
   const builtin = more.builtin ?? !id.startsWith('at-')
   const version = more.current_version ?? 1
   return seenBy('owner', {
@@ -21,21 +21,31 @@ export function agentType(id: string, name: string, role: AgentRole, more: Parti
     required_placeholders: ['rules', 'hl_commands'],
     ...(builtin ? {} : { org_id: 'org_a', created_by: { kind: 'user', id: 'u1', name: 'Ada' } }),
     current: {
-      agent_type: id, version, prompt: RESEARCHER_PROMPT, digest: `digest-${id}-${version}`, created_at: at,
-      settings: { model: '', max_subagents: 4, effort: 'high', hyperparameters: {} },
+      agent_type: id, version, prompt: EXECUTOR_PROMPT, digest: `digest-${id}-${version}`, created_at: at,
+      settings: { model, max_subagents: 4, effort: 'high', hyperparameters: {} },
     },
     ...more,
   })
 }
 
-/** The built-in types, and one researcher type of the org's own. */
+/** The built-in types, and one executor type of the org's own. */
 export const CATALOG: ListedAgentType[] = [
-  agentType('generalist', 'Generalist', 'researcher', { description: 'No fixed axis: whatever moves the metric, settings, structure, inputs or scale.' }),
-  agentType('hyperparameter-search', 'Hyperparameter search', 'researcher', { description: 'Holds structure and inputs fixed and tunes the knobs: rates, sizes, thresholds.' }),
-  agentType('architecture-search', 'Architecture search', 'researcher', { description: 'Holds settings and inputs fixed and searches the structure of the method.' }),
-  agentType('data-search', 'Data search', 'researcher', { description: 'Holds structure and settings fixed and searches what the method is fed.' }),
+  agentType('generalist', 'Generalist', 'executor', { description: 'No fixed axis: whatever moves the metric, settings, structure, inputs or scale.' }),
+  agentType('hyperparameter-search', 'Hyperparameter search', 'executor', { description: 'Holds structure and inputs fixed and tunes the knobs: rates, sizes, thresholds.' }),
+  agentType('architecture-search', 'Architecture search', 'executor', { description: 'Holds settings and inputs fixed and searches the structure of the method.' }),
+  agentType('data-search', 'Data search', 'executor', { description: 'Holds structure and settings fixed and searches what the method is fed.' }),
+  agentType('researcher', 'Researcher', 'researcher', { description: 'Keeps the hypothesis graph: reads the literature, proposes, reviews findings, merges and retires. Runs no job.' }),
   agentType('baseline', 'Baseline', 'baseline', { description: 'Builds the harness, measures the control and each reference, and finishes.' }),
   agentType('planner', 'Planner', 'planner', { description: 'Turns a one-line goal into an experiment and proposes it.' }),
   agentType('coordinator', 'Coordinator', 'coordinator', { description: 'Supervises the run, catches mistakes and files the summary.' }),
-  agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 3 }),
+  agentType('at-lr', 'LR sweeper', 'executor', { current_version: 3 }, 'openrouter/moonshotai/kimi-k2'),
+]
+
+/** Every role as GET /agent-roles answers it. */
+export const ROLES: AgentRoleInfo[] = [
+  { role: 'executor', name: 'Executor', description: 'Implements experiments and runs their jobs.', agent_type: 'generalist', signup_role: 'competitor', in_team: true, org_types: true },
+  { role: 'researcher', name: 'Researcher', description: 'Keeps the hypothesis graph correct and points the work.', agent_type: 'researcher', signup_role: 'researcher', in_team: true, org_types: false },
+  { role: 'baseline', name: 'Baseline', description: 'Measures the control before the run starts.', agent_type: 'baseline', signup_role: 'baseline', in_team: false, org_types: true },
+  { role: 'coordinator', name: 'Coordinator', description: 'Assembles and steers the team.', agent_type: 'coordinator', in_team: false, org_types: false },
+  { role: 'planner', name: 'Planner', description: 'Plans a draft.', agent_type: 'planner', in_team: false, org_types: false },
 ]

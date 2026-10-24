@@ -16,7 +16,7 @@ import (
 var ErrStageRankingPending = errors.New("stages: ranking data still to come from a job in flight")
 
 // minSurvivorsAfterCut is the floor a cut may never take the field below, beside
-// domain.MinResearchersForCut, the field size below which a boundary cuts nobody.
+// domain.MinExecutorsForCut, the field size below which a boundary cuts nobody.
 const minSurvivorsAfterCut = 2
 
 // computeCut ranks survivors on each metric independently — worst-first by their best value,
@@ -38,7 +38,7 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	// A stage that cuts nobody, an unrankable field (no ranking metrics — constraint/attribute
 	// metrics never cut), and a field already at the guardrail floor all mean the same thing
 	// here: advance, cut no one.
-	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < domain.MinResearchersForCut {
+	if stage.EvictPct == 0 || len(rankingMetrics) == 0 || len(survivors) < domain.MinExecutorsForCut {
 		return survivors, nil, nil
 	}
 

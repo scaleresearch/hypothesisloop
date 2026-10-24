@@ -46,7 +46,7 @@ class FakePlatform(BaseHTTPRequestHandler):
             role = "coordinator" if self.path.endswith("/coordinator/instructions") else FakePlatform.instructions["role"]
             return self._reply(200, {**FakePlatform.instructions, "role": role})
         if self.path == "/platform-experiments/pe-1":
-            body = {"id": "pe-1", "status": "running", "coordinator": {"model": "model-1"}}
+            body = {"id": "pe-1", "status": "running", "coordinator": {"model": "anthropic/model-1"}}
             if FakePlatform.repository_url:
                 body["repository_url"] = FakePlatform.repository_url
             if FakePlatform.branch:
@@ -69,9 +69,9 @@ class FakePlatform(BaseHTTPRequestHandler):
 
 def served(**changes) -> dict:
     """Instructions as the platform answers them."""
-    return {"agent_type": "generalist", "agent_type_version": 1, "role": "researcher",
+    return {"agent_type": "generalist", "agent_type_version": 1, "role": "executor",
             "prompt": "Work in {{workdir}} with:\n{{hl_commands}}", "placeholders": ["hl_commands", "workdir"],
-            "settings": {"model": "model-1", "max_subagents": 4, "effort": "high",
+            "settings": {"model": "anthropic/model-1", "max_subagents": 4, "effort": "high",
                          "hyperparameters": {"batch_size": 64}},
             "rules_version": 1, "digest": "digest-1", **changes}
 
@@ -79,7 +79,7 @@ def served(**changes) -> dict:
 class PlatformCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         FakePlatform.joined, FakePlatform.calls, FakePlatform.tokens = {"agent-a"}, [], set()
-        FakePlatform.signup = {"agent_type": "generalist", "model": "model-1", "hyperparameters": {"batch_size": 64}}
+        FakePlatform.signup = {"agent_type": "generalist", "model": "anthropic/model-1", "hyperparameters": {"batch_size": 64}}
         FakePlatform.status_for_strangers = 401
         FakePlatform.repository_url = "https://github.com/acme/model.git"
         FakePlatform.git_url = "https://api.example.invalid/git/pe-1.git"
@@ -264,7 +264,7 @@ class StartupTest(PlatformCase):
     async def test_instructions_the_harness_cannot_run_fail_startup(self):
         settings = served()["settings"]
         for broken, said in (
-            (served(settings={**settings, "model": ""}), "name no model"),
+            (served(settings={**settings, "model": ""}), "is not <provider>"),
             (served(settings={k: v for k, v in settings.items() if k != "effort"}), "settings lack the fields effort"),
             (served(role="coordinator"), "cannot run as"),
             (served(prompt="{{rules}} and {{workdir}}"), "holds '{{rules}} and '"),

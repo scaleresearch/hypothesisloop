@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/clitest"
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func links(pairs ...string) []any {
@@ -526,7 +527,7 @@ func TestTheOnlyJobOfAHypothesisShowsItsWholeEnvAndSeveralShowWhatDiffers(t *tes
 // the agent that asked: by default it prints what a decision needs, and --full the record.
 func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
 	long := strings.Repeat("ö", commentCut+40)
-	actor := map[string]any{"kind": "agent", "id": "a", "name": "Researcher 1"}
+	actor := map[string]any{"kind": "agent", "id": "a", "name": "Executor 1"}
 	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
 		return map[string]any{"id": "hyp-1", "agent_id": "a", "actor": actor, "platform_experiment_id": "pe-1", "text": "bf16 is faster", "status": "open",
 			"links":           map[string]any{"out": []any{map[string]any{"type": "builds_on", "hypothesis_id": "hyp-0", "text": "a long parent text", "status": "confirmed", "actor": actor}}, "in": []any{}},
@@ -559,14 +560,14 @@ func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
 	if code := clitest.Run(HypothesisGet, []string{"hyp-1", "--full"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatalf("--full: exit %d, stderr %s", code, stderr.String())
 	}
-	for _, whole := range []string{long, "a long parent text", "a long theory", `"name":"Researcher 1"`, `"job":{"env":{"P":"bf16"}}`} {
+	for _, whole := range []string{long, "a long parent text", "a long theory", `"name":"Executor 1"`, `"job":{"env":{"P":"bf16"}}`} {
 		if !strings.Contains(stdout.String(), whole) {
 			t.Errorf("--full lacks %q: %s", whole, stdout.String())
 		}
 	}
 }
 
-// Researchers posted the literature as a comment on the objective with hl hypothesis comment root
+// Agents posted the literature as a comment on the objective with hl hypothesis comment root
 // and got 404 five times: root names the objective of the token's platform experiment, and the
 // comments on it are read back with hl hypothesis get root and pointed at by hl hypothesis list.
 func TestCommentsOnTheObjective(t *testing.T) {
@@ -656,5 +657,59 @@ func TestTheStartOfSeveralHypothesisIDsListsThem(t *testing.T) {
 	}
 	if len(*got) != 1 || !strings.Contains(stderr.String(), ids[0]+", "+ids[1]) || !strings.Contains(stderr.String(), "Give more of the id") {
 		t.Fatalf("requests %+v, stderr %s", *got, stderr.String())
+	}
+}
+
+func TestHypothesisCurationSendsWhatTheRoutesTake(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"id": "hyp-1"} })
+	for _, c := range []struct {
+		run    command.Func
+		args   []string
+		method string
+		path   string
+		body   map[string]any
+	}{
+		{HypothesisMerge, []string{"hyp-1", "--into", "hyp-2", "--reason", "one claim", "--agent", "ag-r"}, "POST", "/hypotheses/hyp-1/merge",
+			map[string]any{"into": "hyp-2", "reason": "one claim", "agent_id": "ag-r"}},
+		{HypothesisMerge, []string{"hyp-1", "--into", "hyp-2", "--agent", "ag-r"}, "POST", "/hypotheses/hyp-1/merge",
+			map[string]any{"into": "hyp-2", "agent_id": "ag-r"}},
+		{HypothesisRetire, []string{"hyp-1", "--reason", "moot after hyp-3", "--agent", "ag-r"}, "POST", "/hypotheses/hyp-1/retire",
+			map[string]any{"reason": "moot after hyp-3", "agent_id": "ag-r"}},
+		{HypothesisUnlink, []string{"hyp-1", "--type", "builds_on", "--to", "hyp-2", "--agent", "ag-r"}, "DELETE", "/hypotheses/hyp-1/links/builds_on/hyp-2?agent_id=ag-r", nil},
+	} {
+		*got = nil
+		var stdout, stderr bytes.Buffer
+		if code := clitest.Run(c.run, c.args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit %d, stderr %s", c.args, code, stderr.String())
+		}
+		request := (*got)[0]
+		path := request.Path
+		if request.Query != "" {
+			path += "?" + request.Query
+		}
+		if request.Method != c.method || path != c.path || (c.body != nil && !reflect.DeepEqual(request.Body, c.body)) {
+			t.Fatalf("%v: request = %+v", c.args, request)
+		}
+	}
+}
+
+func TestHypothesisCurationUsageErrors(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return nil })
+	for _, c := range []struct {
+		run  command.Func
+		args []string
+	}{
+		{HypothesisMerge, []string{"hyp-1"}},
+		{HypothesisRetire, []string{"hyp-1"}},
+		{HypothesisUnlink, []string{"hyp-1", "--type", "extends", "--to", "hyp-2"}},
+		{HypothesisUnlink, []string{"hyp-1", "--type", "related"}},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := clitest.Run(c.run, c.args, &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", c.args, code)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("usage errors sent %d requests", len(*got))
 	}
 }

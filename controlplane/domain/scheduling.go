@@ -16,6 +16,9 @@ func DefaultSchedulingWeights() SchedulingWeights {
 	}
 }
 
+// SubmissionWindow is the span QuotaConfig.MaxSubmissionsPerHour counts an agent's submissions over.
+const SubmissionWindow = time.Hour
+
 // QuotaConfig holds tunable constants for quota allocation.
 type QuotaConfig struct {
 	// Top3BonusFraction is the fraction of base_share added for top-3 placement in any past experiment.
@@ -38,12 +41,12 @@ type QuotaConfig struct {
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
 	// MinBaseline is the least an accepted draft may give its baseline.
 	MinBaseline time.Duration `json:"min_baseline,omitempty"`
-	// AgentsDue is how long a started platform experiment whose researchers the platform runs
+	// AgentsDue is how long a started platform experiment whose executors the platform runs
 	// waits for the first one's machine to be running before the platform closes it: the time
 	// one machine and every restart of it may take to come up, and never past its end.
 	AgentsDue time.Duration `json:"agents_due,omitempty"`
-	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour within
-	// a single platform experiment.
+	// MaxSubmissionsPerHour caps how many experiments an agent may submit within a single
+	// platform experiment in any SubmissionWindow.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a job's
@@ -60,8 +63,7 @@ type QuotaConfig struct {
 	DefaultMaxConcurrentAccelerators int `json:"default_max_concurrent_accelerators,omitempty"`
 
 	// DefaultModelBudgetUSD is the model budget of a platform experiment that states none, and
-	// MaxModelBudgetUSD the most one may state. ModelCatalog prices what is spent of it.
-	DefaultModelBudgetUSD float64      `json:"default_model_budget_usd,omitempty"`
-	MaxModelBudgetUSD     float64      `json:"max_model_budget_usd,omitempty"`
-	ModelCatalog          ModelCatalog `json:"-"`
+	// MaxModelBudgetUSD the most one may state.
+	DefaultModelBudgetUSD float64 `json:"default_model_budget_usd,omitempty"`
+	MaxModelBudgetUSD     float64 `json:"max_model_budget_usd,omitempty"`
 }

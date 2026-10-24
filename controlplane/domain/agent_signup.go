@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
@@ -36,21 +35,22 @@ type AgentSignup struct {
 	// gave as why. From then its machine is no longer wanted.
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	FinishedReason string     `json:"finished_reason,omitempty"`
-	// Replaces is the researcher whose place the platform added this one in, keeping its
-	// platform experiment's researchers, and ReplacedBy the one added in this one's place.
-	Replaces   string `json:"replaces,omitempty" doc:"The researcher that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters."`
-	ReplacedBy string `json:"replaced_by,omitempty" doc:"The researcher the platform added in this one's place. A replaced researcher takes no place and is never started again."`
+	// Replaces is the agent whose place the platform added this one in, keeping its
+	// platform experiment's team, and ReplacedBy the one added in this one's place.
+	Replaces   string `json:"replaces,omitempty" doc:"The agent that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters."`
+	ReplacedBy string `json:"replaced_by,omitempty" doc:"The agent the platform added in this one's place. A replaced agent takes no place and is never started again."`
 	// Ended is why the agent's run in the platform experiment is over, empty while it goes on.
 	// A sandboxed agent's machine is told to stop for this and for nothing else, and the agent
 	// reads it to learn why.
 	Ended RunEnd `json:"-"`
 	// CutReason is why the platform cut the agent other than at a stage boundary, empty for a stage
 	// cut and for an agent that was not cut.
-	CutReason string `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut."`
-	// AtWork is whether the agent is a researcher at work, the one count max_agents and the pool
-	// hold to, and EndedReason why a researcher's place is free: one of the EndedReason constants.
-	AtWork      bool   `json:"at_work" doc:"Whether it is a researcher at work: of role competitor, not finished, not cut, not replaced and, run by the platform, with a machine. The one count max_agents and the researchers pool hold to."`
-	EndedReason string `json:"ended_reason,omitempty" enum:"finished,cut,replaced,stopped" doc:"Why it no longer holds a place among the researchers: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added a researcher in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close."`
+	CutReason string `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest executors above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut."`
+	// AtWork is whether the agent is of the team at work, the count the pool holds to and, of an
+	// executor, max_agents, and EndedReason why an agent's place is free: one of the EndedReason
+	// constants.
+	AtWork      bool   `json:"at_work" doc:"Whether it is of the team at work: an executor (role competitor) or a researcher, not finished, not cut, not replaced and, run by the platform, with a machine. The pool of agents holds to it, and max_agents to its executors."`
+	EndedReason string `json:"ended_reason,omitempty" enum:"finished,cut,replaced,stopped" doc:"Why it no longer holds a place in the team: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added an agent in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close."`
 	// Instance is what became of a sandboxed agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`
@@ -191,7 +191,7 @@ func ActivityOf(text string, at *time.Time) *AgentActivity {
 	return &AgentActivity{Text: text, At: *at}
 }
 
-// Why an agent no longer holds a place among the researchers (AgentSignup.EndedReason), beside
+// Why an agent no longer holds a place in the team (AgentSignup.EndedReason), beside
 // RunEndCut and RunEndFinished.
 const (
 	EndedReplaced = "replaced"
@@ -330,10 +330,15 @@ const CoordinatorAgentType = "coordinator"
 // with it: the platform signs the planner up, with role SignupRolePlanner.
 const PlannerAgentType = "planner"
 
+// ResearcherAgentType is the built-in type a researcher runs as, and the one type an entry of a
+// pool names to be one (experimentspec.ResearcherAgentType).
+const ResearcherAgentType = experimentspec.ResearcherAgentType
+
 // SharesBudget says the agent is given a share of the budget when its platform experiment
-// starts: every role but baseline, whose quota is its own from the moment it joins, and planner.
+// starts: every role that submits jobs but baseline, whose quota is its own from the moment it
+// joins.
 func (s AgentSignup) SharesBudget() bool {
-	return s.Role != SignupRoleBaseline && s.Role != SignupRolePlanner
+	return s.Role.SubmitsJobs() && s.Role != SignupRoleBaseline
 }
 
 // InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a
@@ -369,19 +374,15 @@ var ErrNoSession = errors.New("objectstore: no session is stored")
 // to the agent's launcher and in the agent's environment.
 const MaxHyperparametersBytes = experimentspec.MaxHyperparametersBytes
 
-// DefaultAgentType is the agent type a researcher runs as when it joins without naming one.
+// DefaultAgentType is the agent type an executor runs as when it joins without naming one.
 const DefaultAgentType = "generalist"
-
-const maxModelLength = 128
-
-var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$`)
 
 // AgentName is what an agent created without a name is called in a platform experiment: its
 // role and the first number no agent of that experiment carries yet, "Baseline 1" or
-// "Researcher 2". taken says whether the experiment already has an agent of that name.
+// "Executor 2". taken says whether the experiment already has an agent of that name.
 func AgentName(role SignupRole, taken func(name string) bool) string {
 	label := map[SignupRole]string{
-		SignupRoleCompetitor: "Researcher", SignupRoleBaseline: "Baseline", SignupRoleReviewer: "Reviewer", SignupRolePlanner: "Planner",
+		SignupRoleCompetitor: "Executor", SignupRoleBaseline: "Baseline", SignupRoleReviewer: "Reviewer", SignupRoleResearcher: "Researcher", SignupRolePlanner: "Planner",
 	}[role]
 	for n := 1; ; n++ {
 		if name := fmt.Sprintf("%s %d", label, n); !taken(name) {

@@ -462,7 +462,7 @@ func simJob(rng *rand.Rand, id, agent string, tier domain.CapacityTier, cores in
 	return priced(exp, hours)
 }
 
-// smallCores and runHours are the sizes and lengths of the researchers' jobs: mostly a few
+// smallCores and runHours are the sizes and lengths of the executors' jobs: mostly a few
 // cores, mostly hours, some a day.
 func smallCores(rng *rand.Rand) int { return []int{1, 1, 2, 2, 2, 4, 4, 6}[rng.IntN(8)] }
 func runHours(rng *rand.Rand) float64 {
@@ -592,9 +592,9 @@ func joinFirst(lines []string, n int) string {
 	return strings.Join(lines, "\n  ")
 }
 
-// researchers keeps each agent's jobs coming: an agent keeps outstanding jobs queued or placed,
+// executors keeps each agent's jobs coming: an agent keeps outstanding jobs queued or placed,
 // submitting one as one ends.
-type researchers struct {
+type executors struct {
 	rng         *rand.Rand
 	outstanding map[string]int
 	size        func(*rand.Rand) int
@@ -602,7 +602,7 @@ type researchers struct {
 	next        int
 }
 
-func (rs *researchers) topUp(s *sim) {
+func (rs *executors) topUp(s *sim) {
 	s.mu.Lock()
 	open := map[string]int{}
 	for _, r := range s.rows {
@@ -628,10 +628,10 @@ func (s *sim) submitJob(rng *rand.Rand, id, agent string, tier domain.CapacityTi
 // loadedDeployment is three clusters of uneven size and five agents: one has queued a backlog of
 // 300 jobs at once, four keep eight jobs each queued or placed. light-d's share of the budget
 // runs out.
-func loadedDeployment(t *testing.T) (*sim, *researchers) {
+func loadedDeployment(t *testing.T) (*sim, *executors) {
 	withCPUType(t)
 	s := newSim(t, unevenBoxes())
-	rs := &researchers{rng: rand.New(rand.NewPCG(7, 11)), outstanding: map[string]int{}, size: smallCores, tier: domain.CapacityGuaranteed}
+	rs := &executors{rng: rand.New(rand.NewPCG(7, 11)), outstanding: map[string]int{}, size: smallCores, tier: domain.CapacityGuaranteed}
 	for _, agent := range []string{"light-a", "light-b", "light-c", "light-d"} {
 		rs.outstanding[agent] = 8
 		s.budget[agent] = 1e6
@@ -706,7 +706,7 @@ func TestALargeJobIsNotStarvedByAStreamOfSmallOnes(t *testing.T) {
 	withCPUType(t)
 	run := func(hold bool) map[string]*simRow {
 		s := newSim(t, unevenBoxes())
-		rs := &researchers{rng: rand.New(rand.NewPCG(3, 5)), outstanding: map[string]int{}, tier: domain.CapacityGuaranteed,
+		rs := &executors{rng: rand.New(rand.NewPCG(3, 5)), outstanding: map[string]int{}, tier: domain.CapacityGuaranteed,
 			size: func(rng *rand.Rand) int { return []int{1, 1, 2, 2, 3}[rng.IntN(5)] }}
 		for _, agent := range []string{"light-a", "light-b", "light-c", "light-d", "light-e"} {
 			rs.outstanding[agent] = 14
@@ -768,7 +768,7 @@ func overflowBoxes() map[string]simBox {
 func TestUnderLoadPriorityComesFirst(t *testing.T) {
 	withCPUType(t)
 	s := newSim(t, overflowBoxes())
-	rs := &researchers{rng: rand.New(rand.NewPCG(13, 17)), outstanding: map[string]int{}, size: smallCores, tier: domain.CapacityGuaranteed}
+	rs := &executors{rng: rand.New(rand.NewPCG(13, 17)), outstanding: map[string]int{}, size: smallCores, tier: domain.CapacityGuaranteed}
 	for _, agent := range []string{"light-a", "light-b", "light-c"} {
 		rs.outstanding[agent] = 10
 		s.budget[agent] = 1e6

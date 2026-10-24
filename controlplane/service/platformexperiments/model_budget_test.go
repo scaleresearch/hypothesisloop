@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,12 +65,17 @@ func TestAModelBudgetIsStatedUpToThePlatformsMost(t *testing.T) {
 	}
 }
 
-// What a platform experiment spent is its recorded model calls at the catalog's prices, against
-// its own budget or the platform's default.
-func TestAModelBudgetIsSpentAtTheCatalogsPrices(t *testing.T) {
-	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+// What a platform experiment spent is the sum of the costs recorded with its model calls, read
+// in one query, against its own budget or the platform's default.
+func TestAModelBudgetIsSpentByTheRecordedCosts(t *testing.T) {
+	var mu sync.Mutex
+	queries := 0
+	metrics := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		queries++
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[["agent-a","anthropic","model-default",3,1000000,1000000,1000000,10000000],["coordinator","anthropic","model-default",1,0,500000,0,0]]}}]}`))
+		_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[["agent-a","anthropic","model-default",3,1000001,1000000,1000000,10000000,18.5],["coordinator","openrouter","moonshotai/kimi-k2",1,0,500000,0,0,4.5]]}}]}`))
 	}))
 	t.Cleanup(metrics.Close)
 	store := &createStore{created: &domain.PlatformExperiment{ID: "pe-1"}}
@@ -78,8 +84,12 @@ func TestAModelBudgetIsSpentAtTheCatalogsPrices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(budget.UsedUSD-23) > 1e-9 || budget.BudgetUSD != 50 || budget.Spent() {
-		t.Fatalf("budget = %+v, want $23 of the default $50", budget)
+	if math.Abs(budget.UsedUSD-(18.5+4.5)) > 1e-9 || budget.BudgetUSD != 50 || budget.Spent() || queries != 1 {
+		t.Fatalf("budget = %+v after %d queries, want $23 of the default $50 from one", budget, queries)
+	}
+	usage, err := svc.ModelUsage(context.Background(), "pe-1")
+	if err != nil || len(usage.Usage) != 2 || math.Abs(usage.Usage[0].CostUSD-18.5) > 1e-9 || usage.Usage[1].CostUSD != 4.5 {
+		t.Fatalf("usage = %+v, %v, want each entry at its cost", usage, err)
 	}
 	stated := 20.0
 	store.created.ModelBudgetUSD = &stated

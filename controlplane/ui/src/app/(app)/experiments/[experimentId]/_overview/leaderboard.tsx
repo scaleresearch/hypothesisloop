@@ -55,7 +55,7 @@ export function Leaderboard({ pe, agentIds, results, quotas, stages, jobsByAgent
               {metrics.length > 0 ? metrics.map((m, i) => (
                 <th key={m.key} className="text-right">
                   {i === 0 && metrics.length > 1 && (
-                    <span title="The primary metric, which ranks the researchers" className="mr-1 font-medium">★</span>
+                    <span title="The primary metric, which ranks the executors" className="mr-1 font-medium">★</span>
                   )}
                   Best {m.key} <span className="font-normal text-subtle">({m.direction === 'maximize' ? '↑' : '↓'})</span>
                 </th>

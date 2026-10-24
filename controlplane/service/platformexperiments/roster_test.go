@@ -27,7 +27,7 @@ type rosterStore struct {
 	completed []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
-	// lateShare is what the researchers that ended left unspent, for one joining the run.
+	// lateShare is what the executors that ended left unspent, for one joining the run.
 	lateShare float64
 	// submitted is how many jobs each agent submitted.
 	submitted map[string]int
@@ -240,7 +240,7 @@ func (f *rosterStore) ListSignupsByRole(_ context.Context, _ string, role domain
 	return ids, nil
 }
 
-// JoinRunning joins as an open experiment would, while the researchers that ended left
+// JoinRunning joins as an open experiment would, while the executors that ended left
 // lateShare unspent.
 func (f *rosterStore) JoinRunning(ctx context.Context, id string, agent *domain.Agent, signup domain.AgentSignup, _ db.LateJoin) error {
 	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleCompetitor {

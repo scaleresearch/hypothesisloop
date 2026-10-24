@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { describeType, parseHyperparameters, researcherTypes, typeName } from '@/lib/agent-types'
-import { CATALOG, agentType } from '@/test-agent-types'
+import { describeType, parseHyperparameters, teamTypes, typeName } from '@/lib/agent-types'
+import { CATALOG, ROLES, agentType } from '@/test-agent-types'
 
 describe('reading hyperparameters as typed', () => {
   it('takes hyperparameters as a JSON object, empty text as none', () => {
@@ -14,8 +14,8 @@ describe('reading hyperparameters as typed', () => {
 describe('naming and describing types', () => {
   it('describes a type by the description it states, and an org\'s own that states none by its role and author', () => {
     expect(describeType(CATALOG[1])).toMatch(/tunes the knobs/)
-    expect(describeType(CATALOG.find(t => t.id === 'at-lr')!)).toBe("Your org's own researcher type, made by Ada.")
-    expect(describeType(agentType('at-x', 'X', 'researcher', { description: 'Sweeps lr.' }))).toBe('Sweeps lr.')
+    expect(describeType(CATALOG.find(t => t.id === 'at-lr')!)).toBe("Your org's own executor type, made by Ada.")
+    expect(describeType(agentType('at-x', 'X', 'executor', { description: 'Sweeps lr.' }))).toBe('Sweeps lr.')
   })
 
   it('reads an id as its name, and an id the catalog does not hold as itself', () => {
@@ -23,9 +23,10 @@ describe('naming and describing types', () => {
     expect(typeName('at-gone', CATALOG)).toBe('at-gone')
   })
 
-  it('offers researcher types that are not archived, built-in first', () => {
-    const archived = agentType('at-old', 'Old', 'researcher', { archived_at: '2026-02-01T00:00:00Z' })
-    const ids = researcherTypes([CATALOG[7], archived, ...CATALOG.slice(0, 7)]).map(t => t.id)
-    expect(ids).toEqual(['generalist', 'hyperparameter-search', 'architecture-search', 'data-search', 'at-lr'])
+  it('offers the types of the roles a team names, not archived, executors first and built-in first', () => {
+    const archived = agentType('at-old', 'Old', 'executor', { archived_at: '2026-02-01T00:00:00Z' })
+    const lr = CATALOG.find(t => t.id === 'at-lr')!
+    const ids = teamTypes([lr, archived, ...CATALOG.filter(t => t !== lr)], ROLES).map(t => t.id)
+    expect(ids).toEqual(['generalist', 'hyperparameter-search', 'architecture-search', 'data-search', 'at-lr', 'researcher'])
   })
 })

@@ -21,7 +21,7 @@ func (s *checkoutStore) CheckOutHypothesis(_ context.Context, _, hypothesisID, a
 	return s.others, nil
 }
 
-// Two researchers started the same people's ideas within two minutes because nothing showed a
+// Two executors started the same people's ideas within two minutes because nothing showed a
 // claim before a job. A checkout is recorded, and one of a hypothesis another agent works on is
 // told who, as a warning: two approaches to one idea can both be worth running.
 func TestACheckoutIsRecordedAndOneOfAClaimedHypothesisSaysWhoHasIt(t *testing.T) {
@@ -34,12 +34,12 @@ func TestACheckoutIsRecordedAndOneOfAClaimedHypothesisSaysWhoHasIt(t *testing.T)
 		t.Fatalf("a first checkout: got = %+v, %v (recorded %v), want it recorded with no warning", alone, err, store.recorded)
 	}
 
-	store.others = []domain.HypothesisWorker{{AgentID: "agent-a", Name: "researcher-1"}}
+	store.others = []domain.HypothesisWorker{{AgentID: "agent-a", Name: "executor-1"}}
 	second, err := svc.CheckOut(context.Background(), hyp, "agent-b", "hl/pe-1/b/idea")
 	if err != nil || len(second.Working) != 1 || len(store.recorded) != 2 {
 		t.Fatalf("a second checkout: got = %+v, %v, want it recorded and answered with who works on it", second, err)
 	}
-	for _, want := range []string{"researcher-1", "hyp-1", "different approach"} {
+	for _, want := range []string{"executor-1", "hyp-1", "different approach"} {
 		if !strings.Contains(second.Warning, want) {
 			t.Errorf("warning %q does not say %q", second.Warning, want)
 		}

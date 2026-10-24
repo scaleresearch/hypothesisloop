@@ -2,6 +2,8 @@ package placement
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -46,22 +48,22 @@ func RunsOn(labels map[string]string, exp *domain.Experiment) bool {
 }
 
 // DesiredFits proves candidate fits the cluster beside the jobs already desired there.
-// resolved is the candidate's job as the runtime will be handed it: when the candidate lands on a
-// slot (domain.NodeSlotLabel), resolved is pinned to that slot.
+// resolved is the candidate's job as the runtime will be handed it: when the candidate lands on
+// slots (domain.NodeSlotLabel), resolved is pinned to them, one per node in rank order.
 func DesiredFits(byNode map[string]map[string]int64, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment, resolved *domain.JobSpec) bool {
 	byNode, nodeResources = CloneNodes(byNode), CloneNodes(nodeResources)
 	// Planned jointly, not one job after another: the runtime is free to put an already-desired
 	// job on whichever node it likes, so replaying it onto one fixed node and then asking whether
 	// the candidate fits around that guess rejected candidates the cluster could host.
 	//
-	// A desired job pinned to a slot is the exception, since its node is decided. It holds that
-	// slot whether or not the runtime has rented it yet, and is not planned again: its slot reads
-	// as taken from the moment its instance exists, and planning it there would find no room for
-	// a job that is already in place.
+	// A desired job pinned to slots is the exception, since its nodes are decided. It holds those
+	// slots whether or not the runtime has rented them yet, and is not planned again: a slot reads
+	// as taken from the moment its instance exists, and planning the job there would find no room
+	// for a job that is already in place.
 	jobs := make([]*domain.Experiment, 0, len(desired)+1)
 	for _, d := range desired {
-		if slot := d.EffectiveJob().NodeSelector[domain.NodeSlotLabel]; slot != "" {
-			HoldSlot(byNode, nodeResources, labelsByNode, slot)
+		if slots := d.EffectiveJob().Slots; len(slots) > 0 {
+			HoldSlots(byNode, nodeResources, labelsByNode, slots)
 			continue
 		}
 		jobs = append(jobs, d)
@@ -71,18 +73,18 @@ func DesiredFits(byNode map[string]map[string]int64, nodeResources map[string]ma
 	if !ok {
 		return false
 	}
-	// A slot holds a whole job, so only a job that is one node can be pinned to one.
-	if candidate.Job.Nodes() == 1 {
-		for _, p := range plan {
-			if slot := labelsByNode[p.node][domain.NodeSlotLabel]; p.job == len(jobs)-1 && slot != "" {
-				selector := make(map[string]string, len(resolved.NodeSelector)+1)
-				for key, value := range resolved.NodeSelector {
-					selector[key] = value
-				}
-				selector[domain.NodeSlotLabel] = slot
-				resolved.NodeSelector = selector
-			}
+	// A job is on slots with every node or with none: one runtime rents all of its nodes.
+	slots := make([]string, len(candidate.NodeShapes()))
+	for _, p := range plan {
+		if p.job == len(jobs)-1 {
+			slots[p.rank] = labelsByNode[p.node][domain.NodeSlotLabel]
 		}
+	}
+	switch {
+	case !slices.Contains(slots, ""):
+		resolved.Slots = slots
+	case slices.ContainsFunc(slots, func(slot string) bool { return slot != "" }):
+		return false
 	}
 	return true
 }
@@ -134,10 +136,12 @@ func Reserve(byNode, nodeResources map[string]map[string]int64, labelsByNode map
 	return true
 }
 
-// rankAssignment is one rank of one job pinned to a node by planPlacement. key is the
-// AcceleratorKey of the job's type, "" for a rank that holds no accelerator.
+// rankAssignment is one rank of one job pinned to a node by planPlacement: rank is its index in
+// the job's NodeShapes. key is the AcceleratorKey of the job's type, "" for a rank that holds no
+// accelerator.
 type rankAssignment struct {
 	job   int
+	rank  int
 	shape domain.NodeShape
 	node  string
 	key   string
@@ -157,10 +161,14 @@ var searchBudget = 50000
 func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment) ([]rankAssignment, bool) {
 	type rank struct {
 		job      int
+		rank     int
 		shape    domain.NodeShape
 		key      string
 		distinct bool
-		nodes    []string // qualifying candidate set for this rank
+		// network is how many nodes of the job are of this rank's shape, which a slot's private
+		// network must hold (SlotNetwork); 0 for a job on one node or one already on its slots.
+		network int
+		nodes   []string // qualifying candidate set for this rank
 	}
 	var ranks []rank
 	for i, exp := range jobs {
@@ -171,12 +179,21 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		acceleratorNodes := qualifyingNodes(byNode, labelsByNode, exp)
 		plainNodes := qualifyingNodes(nodeResources, labelsByNode, exp)
 		distinct := RequiresDistinctHosts(exp)
-		for _, shape := range exp.NodeShapes() {
+		shapes := exp.NodeShapes()
+		pinned := exp.EffectiveJob().Slots
+		for r, shape := range shapes {
 			nodes := plainNodes
 			if shape.AcceleratorCount > 0 {
 				nodes = acceleratorNodes
 			}
-			ranks = append(ranks, rank{job: i, shape: shape, key: key, distinct: distinct, nodes: nodes})
+			network := 0
+			switch {
+			case len(pinned) > 0:
+				nodes = slices.DeleteFunc(slices.Clone(nodes), func(node string) bool { return labelsByNode[node][domain.NodeSlotLabel] != pinned[r] })
+			case len(shapes) > 1:
+				network = sameShape(shapes, shape)
+			}
+			ranks = append(ranks, rank{job: i, rank: r, shape: shape, key: key, distinct: distinct, network: network, nodes: nodes})
 		}
 	}
 	// Hardest rank first: most accelerators, then the largest fungible request. The rank with the
@@ -210,7 +227,7 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		if !NodeHasRoom(nodeResources[node], r.shape.Resources) {
 			return "", false
 		}
-		if isSlot(labelsByNode[node]) && !takesWholeSlot(r.shape, nodeKey, byNode[node], nodeResources[node]) {
+		if isSlot(labelsByNode[node]) && (!takesWholeSlot(r.shape, nodeKey, byNode[node], nodeResources[node]) || SlotNetwork(labelsByNode[node]) < r.network) {
 			return "", false
 		}
 		return nodeKey, true
@@ -298,7 +315,7 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 			}
 			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
 			used[r.job][c.node] = true
-			plan[i] = rankAssignment{job: r.job, shape: r.shape, node: c.node, key: c.key}
+			plan[i] = rankAssignment{job: r.job, rank: r.rank, shape: r.shape, node: c.node, key: c.key}
 			if place(i + 1) {
 				return true
 			}
@@ -319,6 +336,17 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 	return plan, true
 }
 
+// sameShape is how many of shapes are shape: the nodes of a job that hold slots of one shape.
+func sameShape(shapes []domain.NodeShape, shape domain.NodeShape) int {
+	count := 0
+	for _, other := range shapes {
+		if other.AcceleratorCount == shape.AcceleratorCount && maps.Equal(other.Resources, shape.Resources) {
+			count++
+		}
+	}
+	return count
+}
+
 func shapeResourceTotal(shape domain.NodeShape) int64 {
 	var total int64
 	for _, amount := range shape.Resources {
@@ -335,8 +363,8 @@ func AddNodeResources(available, used map[string]int64) {
 
 // qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels
 // and its image's architecture.
-// The selector is the effective job's: admission may have pinned an admitted job to a slot, and
-// for every other job the resolved selector is the submitted one.
+// The selector is the effective job's, which for a job admitted to a cluster also names its image's
+// architecture. The slots an admitted job is pinned to narrow each rank further (planPlacement).
 func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) []string {
 	nodes := make([]string, 0, len(capacity))
 	for node := range capacity {

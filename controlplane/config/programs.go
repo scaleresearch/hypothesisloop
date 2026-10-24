@@ -1,10 +1,15 @@
 package config
 
+import "github.com/scaleresearch/hypothesisloop/controlplane/domain"
+
 // ControlService is what control-service runs with: the settings and the secrets they call for.
 type ControlService struct {
 	*Settings
 	DatabaseURL, MetricsDBURL, GraphDBURL, SigningSecret string
-	ModelToken, ObjectStoreSecret                        string
+	ObjectStoreSecret                                    string
+	// ModelCredentials is the credential of each model provider the platform serves, by provider:
+	// those whose key is set.
+	ModelCredentials map[string]string
 	// GitHubKey and GitHubClientSecret are set on a github git host, and GitPassword on a plain
 	// one with a username.
 	GitHubKey, GitHubClientSecret, GitPassword string
@@ -21,9 +26,14 @@ func LoadControlService() (*ControlService, error) {
 	}
 	c := &ControlService{
 		Settings: s, DatabaseURL: env[DatabaseURL], MetricsDBURL: env[MetricsDBURL], GraphDBURL: env[GraphDBURL], SigningSecret: env[AuthSigningSecret],
-		ModelToken: env[modelKeys[s.Models.Provider]], ObjectStoreSecret: env[objectStoreKeys[s.ObjectStore.Provider]],
+		ObjectStoreSecret: env[objectStoreKeys[s.ObjectStore.Provider]], ModelCredentials: map[string]string{},
 		GitHubKey: env[GitHostGitHubAppPrivateKey], GitHubClientSecret: env[GitHostGitHubClientSecret], GitPassword: env[GitHostPlainPassword],
 		CloudComputeSecrets: map[string]string{},
+	}
+	for _, provider := range domain.ModelProviders {
+		if credential := lookup(modelKeys[provider]); credential != "" {
+			c.ModelCredentials[provider] = credential
+		}
 	}
 	if s.Sandbox != nil {
 		c.SandboxSecret = env[AccountKey(SectionSandbox, s.Sandbox.Provider)]

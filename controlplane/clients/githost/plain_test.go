@@ -42,7 +42,7 @@ func gitHostAt(t *testing.T, username, password string, repositories ...string) 
 	}
 	root := t.TempDir()
 	for _, name := range repositories {
-		if out, err := exec.Command("git", "init", "--bare", "--quiet", filepath.Join(root, name)).CombinedOutput(); err != nil {
+		if out, err := exec.Command("git", "init", "--bare", "--quiet", "--initial-branch=main", filepath.Join(root, name)).CombinedOutput(); err != nil {
 			t.Fatalf("git init %s: %v\n%s", name, err, out)
 		}
 	}
@@ -62,7 +62,7 @@ func gitHostAt(t *testing.T, username, password string, repositories ...string) 
 		}
 		if repository, ok := strings.CutSuffix(r.URL.Path, "/info/refs"); ok && r.URL.Query().Get("service") == "git-receive-pack" {
 			if _, err := os.Stat(filepath.Join(root, repository)); err != nil {
-				if out, err := exec.Command("git", "init", "--bare", "--quiet", filepath.Join(root, repository)).CombinedOutput(); err != nil {
+				if out, err := exec.Command("git", "init", "--bare", "--quiet", "--initial-branch=main", filepath.Join(root, repository)).CombinedOutput(); err != nil {
 					t.Errorf("git init %s: %v\n%s", repository, err, out)
 				}
 			}

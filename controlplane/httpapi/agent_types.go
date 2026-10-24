@@ -26,11 +26,12 @@ type agentTypesAPI struct {
 // registerAgentTypes registers the agent types of an org on the shared API document.
 func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 	a := agentTypesAPI{types: types}
+	registerAgentRoles(doc)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agent-types", Method: "GET", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"},
 		Summary: "List the agent types an org's agents may run as",
 		Description: "The built-in agent types, read-only for everyone, and the org's own, archived ones included, each with its current version and how many agents and coordinators whose run goes on run it now. " +
-			"An agent type is a role (researcher, baseline, coordinator or planner), a system prompt and settings: researchers, pool entries and added agents name one by id as agent_type.",
+			"An agent type is a role (executor, researcher, baseline, coordinator or planner, which GET /agent-roles describes), a system prompt and settings: entries of a platform experiment's agents and added agents name one by id as agent_type, and its role is theirs.",
 	}, a.list)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-agent-type", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}", Tags: []string{"agent-types"},
@@ -50,8 +51,8 @@ func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 		OperationID: "create-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"}, DefaultStatus: http.StatusCreated,
 		Summary: "Make an agent type of an org",
 		Description: "At version 1, from a role, a prompt and settings, or as a copy of an agent type the org reads (from), which is how a built-in one is changed. " +
-			"An org makes types of role researcher or baseline: a coordinator or a planner runs only its built-in type, and asking for one, or copying one, is refused with 422 invalid_agent_type. " +
-			"Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
+			"An org makes types of role executor or baseline: a researcher, a coordinator or a planner runs only its built-in type, and asking for one, or copying one, is refused with 422 invalid_agent_type. " +
+			"Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with, model_not_served for a model GET /models does not list; " +
 			"409 agent_type_limit once the org has 100 types that are not archived.",
 	}, a.create)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
@@ -60,7 +61,7 @@ func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 		Description: "Inserts the next version and makes it current, which every agent and coordinator of the type runs, and in the same write tells each whose run goes on with agent.instructions; " +
 			"its harness applies it at its next turn boundary: a new prompt, model or the effort max in a new session, the rest in the session it has. An agent given no model or hyperparameters of its own, and a pool entry naming none, run the type's from then on. " +
 			"Only the org's administrators edit: a member is refused with 403, and so is anyone editing a built-in type (builtin_read_only), which only the platform's repository changes. " +
-			"409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
+			"409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with, model_not_served for a model GET /models does not list; " +
 			"429 rate_limited once 60 versions of the type were made in the last hour.",
 	}, a.edit)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
@@ -79,7 +80,7 @@ func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 		OperationID: "archive-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types/{type_id}/archive", Tags: []string{"agent-types"},
 		Summary: "Archive an org's agent type",
 		Description: "An archived type takes no new agent and is no longer edited; nothing is deleted. " +
-			"409 agent_type_in_use while a platform experiment that is not closed names it, in its researchers, for its coordinator or for one of its agents. " +
+			"409 agent_type_in_use while a platform experiment that is not closed names it, in its agents, for its coordinator or for one of its agents. " +
 			"Only the org's administrators archive, and nobody a built-in type.",
 	}, a.archive)
 }

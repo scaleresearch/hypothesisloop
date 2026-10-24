@@ -9,8 +9,8 @@ import { inFlight } from '@/lib/units'
 import { hypothesisStatusValues } from '@/types/api'
 import type { ExperimentStats, HypothesisStats, PlatformExperiment } from '@/types/api'
 
-/** The experiment in figures: what it spent and holds, its jobs, hypotheses and researchers. */
-export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesisStats, verdicts, researchers }: {
+/** The experiment in figures: what it spent and holds, its jobs, hypotheses and executors. */
+export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesisStats, verdicts, executors }: {
   pe: PlatformExperiment
   phase: Phase
   plannedOnly: boolean
@@ -18,7 +18,7 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesi
   stats: ExperimentStats | undefined
   hypothesisStats: ExperimentStats | undefined
   verdicts: HypothesisStats | undefined
-  researchers: number | undefined
+  executors: number | undefined
 }): Figure[] {
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const held = inFlight(stats?.in_flight_accelerators ?? 0, stats?.in_flight_cores ?? 0, pe.max_concurrent_accelerators)
@@ -71,11 +71,11 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesi
     })
   }
   if (!plannedOnly) figures.push({ label: 'Hypotheses', value: hypothesisCount, title: hypothesisSub, href: graphHref(pe.id) })
-  if (!plannedOnly && researchers !== undefined) {
+  if (!plannedOnly && executors !== undefined) {
     figures.push({
-      label: 'Researchers',
-      value: `${researchers} of ${pe.max_agents}`,
-      title: 'Researchers who joined, of the most that may join over the run. Baseline agents and the coordinator are not counted.',
+      label: 'Executors',
+      value: `${executors} of ${pe.max_agents}`,
+      title: 'Executors who joined, of the most that may be at work at once. Researchers, baseline agents and the coordinator are not counted.',
     })
   }
   return figures

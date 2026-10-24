@@ -78,23 +78,25 @@ func (t tokens) Authenticate(_ context.Context, token string) (auth.Principal, e
 }
 
 var principals = tokens{
-	"tok-researcher-2": {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1"},
-	"tok-researcher-3": {Kind: auth.KindAgent, AgentID: "agent-r3", PlatformExperimentID: "pe-1"},
-	"tok-baseline":     {Kind: auth.KindAgent, AgentID: "agent-b1", PlatformExperimentID: "pe-1"},
-	"tok-planner":      {Kind: auth.KindAgent, AgentID: "agent-p1", PlatformExperimentID: "pe-1"},
-	"tok-coordinator":  {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1"},
-	"tok-job":          {Kind: auth.KindJob, AgentID: "agent-r2", ExperimentID: "job-1", PlatformExperimentID: "pe-1"},
-	"tok-other-pe":     {Kind: auth.KindAgent, AgentID: "agent-x", PlatformExperimentID: "pe-2"},
-	"tok-over":         {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1", RunOver: true},
-	"tok-staff":        {Kind: auth.KindStaff},
+	"tok-executor-2":  {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1"},
+	"tok-executor-3":  {Kind: auth.KindAgent, AgentID: "agent-r3", PlatformExperimentID: "pe-1"},
+	"tok-baseline":    {Kind: auth.KindAgent, AgentID: "agent-b1", PlatformExperimentID: "pe-1"},
+	"tok-planner":     {Kind: auth.KindAgent, AgentID: "agent-p1", PlatformExperimentID: "pe-1"},
+	"tok-researcher":  {Kind: auth.KindAgent, AgentID: "agent-s1", PlatformExperimentID: "pe-1"},
+	"tok-coordinator": {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1"},
+	"tok-job":         {Kind: auth.KindJob, AgentID: "agent-r2", ExperimentID: "job-1", PlatformExperimentID: "pe-1"},
+	"tok-other-pe":    {Kind: auth.KindAgent, AgentID: "agent-x", PlatformExperimentID: "pe-2"},
+	"tok-over":        {Kind: auth.KindAgent, AgentID: "agent-r2", PlatformExperimentID: "pe-1", RunOver: true},
+	"tok-staff":       {Kind: auth.KindStaff},
 }
 
 func signups() map[string]domain.AgentSignup {
 	return map[string]domain.AgentSignup{
-		"agent-r2": {AgentID: "agent-r2", Name: "Researcher 2", Role: domain.SignupRoleCompetitor},
-		"agent-r3": {AgentID: "agent-r3", Name: "Researcher 3", Role: domain.SignupRoleCompetitor},
+		"agent-r2": {AgentID: "agent-r2", Name: "Executor 2", Role: domain.SignupRoleCompetitor},
+		"agent-r3": {AgentID: "agent-r3", Name: "Executor 3", Role: domain.SignupRoleCompetitor},
 		"agent-b1": {AgentID: "agent-b1", Name: "Baseline 1", Role: domain.SignupRoleBaseline},
 		"agent-p1": {AgentID: "agent-p1", Name: "Planner 1", Role: domain.SignupRolePlanner},
+		"agent-s1": {AgentID: "agent-s1", Name: "Researcher 1", Role: domain.SignupRoleResearcher},
 	}
 }
 
@@ -241,27 +243,27 @@ func (w *world) noSecretLeaked() {
 	}
 }
 
-func TestAResearcherPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T) {
+func TestAnExecutorPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T) {
 	w := newWorld(t)
-	dir := w.clone("tok-researcher-2", "researcher-2")
+	dir := w.clone("tok-executor-2", "executor-2")
 	main := w.hostRef("refs/heads/main")
 
-	own := "hl/pe-1/researcher-2/faster-attention-abc123"
+	own := "hl/pe-1/executor-2/faster-attention-abc123"
 	head := w.commitOn(dir, own)
-	if out, err := w.git("tok-researcher-2", dir, "push", "--quiet", "origin", own); err != nil {
+	if out, err := w.git("tok-executor-2", dir, "push", "--quiet", "origin", own); err != nil {
 		t.Fatalf("pushing its own branch: %v: %s", err, out)
 	}
 	if got := w.hostRef("refs/heads/" + own); got != head {
 		t.Fatalf("the host holds %q on %s, want %s", got, own, head)
 	}
 	head = w.commitOn(dir, own)
-	if out, err := w.git("tok-researcher-2", dir, "push", "--quiet", "origin", own); err != nil || w.hostRef("refs/heads/"+own) != head {
+	if out, err := w.git("tok-executor-2", dir, "push", "--quiet", "origin", own); err != nil || w.hostRef("refs/heads/"+own) != head {
 		t.Fatalf("pushing more onto its own branch: %v: %s", err, out)
 	}
-	theirs := "hl/pe-1/researcher-3/y"
-	otherDir := w.clone("tok-researcher-3", "researcher-3")
+	theirs := "hl/pe-1/executor-3/y"
+	otherDir := w.clone("tok-executor-3", "executor-3")
 	w.commitOn(otherDir, theirs)
-	if out, err := w.git("tok-researcher-3", otherDir, "push", "--quiet", "origin", theirs); err != nil {
+	if out, err := w.git("tok-executor-3", otherDir, "push", "--quiet", "origin", theirs); err != nil {
 		t.Fatalf("another agent pushing its own branch: %v: %s", err, out)
 	}
 
@@ -270,16 +272,16 @@ func TestAResearcherPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T
 		ref  string
 		why  string
 	}{
-		"the default branch":               {[]string{"push", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/researcher-2/"},
-		"another agent's branch":           {[]string{"push", "origin", "HEAD:refs/heads/hl/pe-1/researcher-3/x"}, "refs/heads/hl/pe-1/researcher-3/x", "your branches are under hl/pe-1/researcher-2/"},
-		"a force push to another's branch": {[]string{"push", "--force", "origin", "HEAD:refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/researcher-2/"},
-		"a delete of another's branch":     {[]string{"push", "origin", ":refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/researcher-2/"},
-		"a delete of the default branch":   {[]string{"push", "origin", ":refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/researcher-2/"},
+		"the default branch":               {[]string{"push", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/executor-2/"},
+		"another agent's branch":           {[]string{"push", "origin", "HEAD:refs/heads/hl/pe-1/executor-3/x"}, "refs/heads/hl/pe-1/executor-3/x", "your branches are under hl/pe-1/executor-2/"},
+		"a force push to another's branch": {[]string{"push", "--force", "origin", "HEAD:refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/executor-2/"},
+		"a delete of another's branch":     {[]string{"push", "origin", ":refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/executor-2/"},
+		"a delete of the default branch":   {[]string{"push", "origin", ":refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/executor-2/"},
 		"a tag":                            {[]string{"push", "origin", "HEAD:refs/tags/v1"}, "refs/tags/v1", "only branches are pushed"},
-		"a force push to main":             {[]string{"push", "--force", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/researcher-2/"},
+		"a force push to main":             {[]string{"push", "--force", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/executor-2/"},
 	} {
 		before := w.hostRef(c.ref)
-		out, err := w.git("tok-researcher-2", dir, c.args...)
+		out, err := w.git("tok-executor-2", dir, c.args...)
 		if err == nil || !strings.Contains(out, "[remote rejected]") || !strings.Contains(out, c.why) {
 			t.Errorf("%s: %v: %s, want it rejected saying %q", name, err, out, c.why)
 		}
@@ -297,13 +299,13 @@ func TestAResearcherPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T
 
 	// One refused ref refuses the push it is in whole.
 	other := w.commitOn(dir, own)
-	out, err := w.git("tok-researcher-2", dir, "push", "origin", own, "HEAD:refs/heads/main")
+	out, err := w.git("tok-executor-2", dir, "push", "origin", own, "HEAD:refs/heads/main")
 	if err == nil || !strings.Contains(out, "a push is taken whole") || w.hostRef("refs/heads/"+own) == other {
 		t.Errorf("a push of its own branch beside main: %v: %s, want both refused", err, out)
 	}
 
 	// Its own branch it deletes, and the other agent's stays.
-	if out, err := w.git("tok-researcher-2", dir, "push", "--quiet", "origin", ":refs/heads/"+own); err != nil || w.hostRef("refs/heads/"+own) != "" {
+	if out, err := w.git("tok-executor-2", dir, "push", "--quiet", "origin", ":refs/heads/"+own); err != nil || w.hostRef("refs/heads/"+own) != "" {
 		t.Errorf("deleting its own branch: %v: %s", err, out)
 	}
 	if w.hostRef("refs/heads/"+theirs) == "" {
@@ -337,21 +339,21 @@ func TestTheBaselineCreatesNoDefaultBranchOnAnEmptyRepository(t *testing.T) {
 
 func TestOnlyAnAgentPastTheDraftPushes(t *testing.T) {
 	w := newWorld(t)
-	for _, token := range []string{"tok-planner", "tok-coordinator", "tok-job"} {
+	for _, token := range []string{"tok-planner", "tok-researcher", "tok-coordinator", "tok-job"} {
 		dir := w.clone(token, strings.TrimPrefix(token, "tok-"))
-		w.commitOn(dir, "hl/pe-1/researcher-2/x")
-		out, err := w.git(token, dir, "push", "origin", "hl/pe-1/researcher-2/x")
+		w.commitOn(dir, "hl/pe-1/executor-2/x")
+		out, err := w.git(token, dir, "push", "origin", "hl/pe-1/executor-2/x")
 		if err == nil || !strings.Contains(out, "read-only") {
 			t.Errorf("%s pushing: %v: %s, want it refused as read-only", token, err, out)
 		}
 	}
 	w.store.draft = true
-	dir := w.clone("tok-researcher-2", "in-draft")
-	w.commitOn(dir, "hl/pe-1/researcher-2/x")
-	if out, err := w.git("tok-researcher-2", dir, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "is a draft") {
-		t.Errorf("a researcher pushing in a draft: %v: %s, want it refused", err, out)
+	dir := w.clone("tok-executor-2", "in-draft")
+	w.commitOn(dir, "hl/pe-1/executor-2/x")
+	if out, err := w.git("tok-executor-2", dir, "push", "origin", "hl/pe-1/executor-2/x"); err == nil || !strings.Contains(out, "is a draft") {
+		t.Errorf("an executor pushing in a draft: %v: %s, want it refused", err, out)
 	}
-	if w.hostRef("refs/heads/hl/pe-1/researcher-2/x") != "" {
+	if w.hostRef("refs/heads/hl/pe-1/executor-2/x") != "" {
 		t.Error("a read-only push reached the host")
 	}
 	w.noSecretLeaked()
@@ -375,7 +377,7 @@ func TestTheProxyServesNoOneElse(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(body), resp.Header
 	}
-	status, body, header := get("tok-researcher-2", "/info/refs?service=git-upload-pack")
+	status, body, header := get("tok-executor-2", "/info/refs?service=git-upload-pack")
 	if status != http.StatusOK || header.Get("Content-Type") != "application/x-git-upload-pack-advertisement" || !strings.Contains(body, "refs/heads/main") {
 		t.Fatalf("an agent's ref listing: %d %s", status, body)
 	}
@@ -383,14 +385,15 @@ func TestTheProxyServesNoOneElse(t *testing.T) {
 		token, path string
 		status      int
 	}{
-		"no token":                       {"", "/info/refs?service=git-upload-pack", http.StatusUnauthorized},
-		"staff":                          {"tok-staff", "/info/refs?service=git-upload-pack", http.StatusForbidden},
-		"another platform experiment's":  {"tok-other-pe", "/info/refs?service=git-upload-pack", http.StatusNotFound},
-		"a run that is over":             {"tok-over", "/info/refs?service=git-upload-pack", http.StatusForbidden},
-		"the dumb protocol":              {"tok-researcher-2", "/info/refs", http.StatusForbidden},
-		"a file of the repository":       {"tok-researcher-2", "/HEAD", http.StatusNotFound},
-		"a job listing refs to push":     {"tok-job", "/info/refs?service=git-receive-pack", http.StatusForbidden},
-		"a planner listing refs to push": {"tok-planner", "/info/refs?service=git-receive-pack", http.StatusForbidden},
+		"no token":                          {"", "/info/refs?service=git-upload-pack", http.StatusUnauthorized},
+		"staff":                             {"tok-staff", "/info/refs?service=git-upload-pack", http.StatusForbidden},
+		"another platform experiment's":     {"tok-other-pe", "/info/refs?service=git-upload-pack", http.StatusNotFound},
+		"a run that is over":                {"tok-over", "/info/refs?service=git-upload-pack", http.StatusForbidden},
+		"the dumb protocol":                 {"tok-executor-2", "/info/refs", http.StatusForbidden},
+		"a file of the repository":          {"tok-executor-2", "/HEAD", http.StatusNotFound},
+		"a job listing refs to push":        {"tok-job", "/info/refs?service=git-receive-pack", http.StatusForbidden},
+		"a planner listing refs to push":    {"tok-planner", "/info/refs?service=git-receive-pack", http.StatusForbidden},
+		"a researcher listing refs to push": {"tok-researcher", "/info/refs?service=git-receive-pack", http.StatusForbidden},
 	} {
 		status, body, header := get(c.token, c.path)
 		if status != c.status {
@@ -401,7 +404,7 @@ func TestTheProxyServesNoOneElse(t *testing.T) {
 		}
 	}
 	w.store.closed = true
-	if status, body, _ := get("tok-researcher-2", "/info/refs?service=git-upload-pack"); status != http.StatusForbidden || !strings.Contains(body, "run closed") {
+	if status, body, _ := get("tok-executor-2", "/info/refs?service=git-upload-pack"); status != http.StatusForbidden || !strings.Contains(body, "run closed") {
 		t.Errorf("a closed platform experiment: %d %s, want 403 run closed", status, body)
 	}
 	w.noSecretLeaked()
@@ -409,10 +412,10 @@ func TestTheProxyServesNoOneElse(t *testing.T) {
 
 func TestAnAgentWhoseNameMakesAnotherAgentsBranchNamesPushesNothing(t *testing.T) {
 	w := newWorld(t)
-	w.store.signups["agent-r3"] = domain.AgentSignup{AgentID: "agent-r3", Name: "researcher-2", Role: domain.SignupRoleCompetitor}
-	dir := w.clone("tok-researcher-2", "researcher-2")
-	w.commitOn(dir, "hl/pe-1/researcher-2/x")
-	if out, err := w.git("tok-researcher-2", dir, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "make the same branch names") {
+	w.store.signups["agent-r3"] = domain.AgentSignup{AgentID: "agent-r3", Name: "executor-2", Role: domain.SignupRoleCompetitor}
+	dir := w.clone("tok-executor-2", "executor-2")
+	w.commitOn(dir, "hl/pe-1/executor-2/x")
+	if out, err := w.git("tok-executor-2", dir, "push", "origin", "hl/pe-1/executor-2/x"); err == nil || !strings.Contains(out, "make the same branch names") {
 		t.Errorf("pushing beside an agent of the same branch names: %v: %s, want it refused", err, out)
 	}
 }
@@ -425,7 +428,7 @@ func TestARepositoryOfAnotherOrgIsNotServed(t *testing.T) {
 	w.run("", "init", "--quiet", "--bare", "-b", "main", other)
 	for _, elsewhere := range []string{"org-2/model.git", "model.git"} {
 		w.store.elsewhere = elsewhere
-		if out, err := w.git("tok-researcher-2", w.root, "ls-remote", w.proxy); err == nil {
+		if out, err := w.git("tok-executor-2", w.root, "ls-remote", w.proxy); err == nil {
 			t.Errorf("%s was served through the proxy: %s", elsewhere, out)
 		}
 	}

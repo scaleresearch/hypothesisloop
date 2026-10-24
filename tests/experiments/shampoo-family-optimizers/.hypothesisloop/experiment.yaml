@@ -146,7 +146,7 @@ metrics:
 budget_accelerator_hours: 100
 max_agents: 4
 duration_hours: 24
-researchers:
+agents:
   - agent_type: generalist
     count: 4
 coordinator_in_agentsandbox: true

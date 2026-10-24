@@ -25,6 +25,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
@@ -261,7 +262,8 @@ func newWorldAPI(t *testing.T) *worldAPI {
 		Accounts:            accounts.NewService(nil, nil, nil, 0, worldSecret, accounts.RuntimeAddresses{}, nil, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
 		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), logger).WithLoop(noopLoop{}),
 		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
-		AgentTypes:          accounts.NewAgentTypes(tripAgentTypes{}, doc.Access, logger),
+		AgentTypes:          accounts.NewAgentTypes(tripAgentTypes{}, models.New(nil, nil, domain.ModelDefaults{}), doc.Access, logger),
+		Models:              models.New(nil, nil, domain.ModelDefaults{}),
 		Repositories:        accounts.NewRepositories(tripInstallations{}, nil, doc.Access, logger),
 		Instructions:        platformexperiments.NewComposer(nil, domain.ModelDefaults{}, logger),
 	})

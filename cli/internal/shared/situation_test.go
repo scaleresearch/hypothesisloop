@@ -18,7 +18,7 @@ const situationRecord = `{
   "capacity": {"clusters": [{"cluster": "gpu-east", "resource": "H100", "free": 4, "total": 8}],
                "fits_now": 4, "jobs_in_flight_run": {"queued": 0, "running": 4}},
   "budget": {"run_budget_acch": 100, "run_used_acch": 40.25},
-  "agents": [{"agent_id": "ag-1", "name": "Researcher 1", "role": "researcher", "jobs": {"queued": 0, "running": 2},
+  "agents": [{"agent_id": "ag-1", "name": "Executor 1", "role": "competitor", "jobs": {"queued": 0, "running": 2},
               "subagents": 3, "turn": {"state": "working", "since": "2026-10-09T13:55:00Z"},
               "activity": {"text": "reading job-7 logs", "at": "2026-10-09T13:59:00Z"},
               "minutes_without_job_in_flight": 0, "budget": {"share": 20, "used": 8, "room_guaranteed": 10, "room_burst": 12},
@@ -45,7 +45,7 @@ func TestSituationPrintsOneLinePerBlock(t *testing.T) {
 		"capacity: fits_now=4 jobs_in_flight_run.queued=0 jobs_in_flight_run.running=4",
 		"capacity.clusters: cluster=gpu-east resource=H100 free=4 total=8",
 		"budget: run_budget_acch=100 run_used_acch=40.25",
-		`agents: agent_id=ag-1 name="Researcher 1" role=researcher jobs.queued=0 jobs.running=2 subagents=3 turn.state=working turn.since=2026-10-09T13:55:00Z activity.text="reading job-7 logs" activity.at=2026-10-09T13:59:00Z minutes_without_job_in_flight=0 budget.share=20 budget.used=8 budget.room_guaranteed=10 budget.room_burst=12 messages.left_this_hour=5 model.window=5h model.utilization=0.41`,
+		`agents: agent_id=ag-1 name="Executor 1" role=competitor jobs.queued=0 jobs.running=2 subagents=3 turn.state=working turn.since=2026-10-09T13:55:00Z activity.text="reading job-7 logs" activity.at=2026-10-09T13:59:00Z minutes_without_job_in_flight=0 budget.share=20 budget.used=8 budget.room_guaranteed=10 budget.room_burst=12 messages.left_this_hour=5 model.window=5h model.utilization=0.41`,
 		"coordinator: summary_written_at=2026-10-09T12:00:00Z model.window=5h model.utilization=0.2",
 	}, "\n") + "\n"
 	if stdout != want {

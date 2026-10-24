@@ -207,9 +207,9 @@ func baselineClock(due, now time.Time) string {
 		due.UTC().Format(time.RFC3339), max(0, int(due.Sub(now).Minutes())), int(domain.MaxBaselineHold.Minutes()))
 }
 
-// researcherLeft says a researcher of signups may still work: one that neither finished nor was
+// executorLeft says an executor of signups may still work: one that neither finished nor was
 // cut, and whose machine, where the platform runs it, did not stop with no restart left.
-func researcherLeft(signups []domain.AgentSignup) bool {
+func executorLeft(signups []domain.AgentSignup) bool {
 	return slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool {
 		stopped := signup.InAgentSandbox && signup.Instance != nil && signup.Instance.Stopped
 		return signup.Role == domain.SignupRoleCompetitor && signup.Ended == "" && !stopped
@@ -217,16 +217,16 @@ func researcherLeft(signups []domain.AgentSignup) bool {
 }
 
 // runningReason is where a running pe, whose roster is signups, stands with its clock and with
-// the researchers that work in it.
+// the executors that work in it.
 func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) *domain.StatusReason {
 	switch {
 	case pe.AwaitsAgents():
-		return &domain.StatusReason{Reason: "agents_starting", Message: "the run started at starts_at, " + pe.StartsAt.UTC().Format(time.RFC3339) + ", and its researchers' machines are starting: the first one running sets started_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then, and at " + endsClock(pe, now) + ", in any case"}
-	case !researcherLeft(signups):
-		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job. Where it runs them the platform adds a researcher of its researchers in the place of one that finished or lost its machine while the run has time for a trial and its budget a share for one, and none is added now; its coordinator may add one up to max_agents with `hl platform-experiments agents add --in-agentsandbox --platform-experiment %s`. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
+		return &domain.StatusReason{Reason: "agents_starting", Message: "the run started at starts_at, " + pe.StartsAt.UTC().Format(time.RFC3339) + ", and its executors' machines are starting: the first one running sets started_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then, and at " + endsClock(pe, now) + ", in any case"}
+	case !executorLeft(signups):
+		return &domain.StatusReason{Reason: "executors_done", Message: fmt.Sprintf("every executor of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job. Where it runs them the platform adds an executor of its agents in the place of one that finished or lost its machine while the run has time for a trial and its budget a share for one, and none is added now; its coordinator may add one up to max_agents with `hl platform-experiments agents add --in-agentsandbox --platform-experiment %s`. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
 			pe.ID, pe.ID, endsClock(pe, now), pe.ID, pe.ID)}
 	}
-	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at " + endsClock(pe, now)}
+	return &domain.StatusReason{Reason: "running", Message: "its executors are at work and the platform closes it at " + endsClock(pe, now)}
 }
 
 // closedReason is why the closed pe closed: its close_reason and what that means. Of one closed
@@ -246,7 +246,7 @@ func (s *Service) closedReason(ctx context.Context, pe *domain.PlatformExperimen
 		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
 		domain.CloseProposalExpired:      "no person accepted its planner's answer or changed its goal by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log)",
-		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. Each agent's instance says why its machine did not come up",
+		domain.CloseAgentsNotStarted:     "it started and no executor's machine was running by agents_due_at, so the platform closed it. Each agent's instance says why its machine did not come up",
 		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started. The git host answered: " + pe.RepositoryError,
 	}
 	if pe.CloseReason == domain.CloseBaselineLimitReached {
@@ -271,7 +271,7 @@ func baselineLimitReached(pe *domain.PlatformExperiment, submitted int) string {
 	const closed = "it was not running by baseline_due_at and the platform closed it: "
 	switch {
 	case pe.BaselineJobID != "":
-		return closed + "its baseline, job " + pe.BaselineJobID + ", was declared and the start still waited for a researcher, or for budget left to share among them"
+		return closed + "its baseline, job " + pe.BaselineJobID + ", was declared and the start still waited for an executor, or for budget left to share among them"
 	case submitted == 0:
 		return closed + "no job was ever submitted to measure its baseline"
 	}
@@ -293,7 +293,7 @@ func (s *Service) jobsSubmitted(ctx context.Context, id string) (int, error) {
 
 // Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
 // planner, on an open one why it is not running yet and what reader does about it, on a running
-// one whether its clock runs and whether a researcher is left to work, and on a closed one why it closed. It is the one place that says so.
+// one whether its clock runs and whether an executor is left to work, and on a closed one why it closed. It is the one place that says so.
 func (s *Service) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
 	if err := s.budgetKinds(ctx, []*domain.PlatformExperiment{pe}); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)

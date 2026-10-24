@@ -29,12 +29,12 @@ func (s *sameHypothesisStore) ListExperiments(_ context.Context, filter domain.E
 
 func (s *sameHypothesisStore) DescribeJobs(_ context.Context, jobs []*domain.Experiment) error {
 	for _, job := range jobs {
-		job.AgentName = strings.Replace(job.AgentID, "ag-", "Researcher ", 1)
+		job.AgentName = strings.Replace(job.AgentID, "ag-", "Executor ", 1)
 	}
 	return nil
 }
 
-// In a live run two researchers ran the same hypothesis and nobody noticed. A submit names the
+// In a live run two executors ran the same hypothesis and nobody noticed. A submit names the
 // other agents' jobs on its hypothesis, in flight or just completed, and none of its own agent's,
 // of other hypotheses or completed long ago.
 func TestASubmitNamesOtherAgentsJobsOnTheSameHypothesis(t *testing.T) {
@@ -55,7 +55,7 @@ func TestASubmitNamesOtherAgentsJobsOnTheSameHypothesis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "hypothesis hyp-1 is tested by another agent too: job-running of Researcher 2 (RUNNING), job-done of Researcher 2 (COMPLETED). " +
+	want := "hypothesis hyp-1 is tested by another agent too: job-running of Executor 2 (RUNNING), job-done of Executor 2 (COMPLETED). " +
 		"If this job repeats that work, cancel it (hl job cancel job-new)"
 	if !strings.HasPrefix(said, want) {
 		t.Fatalf("said %q, want it to start %q", said, want)

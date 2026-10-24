@@ -28,7 +28,7 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 // Update changes the fields the patch carries and no others, and the experiment as patched has
 // to pass validate. The fields its status takes are fieldsIn's. A new duration_hours of a running
 // one moves the end of the run, counted from its start as before. A max_agents of a running one
-// changes only the places not taken, and is held to the unspent hours of its researchers
+// changes only the places not taken, and is held to the unspent hours of its executors
 // (seatsHoldTrials).
 //
 // While it runs, baseline_job_id with baseline_reason raises the baseline (raisedBaseline).
@@ -67,16 +67,16 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	if patch.BudgetAcceleratorHours != nil {
 		patched.BudgetAcceleratorHours = *patch.BudgetAcceleratorHours
 	}
-	if patch.Researchers != nil {
-		patched.Researchers = *patch.Researchers
+	if patch.Agents != nil {
+		patched.Agents = *patch.Agents
 	}
-	// Held to the researchers at work in the write that stores it, the count a join is held to: a
+	// Held to the executors at work in the write that stores it, the count a join is held to: a
 	// running one loses the newest above it, and an open one refuses it (db.PoolBelowAtWorkError).
-	// Researchers the patch does not state are capped to it there.
+	// Agents the patch does not state are capped to it there.
 	if patch.MaxAgents != nil {
 		patched.MaxAgents = *patch.MaxAgents
-		if patch.Researchers == nil {
-			patched.Researchers = patched.Researchers.Capped(patched.MaxAgents)
+		if patch.Agents == nil {
+			patched.Agents = patched.Agents.Capped(patched.MaxAgents)
 		}
 		if pe.Status == domain.PlatformExpRunning && patched.MaxAgents > pe.MaxAgents {
 			if err := s.seatsHoldTrials(ctx, &patched); err != nil {
@@ -131,7 +131,7 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	}
 	checked, err := s.validate(CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
 		Name: patched.Name, Description: authored,
-		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Researchers: patched.Researchers,
+		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Agents: patched.Agents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: patched.DefaultQuotaTier,
@@ -168,16 +168,16 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 		return s.stored(ctx, pe.ID)
 	}
 	pe = &patched
-	var researchers domain.ResearcherPool
-	if patch.Researchers != nil {
-		researchers = patched.Researchers
+	var agents domain.AgentPool
+	if patch.Agents != nil {
+		agents = patched.Agents
 	}
 	var below *db.PoolBelowAtWorkError
-	switch err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus, researchers); {
+	switch err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus, agents); {
 	case errors.As(err, &below) && below.Key == (domain.PoolKey{}):
-		return nil, refuseUpdate(409, "max_agents_below_researchers", "max_agents %d is below the %d researchers (agents of role competitor) of platform experiment %s, which has not started: state at least %d, or remove researchers first. Once it runs, a lower max_agents cuts the newest of them", below.Count, below.AtWork, pe.ID, below.AtWork)
+		return nil, refuseUpdate(409, "max_agents_below_executors", "max_agents %d is below the %d executors (agents of role competitor) of platform experiment %s, which has not started: state at least %d, or remove executors first. Once it runs, a lower max_agents cuts the newest of them", below.Count, below.AtWork, pe.ID, below.AtWork)
 	case errors.As(err, &below):
-		return nil, refuseUpdate(409, "researchers_below_at_work", "%s: a change of researchers takes out no researcher at work, so state at least that many", below)
+		return nil, refuseUpdate(409, "agents_below_at_work", "%s: a change of agents takes out no agent at work, so state at least that many", below)
 	case err != nil:
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
@@ -229,15 +229,15 @@ func (s *Service) setGoal(ctx context.Context, id, goal string) (*domain.Platfor
 	return s.stored(ctx, id)
 }
 
-// seatsHoldTrials refuses a max_agents raised on the running pe when what its researchers left
-// unspent, split evenly over max_agents researchers, would not hold one trial of the baseline
-// each: the share a researcher that joins is given (domain.LateShare) would not run one.
+// seatsHoldTrials refuses a max_agents raised on the running pe when what its executors left
+// unspent, split evenly over max_agents executors, would not hold one trial of the baseline
+// each: the share an executor that joins is given (domain.LateShare) would not run one.
 func (s *Service) seatsHoldTrials(ctx context.Context, pe *domain.PlatformExperiment) error {
 	held, err := s.runningTrialHeld(ctx, pe)
 	if err != nil || held == 0 {
 		return err
 	}
-	quotas, err := s.researcherQuotas(ctx, pe)
+	quotas, err := s.executorQuotas(ctx, pe)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Update: %w", err)
 	}
@@ -246,7 +246,7 @@ func (s *Service) seatsHoldTrials(ctx context.Context, pe *domain.PlatformExperi
 		unspent += quota.Unspent()
 	}
 	if each := unspent / float64(pe.MaxAgents); each < held {
-		return refuseUpdate(422, "budget_below_baseline", "a trial holds %.3f accelerator-hours of its researcher's share (%g h, the estimate measured on the baseline job), and the researchers left %.3f unspent, %.3f for each of %d: state a max_agents that leaves each at least one trial", held, pe.JobEstimatedDurationHours, unspent, each, pe.MaxAgents)
+		return refuseUpdate(422, "budget_below_baseline", "a trial holds %.3f accelerator-hours of its executor's share (%g h, the estimate measured on the baseline job), and the executors left %.3f unspent, %.3f for each of %d: state a max_agents that leaves each at least one trial", held, pe.JobEstimatedDurationHours, unspent, each, pe.MaxAgents)
 	}
 	return nil
 }
@@ -292,16 +292,16 @@ func (s *Service) Patch(ctx context.Context, id string, patch PlatformExperiment
 	}
 	by := caller.Actor()
 	patch.by = &by
-	if patch.Researchers != nil {
+	if patch.Agents != nil {
 		catalog, err := s.store.AgentTypeCatalog(ctx, id)
 		if err != nil {
 			return nil, s.refusal("update platform experiment", err)
 		}
-		resolved, err := s.resolvedPool(catalog, *patch.Researchers)
+		resolved, err := s.resolvedPool(ctx, catalog, *patch.Agents)
 		if err != nil {
 			return nil, err
 		}
-		patch.Researchers = &resolved
+		patch.Agents = &resolved
 	}
 	pe, err := s.Update(ctx, id, patch)
 	if err != nil {

@@ -17,12 +17,17 @@ import (
 // it right now, or its market was not read because no job waits for it. noOffer then says why,
 // for whoever waits for the slot. architecture is that of the instance's machine, and for a slot
 // no instance holds the one it is dealt (slotsAgainst).
+//
+// network is, for a free slot of a shape some waiting job that spans several nodes wants, how
+// many instances of the shape one private network can hold now, and why none when it can hold
+// none. It is nil for every other slot.
 type slot struct {
 	shape        Shape
 	name         string
 	taken        bool
 	noOffer      string
 	architecture string
+	network      *onOffer
 }
 
 func (s slot) offerless() bool { return s.noOffer != "" }
@@ -38,7 +43,7 @@ func (e *Executor) slots(ctx context.Context) ([]slot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.slotsAgainst(v, e.rentable(ctx, v)), nil
+	return e.slotsAgainst(v, e.rentable(ctx, v), e.networked(ctx, v)), nil
 }
 
 // onOffer is how many more instances of a shape the vendor has a machine of one architecture for,
@@ -66,9 +71,8 @@ func (e *Executor) rentable(ctx context.Context, v *view) *market {
 	if e.market == nil || v.market != nil {
 		return v.market
 	}
-	m := &market{offers: map[string]onOffer{}}
-	wanted, err := e.wanted(ctx)
-	m.wanted = wanted
+	d := e.demanded(ctx, v)
+	m := &market{offers: map[string]onOffer{}, wanted: d.wanted}
 	taken := takenSlots(v)
 	for _, shape := range e.shapes {
 		open := 0
@@ -80,12 +84,12 @@ func (e *Executor) rentable(ctx context.Context, v *view) *market {
 		for _, arch := range e.architectures {
 			key := marketKey(shape.Name, arch)
 			switch {
-			case err != nil:
-				m.offers[key] = onOffer{why: "shape " + key + ": the jobs waiting for the cluster could not be read: " + err.Error()}
-			case wanted[key] == 0 || open == 0:
+			case d.err != nil:
+				m.offers[key] = onOffer{why: "shape " + key + ": the jobs waiting for the cluster could not be read: " + d.err.Error()}
+			case d.wanted[key] == 0 || open == 0:
 				m.offers[key] = onOffer{why: "shape " + key + ": no job waits for it, and its market is read once one does"}
 			default:
-				m.offers[key] = e.onOffer(ctx, shape, arch, min(open, wanted[key]+demandMargin))
+				m.offers[key] = e.onOffer(ctx, shape, arch, min(open, d.wanted[key]+demandMargin))
 			}
 		}
 	}
@@ -96,11 +100,7 @@ func (e *Executor) rentable(ctx context.Context, v *view) *market {
 // onOffer asks the market of one shape on one architecture for up to atMost machines.
 func (e *Executor) onOffer(ctx context.Context, shape Shape, arch string, atMost int) onOffer {
 	key := marketKey(shape.Name, arch)
-	supply, err := e.market.Rentable(ctx, provider.Spec{
-		Architecture:    arch,
-		AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
-		CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
-	}, atMost)
+	supply, err := e.market.Rentable(ctx, shape.spec(arch), atMost)
 	if err != nil {
 		return onOffer{why: "shape " + key + ": the provider's market could not be read: " + err.Error()}
 	}
@@ -108,6 +108,44 @@ func (e *Executor) onOffer(ctx context.Context, shape Shape, arch string, atMost
 		return onOffer{why: "shape " + key + ": " + supply.Why}
 	}
 	return onOffer{left: supply.Count, why: "shape " + key + ": the shape's lower slots take the machines its market was last read to have"}
+}
+
+// spec is an instance of the shape on arch, as a market or a network is asked about it.
+func (s Shape) spec(arch string) provider.Spec {
+	return provider.Spec{
+		Architecture:    arch,
+		AcceleratorType: s.AcceleratorType, AcceleratorCount: s.Accelerators,
+		CPUMillis: s.CPUMillis, MemoryBytes: s.MemoryBytes, DiskBytes: s.StorageBytes,
+	}
+}
+
+// networked reads, once per view, how many instances one private network can hold of each shape
+// on each architecture some waiting job that spans several nodes wants, asking for as many as the
+// largest such job needs, by marketKey. It is nil for a provider with no network.
+func (e *Executor) networked(ctx context.Context, v *view) map[string]onOffer {
+	if e.network == nil || v.networks != nil {
+		return v.networks
+	}
+	v.networks = map[string]onOffer{}
+	for _, shape := range e.shapes {
+		for _, arch := range e.architectures {
+			key := marketKey(shape.Name, arch)
+			g, wanted := e.demanded(ctx, v).gangs[key]
+			if !wanted {
+				continue
+			}
+			supply, err := e.network.Networked(ctx, shape.spec(arch), g.nodes, g.spread)
+			switch {
+			case err != nil:
+				v.networks[key] = onOffer{why: "shape " + key + ": the provider's private networks could not be read: " + err.Error()}
+			case supply.Count == 0:
+				v.networks[key] = onOffer{why: "shape " + key + ": " + supply.Why}
+			default:
+				v.networks[key] = onOffer{left: supply.Count}
+			}
+		}
+	}
+	return v.networks
 }
 
 // takenSlots is the architecture of the machine in each slot an instance holds.
@@ -123,8 +161,9 @@ func takenSlots(v *view) map[string]string {
 // lowest index first, to every architecture the provider rents, whatever the market has: the
 // architectures a cluster names do not wait on a read. Those some job waits for on the shape come
 // first, so a shape with a single open slot names the one wanted. m bounds how many slots of
-// each architecture are free, and nil bounds none.
-func (e *Executor) slotsAgainst(v *view, m *market) []slot {
+// each architecture are free, and nil bounds none. networks are what each free slot of a shape
+// on an architecture is told of the provider's private networks.
+func (e *Executor) slotsAgainst(v *view, m *market, networks map[string]onOffer) []slot {
 	taken := takenSlots(v)
 	var slots []slot
 	for _, shape := range e.shapes {
@@ -152,6 +191,9 @@ func (e *Executor) slotsAgainst(v *view, m *market) []slot {
 				} else {
 					s.noOffer = m.offers[marketKey(shape.Name, s.architecture)].why
 				}
+			}
+			if network, wanted := networks[marketKey(shape.Name, s.architecture)]; wanted && s.free() {
+				s.network = &network
 			}
 			slots = append(slots, s)
 		}
@@ -191,8 +233,8 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 // sizes one job to it and says which slot it placed the job on, its architecture where it has one
 // (a vendor may not say that of a machine it rented), what a job's image needs there, for a slot with
 // accelerators how many it has and the label its type stands for, as a device plugin would
-// publish it, and for an offerless slot that it is one, so a job waiting for it is told what it
-// waits for.
+// publish it, for an offerless slot that it is one, so a job waiting for it is told what it
+// waits for, and what it is told of the provider's private networks.
 func (s slot) labels(imageNeeds []string) map[string]string {
 	labels := map[string]string{clusterapi.NodeSlotLabel: s.name}
 	if s.architecture != "" {
@@ -203,6 +245,12 @@ func (s slot) labels(imageNeeds []string) map[string]string {
 	}
 	if s.offerless() {
 		labels[clusterapi.NodeSlotNoOfferLabel] = s.noOffer
+	}
+	if s.network != nil {
+		labels[clusterapi.NodeSlotNetworkLabel] = strconv.Itoa(s.network.left)
+		if s.network.left == 0 {
+			labels[clusterapi.NodeSlotNoNetworkLabel] = s.network.why
+		}
 	}
 	if key, value, ok := strings.Cut(s.shape.AcceleratorType, "="); ok {
 		labels[key] = value
@@ -289,7 +337,7 @@ func (e *Executor) GetLiveNodeResourceCapacity(ctx context.Context) (map[string]
 // GetNodeTotalCapacity is configuration alone. Nothing but our own instances is ever in a slot.
 func (e *Executor) GetNodeTotalCapacity(context.Context) (map[string]map[string]int64, error) {
 	byNode := map[string]map[string]int64{}
-	for _, s := range e.slotsAgainst(&view{}, nil) {
+	for _, s := range e.slotsAgainst(&view{}, nil, nil) {
 		byNode[s.name] = nodeResources(s.shape)
 	}
 	return byNode, nil
@@ -313,6 +361,7 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	nodeLabels = make(map[string]map[string]string, len(slots))
 	for _, s := range slots {
 		nodeLabels[s.name] = s.labels(e.imageNeeds)
+		nodeLabels[s.name][clusterapi.NodeSlotStartupLabel] = strconv.Itoa(int(e.startup.Seconds()))
 		unit, units := s.shape.units()
 		free := units
 		if !s.free() {

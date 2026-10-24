@@ -57,7 +57,7 @@ func main() {
 	seedBuiltins(store, pcfg.Quota.NewOrgComputeLimit(), logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = metrics.EnsureSchema(metricsCtx)
+	err = metrics.EnsureSchema(metricsCtx, pcfg.Models.Anthropic.Catalog)
 	metricsCancel()
 	if err != nil {
 		logger.Fatal("control-service: metrics store schema", zap.Error(err))
@@ -91,7 +91,6 @@ func main() {
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 		DefaultModelBudgetUSD:            pcfg.Quota.DefaultModelBudgetUSD,
 		MaxModelBudgetUSD:                pcfg.Quota.MaxModelBudgetUSD,
-		ModelCatalog:                     pcfg.Models.Catalog,
 	}
 
 	// One root context for every background loop, cancelled before the HTTP server drains.

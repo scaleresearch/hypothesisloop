@@ -64,14 +64,14 @@ func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 		t.Errorf("a baseline job nothing fits is answered %d, want 402", got)
 	}
 
-	// A researcher's job has the measured estimate or states one: the largest that fits would hold
+	// An executor's job has the measured estimate or states one: the largest that fits would hold
 	// its whole share for one trial.
 	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 	exp.EstimatedDurationHours = 0
 	var refused *AdmissionError
 	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonRequired {
-		t.Errorf("a researcher's job with no estimate and none measured: got = %v, want %s", err, ReasonRequired)
+		t.Errorf("an executor's job with no estimate and none measured: got = %v, want %s", err, ReasonRequired)
 	}
 }
 

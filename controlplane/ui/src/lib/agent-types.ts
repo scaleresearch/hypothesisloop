@@ -1,33 +1,40 @@
 import useSWR from 'swr'
-import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { fetchAgentRoles, fetchAgentTypes } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
 import { keys } from '@/lib/keys'
-import type { AgentRole, ListedAgentType } from '@/types/api'
+import type { AgentRole, AgentRoleInfo, ListedAgentType } from '@/types/api'
 
-/** The built-in researcher type an agent runs as when it names none. */
+/** The built-in executor type an agent runs as when it names none, the one the platform defaults to. */
 export const DEFAULT_AGENT_TYPE = 'generalist'
 
-export const ROLES: { role: AgentRole; label: string; plural: string; builtin: string; description: string }[] = [
-  { role: 'researcher', label: 'Researcher', plural: 'Researchers', builtin: DEFAULT_AGENT_TYPE, description: 'Competes in the run: registers hypotheses and tests them with jobs.' },
-  { role: 'baseline', label: 'Baseline', plural: 'Baseline', builtin: 'baseline', description: 'Builds the harness and measures the control before the run starts.' },
-  { role: 'planner', label: 'Planner', plural: 'Planners', builtin: 'planner', description: 'Turns a one-line goal into a draft experiment.' },
-  { role: 'coordinator', label: 'Coordinator', plural: 'Coordinators', builtin: 'coordinator', description: 'Supervises a run and writes its summary.' },
-]
+/** The built-in type a team entry names to be of researchers. */
+export const RESEARCHER_AGENT_TYPE = 'researcher'
 
-/** The sentence every save and restore of a type says of the agents running it. */
-export const APPLIES_LIVE = 'Changes apply in real time to running agents.'
+/** Every role an agent plays, in the platform's order, with its name, what it does and its built-in type. */
+export function useAgentRoles() {
+  return useSWR(keys.agentRoles(), fetchAgentRoles)
+}
 
-export function roleOf(role: AgentRole) {
-  const found = ROLES.find(r => r.role === role)
+/** The name role is shown by, empty until the roles are read. */
+export function useRoleName(role: AgentRole): string {
+  return useAgentRoles().data?.find(r => r.role === role)?.name ?? ''
+}
+
+/** The role of roles named role. The API lists every role an agent type has. */
+export function roleOf(roles: AgentRoleInfo[], role: AgentRole): AgentRoleInfo {
+  const found = roles.find(r => r.role === role)
   if (!found) throw new Error(`unknown agent role ${role}`)
   return found
 }
+
+/** The sentence every save and restore of a type says of the agents running it. */
+export const APPLIES_LIVE = 'Changes apply in real time to running agents.'
 
 /** One line on what agents of the type do: the one the type states, a built-in's always. */
 export function describeType(t: ListedAgentType): string {
   if (t.builtin || t.description) return t.description
   const by = t.created_by?.name ? `, made by ${t.created_by.name}` : ''
-  return `Your org's own ${roleOf(t.role).label.toLowerCase()} type${by}.`
+  return `Your org's own ${t.role} type${by}.`
 }
 
 /** The name an agent type id reads as, or the id itself when the catalog does not hold it. */
@@ -40,10 +47,16 @@ export function useAgentTypes(orgID: string | undefined) {
   return useSWR(orgID ? keys.agentTypes(orgID) : null, () => fetchAgentTypes(orgID!))
 }
 
-/** The types a new researcher may be started as, built-in first. */
-export function researcherTypes(catalog: ListedAgentType[] | undefined): ListedAgentType[] {
-  return (catalog ?? []).filter(t => t.role === 'researcher' && !t.archived_at)
-    .sort((a, b) => Number(b.builtin) - Number(a.builtin))
+/** The types an entry of a team may name: those of a role the API says is in a team, not archived, by role in the platform's order and built-in first. */
+export function teamTypes(catalog: ListedAgentType[] | undefined, roles: AgentRoleInfo[] | undefined): ListedAgentType[] {
+  const order = (roles ?? []).filter(r => r.in_team).map(r => r.role)
+  return (catalog ?? []).filter(t => order.includes(t.role) && !t.archived_at)
+    .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role) || Number(b.builtin) - Number(a.builtin))
+}
+
+/** The label a type is offered by: a built-in by its name, an org's own with its version. */
+export function typeLabel(t: ListedAgentType): string {
+  return t.builtin ? t.name : `${t.name} (v${t.current_version})`
 }
 
 /** What each placeholder stands for, by its name. Which ones a prompt may hold the API lists on each type. */

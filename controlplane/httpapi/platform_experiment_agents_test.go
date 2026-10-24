@@ -42,7 +42,7 @@ type rosterStore struct {
 	completed []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
-	// lateShare is what the researchers that ended left unspent, for one joining the run.
+	// lateShare is what the executors that ended left unspent, for one joining the run.
 	lateShare float64
 	// submitted is how many jobs each agent submitted.
 	submitted map[string]int
@@ -261,7 +261,7 @@ func (f *rosterStore) ListSignupsByRole(_ context.Context, _ string, role domain
 	return ids, nil
 }
 
-// JoinRunning joins as an open experiment would, while the researchers that ended left
+// JoinRunning joins as an open experiment would, while the executors that ended left
 // lateShare unspent.
 func (f *rosterStore) JoinRunning(ctx context.Context, id string, agent *domain.Agent, signup domain.AgentSignup, _ db.LateJoin) error {
 	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleCompetitor {
@@ -314,7 +314,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute)
+	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute).WithServedModels(testModels)
 	registerExperimentAgents(doc, svc, store, agentsTestLaunch(), zap.NewNop())
 	return r
 }
@@ -364,7 +364,7 @@ var (
 func TestSandboxedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	agents := addEach(t, r, 3, `{"in_agentsandbox":true,"agent_type":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
+	agents := addEach(t, r, 3, `{"in_agentsandbox":true,"agent_type":"hyperparameter-search","model":"anthropic/model-2","hyperparameters":{"batch_size":64}}`)
 	if len(agents) != 3 || len(store.signups) != 3 {
 		t.Fatalf("agents = %d, signups = %d, want 3 and 3", len(agents), len(store.signups))
 	}
@@ -379,7 +379,7 @@ func TestSandboxedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *te
 			t.Errorf("a sandboxed agent was handed its token: %v", a)
 		}
 		want := map[string]any{
-			"in_agentsandbox": true, "agent_type": "hyperparameter-search", "model": "claude-sonnet-5",
+			"in_agentsandbox": true, "agent_type": "hyperparameter-search", "model": "anthropic/model-2",
 			"role": "competitor", "hyperparameters": map[string]any{"batch_size": float64(64)}, "platform_experiment_id": "pe-1",
 		}
 		for key, value := range want {
@@ -392,7 +392,7 @@ func TestSandboxedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *te
 		}
 	}
 	names := []string{agents[0]["name"].(string), agents[1]["name"].(string), agents[2]["name"].(string)}
-	if !reflect.DeepEqual(names, []string{"Researcher 1", "Researcher 2", "Researcher 3"}) {
+	if !reflect.DeepEqual(names, []string{"Executor 1", "Executor 2", "Executor 3"}) {
 		t.Errorf("names = %v", names)
 	}
 }
@@ -417,7 +417,7 @@ func TestASelfRunAgentIsHandedTheTokenThatActsAsItAndNoLauncher(t *testing.T) {
 		t.Errorf("token = %v, want the agent:pe-1/%s token", agents[0]["token"], id)
 	}
 	// Named by its place, which is what a person reads in every list in place of the id.
-	if agents[0]["in_agentsandbox"] != false || agents[0]["launcher"] != nil || agents[0]["name"] != "Researcher 1" {
+	if agents[0]["in_agentsandbox"] != false || agents[0]["launcher"] != nil || agents[0]["name"] != "Executor 1" {
 		t.Errorf("agent = %v", agents[0])
 	}
 
@@ -482,7 +482,8 @@ func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNo
 
 func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 	refusedValue := map[string]string{"unknown role": "judge", "unknown tier": "gold", "agent type not an id": "../x",
-		"unknown agent type": "prompt-search", "unknown agent type, sandboxed": "prompt-search", "model with a space": "a b"}
+		"unknown agent type": "prompt-search", "unknown agent type, sandboxed": "prompt-search", "model with a space": "a b",
+		"a bare model": "model-2", "a model not listed": "claude-fable-5-1", "a provider not served": "kimi-k2"}
 	for name, tc := range map[string]struct {
 		status     domain.PlatformExperimentStatus
 		path, body string
@@ -504,6 +505,9 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"unknown agent type":            {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 422, "invalid_request"},
 		"unknown agent type, sandboxed": {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search","in_agentsandbox":true}`, 422, "invalid_request"},
 		"model with a space":            {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 422, "invalid_request"},
+		"a bare model":                  {domain.PlatformExpOpen, "pe-1", `{"model":"model-2"}`, 422, "invalid_request"},
+		"a model not listed":            {domain.PlatformExpOpen, "pe-1", `{"model":"anthropic/claude-fable-5-1"}`, 422, "model_not_served"},
+		"a provider not served":         {domain.PlatformExpOpen, "pe-1", `{"model":"openrouter/moonshotai/kimi-k2","in_agentsandbox":true}`, 422, "model_not_served"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(tc.status, 2)
@@ -613,9 +617,9 @@ func TestACoordinatorAddsNoAgentOnceItsExperimentClosed(t *testing.T) {
 	}
 }
 
-// A run whose researchers ended while time and quota are left goes on with new ones: its
-// coordinator adds a researcher, and nothing of another role, and an agent adds none.
-func TestACoordinatorReplacesAResearcherWhileTheRunGoesOn(t *testing.T) {
+// A run whose executors ended while time and quota are left goes on with new ones: its
+// coordinator adds an executor, and nothing of another role, and an agent adds none.
+func TestACoordinatorReplacesAnExecutorWhileTheRunGoesOn(t *testing.T) {
 	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
 	store := newRosterStore(domain.PlatformExpRunning, 1)
 	store.lateShare = 1
@@ -626,7 +630,7 @@ func TestACoordinatorReplacesAResearcherWhileTheRunGoesOn(t *testing.T) {
 		t.Fatalf("a reviewer: got = %d %v, want = 409 signup_closed", code, out)
 	}
 	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true}`); code != http.StatusCreated {
-		t.Fatalf("a researcher: got = %d %v, want = 201", code, out)
+		t.Fatalf("an executor: got = %d %v, want = 201", code, out)
 	}
 	if len(store.signups) != 2 {
 		t.Fatalf("signups = %d, want the one that ended and its replacement", len(store.signups))
@@ -669,7 +673,7 @@ func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	}
 }
 
-// A coordinator once removed the researcher its owner had added, to make the roster match what
+// A coordinator once removed the executor its owner had added, to make the roster match what
 // it thought max_agents meant.
 func TestACoordinatorRemovesOnlyTheAgentsItAddedItself(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
@@ -789,8 +793,8 @@ func TestAnAgentNamingNoModelIsStoredRunningItsTypes(t *testing.T) {
 	if s := store.signups[0]; s.AgentType != "generalist" || s.Model != "" || s.Hyperparameters != nil {
 		t.Errorf("stored signup: agent type %q, model %q", s.AgentType, s.Model)
 	}
-	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_type":"data-search","model":"another-model"}`)
-	if a := joined(t, body)[0]; code != http.StatusCreated || a["agent_type"] != "data-search" || a["model"] != "another-model" {
+	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_type":"data-search","model":"anthropic/model-2"}`)
+	if a := joined(t, body)[0]; code != http.StatusCreated || a["agent_type"] != "data-search" || a["model"] != "anthropic/model-2" {
 		t.Errorf("an agent that named both: %d %v", code, a)
 	}
 }
@@ -831,16 +835,20 @@ func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
 	call(t, r, "POST", "/platform-experiments/pe-1/agents", `{}`)
 	_, second := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{}`)
 	_, named := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`)
-	if got := joined(t, second)[0]["name"]; got != "Researcher 2" {
-		t.Errorf("the second agent is named %v, want Researcher 2", got)
+	if got := joined(t, second)[0]["name"]; got != "Executor 2" {
+		t.Errorf("the second agent is named %v, want Executor 2", got)
 	}
 	if got := joined(t, named)[0]["name"]; got != "ablation" {
 		t.Errorf("a stated name became %v", got)
 	}
-	// A baseline agent and a researcher were both "Researcher 2".
+	// A baseline agent and an executor were both "Researcher 2" once.
 	_, baseline := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"role":"baseline"}`)
 	if got := joined(t, baseline)[0]["name"]; got != "Baseline 1" {
 		t.Errorf("the baseline agent is named %v, want Baseline 1", got)
+	}
+	_, researcher := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"role":"researcher"}`)
+	if got := joined(t, researcher)[0]; got["name"] != "Researcher 1" || got["agent_type"] != domain.ResearcherAgentType || got["role"] != "researcher" {
+		t.Errorf("the researcher is %v, want Researcher 1 of the built-in researcher type", got)
 	}
 	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`); code != http.StatusConflict || out["reason"] != "name_taken" {
 		t.Errorf("a second agent named ablation: got = %d %v, want 409 name_taken", code, out)
@@ -898,7 +906,7 @@ func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
 	}
 }
 
-// A researcher was briefed to settle every hypothesis before it finishes, and nothing told one
+// An executor was briefed to settle every hypothesis before it finishes, and nothing told one
 // that had not. The finish answers the hypotheses the agent leaves open, its own and of this
 // platform experiment alone, and is taken whatever they are. A graph that does not answer leaves
 // the agent unfinished.
@@ -955,7 +963,7 @@ func TestAFinishAnswersTheHypothesesTheAgentLeavesOpen(t *testing.T) {
 	}
 }
 
-// A researcher of an open platform experiment has no machine asked for and its instance reads
+// An executor of an open platform experiment has no machine asked for and its instance reads
 // requested, which a coordinator reported as sandboxed instances that never launched. Each agent
 // that waits for the start says so in the roster, for the reason its platform experiment waits.
 func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
@@ -972,7 +980,7 @@ func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 		return reason, message
 	}
 	if reason, message := reasonOf(added[0]); reason != "baseline_measuring" || !strings.HasPrefix(message, "its machine is asked for when the platform starts the run, and none is before: ") {
-		t.Errorf("the researcher as it was added: status_reason %q %q, want baseline_measuring and that no machine is asked for yet", reason, message)
+		t.Errorf("the executor as it was added: status_reason %q %q, want baseline_measuring and that no machine is asked for yet", reason, message)
 	}
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/agents", "")
 	if code != http.StatusOK {

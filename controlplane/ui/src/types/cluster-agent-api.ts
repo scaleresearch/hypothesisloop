@@ -230,6 +230,7 @@ export interface components {
                 [key: string]: string;
             };
             shm_size?: string;
+            readonly slots?: string[];
             storage?: string;
             /** Format: int64 */
             termination_grace_period_seconds?: number;

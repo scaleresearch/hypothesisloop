@@ -232,7 +232,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	rate, err := domain.AccHPerHour(exp.AcceleratorType, exp.AcceleratorCount)
 	limited = limited && err == nil && domain.ExceedsLimit(rate, limit.Project)
 	var judged []string
-	lacking, overLimit := 0, 0
+	lacking, overLimit, fewHosts := 0, 0, 0
 	otherArchitectures := map[string]bool{}
 	for _, c := range runs {
 		total, reported := in.totals[c.Name]
@@ -255,6 +255,9 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 			return ""
 		default:
 			lacking++
+			if _, short := tooFewHosts(in.nodeTotals[c.Name], exp); short {
+				fewHosts++
+			}
 			judged = append(judged, c.Name+" has "+describeOffer(total, in.nodeTotals[c.Name], exp))
 		}
 	}
@@ -274,8 +277,15 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	if spansNodes {
 		asks += fmt.Sprintf(" over %d nodes", exp.Job.Nodes())
 	}
-	return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
-		domain.NotAdmittedExceedsClusterCapacity, asks, strings.Join(judged, "; "))
+	if placement.RequiresDistinctHosts(exp) {
+		asks += fmt.Sprintf(", each on a host of its own, so %d hosts", exp.Job.Nodes())
+	}
+	advice := "Ask for less"
+	if fewHosts > 0 {
+		advice = "Ask for fewer or smaller nodes, or set topology.spread_across_hosts: false so its nodes may share a host"
+	}
+	return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. %s (hl capacity lists what each cluster has)",
+		domain.NotAdmittedExceedsClusterCapacity, asks, strings.Join(judged, "; "), advice)
 }
 
 // couldHold narrows candidates to the clusters that hold exp when idle, so a job that fits nowhere

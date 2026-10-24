@@ -103,6 +103,37 @@ func allottedCPUs(cpu string) (string, error) {
 	return strconv.FormatInt(max((q.MilliValue()+999)/1000, 1), 10), nil
 }
 
+// Gang is where one node of a job that spans several stands among them: the node at index of
+// group, whose first rank is offset, meeting the others at masterAddr. The torch names stand
+// beside the platform's, one process per node, so LOCAL_RANK is always 0.
+//
+// A grouped node is told its group's offset and its index in the group, never RANK: a rank
+// computed for every group after the first from its index alone would be silently wrong, two
+// nodes claiming rank 0 in one process group, while an absent RANK fails at its first read.
+func Gang(spec clusterapi.JobSpec, group clusterapi.JobGroup, offset, index int, masterAddr string) []Var {
+	worldSize := strconv.Itoa(spec.Nodes())
+	masterPort := strconv.Itoa(jobenv.DistributedMasterPort)
+	vars := []Var{
+		{jobenv.WorldSize, worldSize},
+		{jobenv.MasterAddr, masterAddr},
+		{jobenv.MasterPort, masterPort},
+		{jobenv.TorchLocalRank, "0"},
+		{jobenv.TorchWorldSize, worldSize},
+		{jobenv.TorchMasterAddr, masterAddr},
+		{jobenv.TorchMasterPort, masterPort},
+	}
+	if len(spec.Groups) > 0 {
+		return append(vars,
+			Var{jobenv.Group, group.Name},
+			Var{jobenv.GroupRank, strconv.Itoa(index)},
+			Var{jobenv.GroupReplicas, strconv.Itoa(group.Replicas)},
+			Var{jobenv.RankOffset, strconv.Itoa(offset)},
+		)
+	}
+	rank := strconv.Itoa(offset + index)
+	return append(vars, Var{jobenv.Rank, rank}, Var{jobenv.TorchRank, rank})
+}
+
 // Job returns the job's own environment with the group's entries over it: the job-level map says
 // what is true of every node, the group's what is true of its role. The job's secret_env is part
 // of it; admission refused a name the job or a group also sets in the open.

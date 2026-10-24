@@ -180,7 +180,7 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 		"no api url":             {api + "\n", ""},
 		"api url with no host":   {api, "  public_api_url: /api"},
 		"api url not http":       {api, "  public_api_url: ftp://example.invalid"},
-		"api url under agents":   {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-5\n  api_url: http://host.example.invalid:8081"},
+		"api url under agents":   {"  default_model: anthropic/claude-sonnet-5", "  default_model: anthropic/claude-sonnet-5\n  api_url: http://host.example.invalid:8081"},
 		"api url under runtimes": {metrics, metrics + "\n  api_url: http://host.example.invalid:8081"},
 		"no metrics url":         {metrics, `  metrics_url: ""`},
 		"metrics url no host":    {metrics, "  metrics_url: /metrics"},
@@ -242,10 +242,10 @@ func TestLoadRejectsRuntimeImagesANodeCannotPull(t *testing.T) {
 func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
 		"no image":                 {"  image: registry.example.invalid/hypothesisloop-harness-base:abc1234", `  image: ""`},
-		"misspelled agents key":    {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-5\n  launchers: [main]"},
-		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
-		"no coordinator model":     {"  coordinator_model: claude-opus-5-5\n", ""},
-		"coordinator model unsafe": {"  coordinator_model: claude-opus-5-5", "  coordinator_model: $(id)"},
+		"misspelled agents key":    {"  default_model: anthropic/claude-sonnet-5", "  default_model: anthropic/claude-sonnet-5\n  launchers: [main]"},
+		"no default model":         {"  default_model: anthropic/claude-sonnet-5\n", ""},
+		"no coordinator model":     {"  coordinator_model: anthropic/claude-opus-5-5\n", ""},
+		"coordinator model unsafe": {"  coordinator_model: anthropic/claude-opus-5-5", "  coordinator_model: $(id)"},
 		"no boot limit":            {"  boot_limit_seconds: 300\n", ""},
 		"no progress limit":        {"  progress_limit_seconds: 300\n", ""},
 		"progress limit too short": {"  progress_limit_seconds: 300", "  progress_limit_seconds: 60"},
@@ -255,7 +255,7 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 		"zero sandboxed bound":     {"  max_agentsandboxes_per_platform_experiment: 25", "  max_agentsandboxes_per_platform_experiment: 0"},
 		"no idle notice":           {"  idle_notice_minutes: 10\n", ""},
 		"zero idle notice":         {"  idle_notice_minutes: 10", "  idle_notice_minutes: 0"},
-		"default model unsafe":     {"  default_model: claude-sonnet-5", "  default_model: $(id)"},
+		"default model unsafe":     {"  default_model: anthropic/claude-sonnet-5", "  default_model: $(id)"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {
@@ -497,7 +497,8 @@ func TestASettingsFileWithASecretIsRefused(t *testing.T) {
 		"signing_secret":    {"  ui_origin:", "  signing_secret: x\n  ui_origin:"},
 		"database url":      {"database:\n", "database:\n  url: postgres://x\n"},
 		"metrics_db_url":    {"  metric_controller_port: 8084", "  metric_controller_port: 8084\n  metrics_db_url: http://x"},
-		"oauth_token":       {"  provider: anthropic\n", "  provider: anthropic\n  anthropic:\n    oauth_token: x\n"},
+		"oauth_token":       {"  anthropic:\n", "  anthropic:\n    oauth_token: x\n"},
+		"api_key":           {"  anthropic:\n", "  openrouter:\n    api_key: x\n  anthropic:\n"},
 		"secret_access_key": {"    access_key_id: hypothesisloop\n", "    access_key_id: hypothesisloop\n    secret_access_key: x\n"},
 	} {
 		if !strings.Contains(text, edit[0]) {
@@ -651,9 +652,12 @@ func TestTheObjectStoreHoldsTheSectionOfTheProviderItNames(t *testing.T) {
 
 func TestLoadRejectsAModelPolicyThatCannotBeApplied(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no catalog":                          {"  catalog:\n", "  old_catalog:\n"},
-		"a default model outside the catalog": {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-4-6"},
-		"a coordinator model outside it":      {"  coordinator_model: claude-opus-5-5", "  coordinator_model: claude-fable-5-1"},
+		"no catalog":                          {"    catalog:\n", "    old_catalog:\n"},
+		"a default model outside the catalog": {"  default_model: anthropic/claude-sonnet-5", "  default_model: anthropic/claude-sonnet-4-6"},
+		"a coordinator model outside it":      {"  coordinator_model: anthropic/claude-opus-5-5", "  coordinator_model: anthropic/claude-fable-5-1"},
+		"a bare default model":                {"  default_model: anthropic/claude-sonnet-5", "  default_model: claude-sonnet-5"},
+		"a default of no known provider":      {"  default_model: anthropic/claude-sonnet-5", "  default_model: openai/gpt-5"},
+		"the old provider key":                {"  max_calls_in_flight_per_org: 64\n", "  max_calls_in_flight_per_org: 64\n  provider: anthropic\n"},
 		"a model priced at nothing":           {"cache_read_usd_per_mtok: 0.01}", "cache_read_usd_per_mtok: 0}"},
 		"no calls in flight":                  {"  max_calls_in_flight_per_org: 64\n", ""},
 		"no default model budget":             {"  default_model_budget_usd: 50\n", ""},

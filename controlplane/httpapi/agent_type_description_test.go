@@ -19,7 +19,7 @@ func TestADescriptionIsKeptOnCreateAndEditAndCopiedWithTheType(t *testing.T) {
 		}
 	}
 	var made domain.CurrentAgentType
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "description": "Tunes the rate.", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "description": "Tunes the rate.", "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	if made.Description != "Tunes the rate." {
 		t.Fatalf("created: got description %q", made.Description)
 	}
@@ -50,7 +50,7 @@ func TestADescriptionOfMoreThanOneLineOrTwoHundredCharactersIsRefused(t *testing
 		"two lines": "one\ntwo",
 		"too long":  strings.Repeat("x", domain.MaxAgentTypeDescriptionLength+1),
 	} {
-		body := name{"name": "x", "description": description, "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}
+		body := name{"name": "x", "description": description, "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}
 		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/agent-types", body); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("create, %s: got = %d %s, want 422", what, rec.Code, rec.Body)
 		}
@@ -60,5 +60,5 @@ func TestADescriptionOfMoreThanOneLineOrTwoHundredCharactersIsRefused(t *testing
 		}
 	}
 	exact := strings.Repeat("x", domain.MaxAgentTypeDescriptionLength)
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "description": exact, "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, nil)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "description": exact, "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, nil)
 }

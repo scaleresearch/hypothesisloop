@@ -65,7 +65,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	measuresBaseline := signup != nil && signup.Role == domain.SignupRoleBaseline
 	switch pe.Status {
 	case domain.PlatformExpRunning:
-	// Before the start the one job there is to run is the baseline's, which every researcher
+	// Before the start the one job there is to run is the baseline's, which every executor
 	// starts from and is ranked against. Its agent holds a quota from the moment it joined.
 	case domain.PlatformExpOpen:
 		if !measuresBaseline {
@@ -92,6 +92,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason:  platformapi.ReasonExperimentClosed,
 			Message: fmt.Sprintf("platform experiment %s is over; jobs are accepted only while it is running", pe.ID),
+		}
+	}
+
+	if signup != nil && !signup.Role.SubmitsJobs() {
+		return &AdmissionError{
+			Reason:  platformapi.ReasonResearcherSubmitsNoJob,
+			Message: fmt.Sprintf("agent %s is a %s of platform experiment %s and submits no job: executors run the jobs, and a researcher steers them through hypotheses and comments", exp.AgentID, signup.Role, pe.ID),
 		}
 	}
 
@@ -258,7 +265,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// and all pass.
 	rateLimit := db.SubmissionRateLimit{
 		MaxPerHour: s.credits.MaxSubmissionsPerHour,
-		Window:     submissionRateLimitWindow,
+		Window:     domain.SubmissionWindow,
 	}
 	// The job's one permanent store key. It is drawn here and written with the row, and the store
 	// is asked to create it only once the transaction has decided to insert: a store outage then
@@ -269,10 +276,18 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	exp.DataKey = dataKey
 	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit, func(ctx context.Context) error {
+		if !measuresBaseline {
+			if err := s.stillUncurated(ctx, exp); err != nil {
+				return err
+			}
+		}
 		return s.dataStore.CreateDataKey(ctx, dataKey, exp.PlatformExperimentID, exp.AgentID, exp.ID)
 	})
 	var refusal *db.AdmitRefusal
+	var admission *AdmissionError
 	switch {
+	case errors.As(err, &admission):
+		return admission
 	case errors.As(err, &refusal) && refusal.Reason == ReasonInsufficientQuota:
 		return &AdmissionError{Reason: refusal.Reason, Message: refusal.Message + " " + shareOutlook(pe)}
 	case errors.As(err, &refusal):

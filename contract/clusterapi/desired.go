@@ -154,6 +154,11 @@ type JobSpec struct {
 	// omitted entirely.
 	NodeSelector map[string]string `json:"node_selector,omitempty" yaml:"node_selector,omitempty"`
 
+	// Slots is the slot (NodeSlotLabel) each node of the job holds, in rank order, on a cluster of
+	// slots: admission chooses them and writes them into the resolved job, and a submitted job
+	// may not state them. The runtime rents exactly these, and decides no placement of its own.
+	Slots []string `json:"slots,omitempty" yaml:"slots,omitempty" readOnly:"true"`
+
 	// Groups expresses a job whose nodes are NOT identical — a learner alongside a fleet of
 	// actors, a parameter server alongside workers. Each group carries its own per-replica
 	// resources, command, args and env; everything that describes the JOB rather than a node
@@ -205,12 +210,6 @@ type JobSpec struct {
 	// accelerator time to reach the same failure, so 0 is the honest setting for a diagnostic
 	// run you expect to fail. Required and non-negative.
 	//
-	// It bounds pod-level retries. A container can also be restarted in place by the kubelet,
-	// which is a separate mechanism this field does not reach — so max_retries 0 is executed
-	// with in-place restarts disabled too, to make "no retries" mean one attempt rather than
-	// one pod. For N > 0 the two layers still compose: up to N+1 pods, each of which the
-	// kubelet may also restart.
-	//
 	// The retried unit is the whole job, which for num_nodes > 1 means the whole gang: every
 	// rank is torn down and all N nodes start again together. It is deliberately not per-rank.
 	// Restarting one rank of a synchronous job leaves the survivors blocked in a collective
@@ -218,10 +217,9 @@ type JobSpec struct {
 	// rendezvous the others have already left — the gang burns its full allocation and fails
 	// anyway. An agent whose ranks really are independent should submit independent jobs.
 	//
-	// Where the budget is enforced differs by shape, because only one layer can enforce it in
-	// each case: a single-pod job's retries are the runtime's (k8s BackoffLimit), and a gang's
-	// are the control plane's, since Kubernetes can recreate a failed index — stranding the
-	// survivors — or fail the Job outright, but has no way to restart a gang.
+	// The control plane spends the budget, for every runtime: a failed attempt goes back to the
+	// queue and the next one comes as desired state with a new attempt number. A runtime runs each
+	// attempt once and restarts nothing itself, neither a pod nor a container in place.
 	//
 	// Left out, it is 0: the job runs once. Submission writes that into the job.
 	MaxRetries *int `json:"max_retries,omitempty" yaml:"max_retries,omitempty"`

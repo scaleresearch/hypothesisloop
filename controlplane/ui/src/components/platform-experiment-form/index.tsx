@@ -16,13 +16,14 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
 import { Text } from '@/components/ui/text'
-import { NEW_EXPERIMENT, STEPS, refusedStep, toDrafts, toResearchers, toStages, toStartingAgents } from '@/components/platform-experiment-form/model'
+import { NEW_EXPERIMENT, NEW_TEAM, STEPS, refusedStep, toDrafts, toStages } from '@/components/platform-experiment-form/model'
 import type { FormState, Problem, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
 import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
 import { StepBudget } from '@/components/platform-experiment-form/step-budget'
 import { errorMessage } from '@/lib/errors'
+import { toTeam, toTeamRows } from '@/lib/team'
 import { keys } from '@/lib/keys'
 import type { ExperimentDraft, PlatformExperiment } from '@/types/api'
 import { canEdit, type EditableField } from '@/lib/editable'
@@ -46,7 +47,7 @@ interface FormHandle {
 // Every field of the form the repository's experiment file fills, by the words the form names it with.
 const FILE_FIELDS = [
   ['branch', 'the branch'], ['name', 'the name'], ['description', 'the experiment goal'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
-  ['max_agents', 'the max researchers'], ['duration_hours', 'the duration'], ['starting_agents', 'the starting agents'],
+  ['max_agents', 'the max executors'], ['duration_hours', 'the duration'], ['agents', 'the team'],
   ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder'], ['max_concurrent_accelerators', 'the max concurrent accelerators'],
   ['agent_image', 'the agent image'], ['coordinator_model', 'the coordinator model'], ['default_quota_tier', 'the default quota tier'],
 ] as const
@@ -62,15 +63,15 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const { mutate } = useSWRConfig()
   const needsGitHub = useNeedsGitHub()
   const isEdit = !!initial
-  // An edit changes the fields the API lists in editable and locks the rest. The researchers are
-  // changed in place on the experiment's page.
+  // An edit changes the fields the API lists in editable and locks the rest. The team is changed
+  // in place on the experiment's page.
   const locked = (field: EditableField) => !!initial && !canEdit(initial, field)
   const [form, setForm] = useState<FormState>(() => ({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
     budget_accelerator_hours: String(initial?.budget_accelerator_hours ?? NEW_EXPERIMENT.budget_accelerator_hours),
-    max_agents: String(initial?.max_agents ?? NEW_EXPERIMENT.researchers),
-    starting_agents: null,
+    max_agents: String(initial?.max_agents ?? NEW_EXPERIMENT.executors),
+    agents: initial ? toTeamRows(initial.agents) : NEW_TEAM,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
     duration_hours: String(initial?.duration_hours ?? NEW_EXPERIMENT.duration_hours),
@@ -193,7 +194,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         budget_accelerator_hours: stated(file.budget_accelerator_hours, f.budget_accelerator_hours),
         max_agents: stated(file.max_agents, f.max_agents),
         duration_hours: stated(file.duration_hours, f.duration_hours),
-        starting_agents: file.researchers?.length ? toStartingAgents(file.researchers) : f.starting_agents,
+        agents: file.agents?.length ? toTeamRows(file.agents) : f.agents,
         report_interval_seconds: stated(file.report_interval_seconds, f.report_interval_seconds),
         stages: file.stages?.length ? toDrafts(file.stages) : f.stages,
         max_concurrent_accelerators: stated(file.max_concurrent_accelerators, f.max_concurrent_accelerators),
@@ -251,12 +252,17 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         onSaved(Object.keys(patch).length > 0 ? await updatePlatformExperiment(initial.id, patch) : initial)
         return
       }
+      const team = toTeam(form.agents)
+      if ('problem' in team) {
+        setError(team.problem)
+        return
+      }
       const payload: CreatePlatformExperimentRequest = {
         name: form.name.trim(),
         description: form.description.trim(),
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
         max_agents: Number(form.max_agents),
-        researchers: toResearchers(form.starting_agents, Number(form.max_agents)),
+        agents: team.agents,
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
         ...(form.report_interval_seconds.trim() !== '' ? { report_interval_seconds: Number(form.report_interval_seconds) } : {}),

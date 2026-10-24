@@ -36,7 +36,7 @@ def test_stage_boundary_advances_and_terminal_jobs_settle(api, experiment, run_i
         "stages-settlement", [(a, None, "guaranteed") for a in agents], budget=BUDGET
     )
 
-    job_overrides = {"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}}
+    job_overrides = {"env": {"RUN_SECONDS": str(RUN_SECONDS)}}
     jobs = [api.submit_job(pe_id, a, hours=JOB_HOURS, job_overrides=job_overrides) for a in agents]
 
     ended = eventually(

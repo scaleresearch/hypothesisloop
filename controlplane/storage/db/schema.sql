@@ -187,7 +187,7 @@ CREATE TABLE agent_types (
     created_by_kind TEXT        NOT NULL,
     created_by_id   TEXT        NOT NULL DEFAULT '',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT agent_types_role CHECK (role IN ('researcher', 'baseline', 'coordinator', 'planner')),
+    CONSTRAINT agent_types_role CHECK (role IN ('executor', 'researcher', 'baseline', 'coordinator', 'planner')),
     CONSTRAINT agent_types_created_by_kind
         CHECK (created_by_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
 );
@@ -255,9 +255,9 @@ CREATE INDEX idx_agents_org ON agents(org_id);
 
 -- starts_at is NULL until the run has a clock. ends_at is what closes it in every status: a
 -- draft's planning or proposal limit, an open one's baseline deadline, a running one's deadline
--- for a researcher to be at work, then starts_at plus duration_hours once started_at is written.
+-- for an executor to be at work, then starts_at plus duration_hours once started_at is written.
 -- proposed_at with no proposal is a declined draft. A write that moves the status clears
--- coordinator_reason and researchers_held with it.
+-- coordinator_reason and agents_held with it.
 -- A removed one (removed_at) is closed and answered to nobody, and every row it holds stays.
 CREATE TABLE platform_experiments (
     id                             TEXT             PRIMARY KEY,
@@ -279,7 +279,7 @@ CREATE TABLE platform_experiments (
     max_agentsandboxes             INTEGER          NOT NULL DEFAULT 0,
     max_concurrent_accelerators    INTEGER,
     default_quota_tier             TEXT             NOT NULL,
-    researchers                    JSONB            NOT NULL DEFAULT '[]',
+    agents                         JSONB            NOT NULL DEFAULT '[]',
     metrics                        JSONB            NOT NULL DEFAULT '[]',
     report_interval_seconds        INTEGER          NOT NULL DEFAULT 30,
     stages                         JSONB            NOT NULL DEFAULT '[{"length_pct":40,"evict_pct":75},{"length_pct":60,"evict_pct":0}]',
@@ -316,7 +316,7 @@ CREATE TABLE platform_experiments (
     coordinator_model              TEXT,
     coordinator_agent_type         TEXT             NOT NULL DEFAULT 'coordinator' REFERENCES agent_types(id),
     coordinator_reason             TEXT,
-    researchers_held               TEXT,
+    agents_held                    TEXT,
 
     capacity_free_since            TIMESTAMPTZ,
     capacity_noticed_at            TIMESTAMPTZ,
@@ -370,7 +370,7 @@ CREATE INDEX idx_platform_experiments_in_progress ON platform_experiments(status
     WHERE status IN ('draft', 'open', 'running');
 
 -- Role and quota_tier are fixed at signup: a change mid-run would rewrite who a past cut applied
--- to. replaces is the researcher this one was added in the place of, '' for none. An agent runs
+-- to. replaces is the agent this one was added in the place of, '' for none. An agent runs
 -- the current version of agent_type; a NULL model or hyperparameters is the type's.
 CREATE TABLE experiment_signups (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
@@ -394,7 +394,7 @@ CREATE TABLE experiment_signups (
     idle_repeat            INTEGER     NOT NULL DEFAULT 0,
 
     PRIMARY KEY (platform_experiment_id, agent_id),
-    CONSTRAINT experiment_signups_role CHECK (role IN ('competitor', 'baseline', 'reviewer', 'planner')),
+    CONSTRAINT experiment_signups_role CHECK (role IN ('competitor', 'baseline', 'reviewer', 'researcher', 'planner')),
     CONSTRAINT experiment_signups_quota_tier CHECK (quota_tier IN ('guaranteed', 'burst_only')),
     CONSTRAINT experiment_signups_added_by_kind
         CHECK (added_by_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
@@ -695,7 +695,7 @@ CREATE TABLE changes (
     occurred_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT changes_kind CHECK (kind IN (
         'experiment.status', 'experiment.blocked', 'quota.changed', 'stage.boundary',
-        'hypothesis.new', 'hypothesis.status', 'hypothesis.link', 'finding.new', 'comment.new',
+        'hypothesis.new', 'hypothesis.status', 'hypothesis.link', 'hypothesis.unlink', 'finding.new', 'comment.new',
         'agent.cut', 'agent.finished', 'agent.replaced', 'agent.idle', 'agent.instructions',
         'capacity.idle', 'agent.message', 'agent.activity',
         'platform_experiment.status', 'platform_experiment.description', 'platform_experiment.goal',
@@ -706,3 +706,21 @@ CREATE TABLE changes (
 );
 CREATE INDEX idx_changes_platform ON changes(platform_experiment_id, id);
 CREATE INDEX idx_changes_occurred ON changes(occurred_at);
+
+-- ---------------------------------------------------------------------------
+-- Model credentials
+-- ---------------------------------------------------------------------------
+
+-- The ChatGPT OAuth tokens every call to an openai model is made with, one row. The refresh token
+-- rotates with each renewal, so the pair in use is kept here and MODEL_OPENAI_AUTH_JSON only seeds
+-- it: seed_digests are the digests of every auth.json seeded, and only one never seen replaces the
+-- row, so a pod still holding an older auth.json never undoes a newer one or a renewal.
+CREATE TABLE chatgpt_credential (
+    id            BOOLEAN     PRIMARY KEY DEFAULT TRUE CHECK (id),
+    access_token  TEXT        NOT NULL,
+    refresh_token TEXT        NOT NULL,
+    account_id    TEXT        NOT NULL,
+    expires_at    TIMESTAMPTZ NOT NULL,
+    seed_digests  TEXT[]      NOT NULL,
+    renewed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);

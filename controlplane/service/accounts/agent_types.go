@@ -38,20 +38,26 @@ type AgentTypeStore interface {
 	Archive(ctx context.Context, orgID, id string, by domain.Actor) (*domain.CurrentAgentType, error)
 }
 
+// ServedModels refuses a model the platform does not serve. *models.Service satisfies it.
+type ServedModels interface {
+	Check(ctx context.Context, model string) error
+}
+
 // AgentTypes serves an org's agent types: every member reads them, its administrators make and
 // change its own, and nobody changes a built-in one.
 type AgentTypes struct {
 	store  AgentTypeStore
+	served ServedModels
 	logger *zap.Logger
 	access *auth.Access
 }
 
-// NewAgentTypes serves store.
-func NewAgentTypes(store AgentTypeStore, access *auth.Access, logger *zap.Logger) *AgentTypes {
-	if store == nil || logger == nil {
-		panic("accounts.NewAgentTypes: a store and a logger are required")
+// NewAgentTypes serves store, refusing a model served does not.
+func NewAgentTypes(store AgentTypeStore, served ServedModels, access *auth.Access, logger *zap.Logger) *AgentTypes {
+	if store == nil || served == nil || logger == nil {
+		panic("accounts.NewAgentTypes: a store, the served models and a logger are required")
 	}
-	return &AgentTypes{store: store, logger: logger, access: access}
+	return &AgentTypes{store: store, served: served, logger: logger, access: access}
 }
 
 // ListedAgentType is an agent type with what the caller may do to it.
@@ -185,6 +191,9 @@ func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentT
 		return nil, err
 	}
 	name, description, role, prompt, settings, err := h.newType(ctx, orgID, body)
+	if err == nil {
+		err = h.checkModel(ctx, settings.Model)
+	}
 	if err != nil {
 		return nil, h.answer("create-agent-type", err)
 	}
@@ -211,6 +220,9 @@ func (h *AgentTypes) Edit(ctx context.Context, orgID, id string, body EditAgentT
 	}
 	if err := checkAgentType(current.Role, name, description, body.Prompt, &body.Settings); err != nil {
 		return nil, err
+	}
+	if err := h.checkModel(ctx, body.Settings.Model); err != nil {
+		return nil, h.answer("edit-agent-type", err)
 	}
 	edited, propagation, err := h.store.Edit(ctx, db.AgentTypeEdit{
 		OrgID: orgID, ID: id, IfVersion: body.IfVersion, Name: name, Description: description, Prompt: body.Prompt, Settings: body.Settings, By: caller.Actor(),
@@ -309,6 +321,19 @@ func checkAgentType(role domain.AgentRole, name, description, prompt string, set
 		}
 	}
 	return nil
+}
+
+// checkModel refuses a model of settings the platform does not serve. An empty one names none.
+func (h *AgentTypes) checkModel(ctx context.Context, model string) error {
+	if model == "" {
+		return nil
+	}
+	err := h.served.Check(ctx, model)
+	var refused *refusal.Refusal
+	if errors.As(err, &refused) {
+		return refused.On("settings.model")
+	}
+	return err
 }
 
 // answer turns what the store refuses into what the caller is told, and anything else into the

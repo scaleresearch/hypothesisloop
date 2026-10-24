@@ -56,7 +56,7 @@ func (s *Service) GetAgentQuota(ctx context.Context, agentID, platformExpID stri
 // invisible until settlement writes its cost. Both are undercounts, both self-correct, and both
 // err toward letting real work finish — the right direction for an eviction that is irreversible
 // and unrefunded.
-// RunBudget is what the researchers of pe share: its budget less what its baseline agents have
+// RunBudget is what the executors of pe share: its budget less what its baseline agents have
 // spent. The budget caps everything the platform experiment spends, measuring the baseline
 // included, so shares are carved from what that left.
 func (s *Service) RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
@@ -121,10 +121,12 @@ type AgentQuotaView struct {
 	HeldAccH                   float64    `json:"held_acch" doc:"What the jobs running now hold of the share beyond what they have spent: each holds its whole estimate until it ends, so the remaining figures leave out held as well as used."`
 	RemainingGuaranteed        float64    `json:"remaining_guaranteed_accelerator_hours" doc:"The largest estimated_cost_acch a guaranteed job submitted now is admitted with. A submit holds the whole estimate of every job that has not ended, so this is less than the share minus what is used while jobs run."`
 	RemainingBurst             float64    `json:"remaining_burst_accelerator_hours" doc:"The same for a burst job."`
-	NextStageStartsAt          *time.Time `json:"next_stage_starts_at,omitempty" doc:"When the next stage of the platform experiment starts by the clock, which raises the share. It starts earlier once the same part of the budget is spent, and waits for a first ranking value while a job that can give one is in flight. Absent in the last stage, outside a running platform experiment and for an agent that is no researcher or was cut."`
-	NextStageShare             *float64   `json:"next_stage_share_accelerator_hours,omitempty" doc:"What share_accelerator_hours becomes when the next stage starts, at the least: the incoming stage's part of the budget is split over the researchers still standing, and what the ones cut then left unspent is added. An agent cut at that boundary holds nothing. Present with next_stage_starts_at: a share that looks spent before it grows again."`
+	NextStageStartsAt          *time.Time `json:"next_stage_starts_at,omitempty" doc:"When the next stage of the platform experiment starts by the clock, which raises the share. It starts earlier once the same part of the budget is spent, and waits for a first ranking value while a job that can give one is in flight. Absent in the last stage, outside a running platform experiment and for an agent that is no executor or was cut."`
+	NextStageShare             *float64   `json:"next_stage_share_accelerator_hours,omitempty" doc:"What share_accelerator_hours becomes when the next stage starts, at the least: the incoming stage's part of the budget is split over the executors still standing, and what the ones cut then left unspent is added. An agent cut at that boundary holds nothing. Present with next_stage_starts_at: a share that looks spent before it grows again."`
 	DataBytes                  *int64     `json:"data_bytes,omitempty" doc:"What the agent holds under its data prefix in this platform experiment, read from the object store as admission reads it. On a read of one agent's quota, where the platform sets a ceiling."`
 	MaxDataBytes               int64      `json:"max_data_bytes,omitempty" doc:"The ceiling on data_bytes: a submit is refused with data_quota_exceeded once data_bytes is at or over it. Absent where the platform sets none."`
+	MaxSubmissionsPerHour      int        `json:"max_submissions_per_hour,omitempty" doc:"The most jobs the agent may submit to this platform experiment in any hour: past it a submit is refused with rate_limited until the oldest of them is an hour old. On a read of one agent's quota, where the platform sets a cap."`
+	SubmissionsLeft            *int       `json:"submissions_left,omitempty" doc:"How many more jobs the agent may submit now: max_submissions_per_hour less the jobs it submitted in the last hour. Present with max_submissions_per_hour."`
 	CreatedAt                  time.Time  `json:"created_at"`
 }
 
@@ -157,6 +159,14 @@ func (s *Service) QuotaView(ctx context.Context, agentID, platformExpID string) 
 			return nil, fmt.Errorf("platform_experiments.QuotaView: measure durable data: %w", err)
 		}
 		views[0].DataBytes, views[0].MaxDataBytes = &held, s.maxDataBytesPerAgent
+	}
+	if s.cfg.MaxSubmissionsPerHour > 0 {
+		recent, err := s.store.RecentSubmissions(ctx, agentID, platformExpID, domain.SubmissionWindow)
+		if err != nil {
+			return nil, fmt.Errorf("platform_experiments.QuotaView: %w", err)
+		}
+		left := max(0, s.cfg.MaxSubmissionsPerHour-recent)
+		views[0].MaxSubmissionsPerHour, views[0].SubmissionsLeft = s.cfg.MaxSubmissionsPerHour, &left
 	}
 	return views[0], nil
 }
@@ -244,9 +254,9 @@ func (e *concurrencyCapError) ConcurrencyCapExceeded() bool { return true }
 // AdmitExperiment reports what the transaction decided: whether the desired-state row was
 // inserted, or the id was already QUEUED and this is a legal re-submission the caller should
 // answer by refreshing priority alone. A submission the transaction refuses is its
-// *db.AdmitRefusal. createDataKey runs only for an inserted row, inside the transaction (see
+// *db.AdmitRefusal. inserted runs only for an inserted row, inside the transaction (see
 // db.AdmitExperimentTx).
-func (s *Service) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error) {
+func (s *Service) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, inserted func(context.Context) error) (db.AdmitDecision, error) {
 	// Read before the transaction opens: created_at never changes, and a pool read made while the
 	// transaction holds its own connection needs a second one, which a burst of submissions as
 	// large as the pool can never get.
@@ -263,7 +273,7 @@ func (s *Service) AdmitExperiment(ctx context.Context, exp *domain.Experiment, r
 			return nil, err
 		}
 		return aq, nil
-	}, rateLimit, createDataKey)
+	}, rateLimit, inserted)
 }
 
 // ReserveAdmittedAcceleratorType revalidates quota and the platform experiment's concurrency cap
@@ -299,8 +309,8 @@ func (s *Service) SetObservedUsage(ctx context.Context, exp *domain.Experiment, 
 var ErrNoQuota = errors.New("no quota")
 
 // AgentQuota is the quota of agentID in the platform experiment id, read by reader. An agent with
-// none is refused with why: a planner has none, and an agent of an open platform experiment is
-// granted one when it starts.
+// none is refused with why: a planner and a researcher have none, and an agent of an open
+// platform experiment is granted one when it starts.
 func (s *Service) AgentQuota(ctx context.Context, agentID, id string, reader auth.Principal) (*AgentQuotaView, error) {
 	if !domain.IdentifierShaped(agentID) {
 		return nil, auth.NotFound("agent")
@@ -321,7 +331,10 @@ func (s *Service) AgentQuota(ctx context.Context, agentID, id string, reader aut
 		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
 	}
 	if signup != nil && signup.Role == domain.SignupRolePlanner {
-		return nil, refusal.Refuse(http.StatusNotFound, platformapi.ReasonPlannerHasNoQuota, "agent "+agentID+" is the planner of platform experiment "+id+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
+		return nil, refusal.Refuse(http.StatusNotFound, platformapi.ReasonPlannerHasNoQuota, "agent "+agentID+" is the planner of platform experiment "+id+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the executors when the run starts")
+	}
+	if signup != nil && signup.Role == domain.SignupRoleResearcher {
+		return nil, refusal.Refuse(http.StatusNotFound, platformapi.ReasonResearcherHasNoQuota, "agent "+agentID+" is a researcher of platform experiment "+id+": a researcher submits no job, so it has no quota and needs none. The run's budget is shared among its executors")
 	}
 	if pe == nil || pe.Status != domain.PlatformExpOpen {
 		return nil, ErrNoQuota

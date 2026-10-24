@@ -100,27 +100,27 @@ func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 	settings := platformexperimentstest.Settings
 	settings.DefaultStages = ladder
 	svc := NewService(&createStore{}, settings, zap.NewNop(), nil, time.Minute)
-	spec := func(researchers int, stages []domain.Stage) CreatePlatformExperimentRequest {
+	spec := func(executors int, stages []domain.Stage) CreatePlatformExperimentRequest {
 		return CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
-			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: researchers,
+			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: executors,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, Stages: stages,
 		}}
 	}
-	for _, researchers := range []int{2, domain.MinResearchersForCut} {
-		checked, err := svc.validate(spec(researchers, nil), agenttypestest.Catalog())
+	for _, executors := range []int{2, domain.MinExecutorsForCut} {
+		checked, err := svc.validate(spec(executors, nil), agenttypestest.Catalog())
 		if err != nil {
-			t.Fatalf("%d researchers, stages left out: %v", researchers, err)
+			t.Fatalf("%d executors, stages left out: %v", executors, err)
 		}
-		if want := domain.RunStages(ladder, researchers); !reflect.DeepEqual(checked.Stages, want) {
-			t.Errorf("%d researchers, stages left out: stored %+v, want the ladder the run starts with %+v", researchers, checked.Stages, want)
+		if want := domain.RunStages(ladder, executors); !reflect.DeepEqual(checked.Stages, want) {
+			t.Errorf("%d executors, stages left out: stored %+v, want the ladder the run starts with %+v", executors, checked.Stages, want)
 		}
 	}
 	var refused *refusal.Refusal
 	if _, err := svc.validate(spec(2, ladder), agenttypestest.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
-		t.Errorf("two stages stated for 2 researchers: got %v, want 422 invalid_stages", err)
+		t.Errorf("two stages stated for 2 executors: got %v, want 422 invalid_stages", err)
 	}
-	if _, err := svc.validate(spec(domain.MinResearchersForCut, ladder), agenttypestest.Catalog()); err != nil {
-		t.Errorf("two stages stated for %d researchers: %v", domain.MinResearchersForCut, err)
+	if _, err := svc.validate(spec(domain.MinExecutorsForCut, ladder), agenttypestest.Catalog()); err != nil {
+		t.Errorf("two stages stated for %d executors: %v", domain.MinExecutorsForCut, err)
 	}
 }
 

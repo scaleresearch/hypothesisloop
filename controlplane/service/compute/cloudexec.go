@@ -1,6 +1,7 @@
-// Package compute runs each job as one rented instance through a provider.Provider. It names
-// no vendor: everything it knows about an instance is the name it gave it and the state the
-// provider reports.
+// Package compute runs each node of a job as one rented instance through a provider.Provider,
+// the nodes of a job that spans several on a private network of the provider's. It names no
+// vendor: everything it knows about an instance or a network is the name it gave it and the
+// state the provider reports.
 package compute
 
 import (
@@ -51,7 +52,7 @@ type Config struct {
 	// Startup is how long a rented instance may take to start its command. Past it the instance
 	// is destroyed and another rented, so nothing rented and not running is paid for longer.
 	Startup time.Duration
-	// Demand is what waits for the cluster, required for a provider with a market.
+	// Demand is what waits for the cluster, required for a provider with a market or a network.
 	Demand Demand
 	Log    func(format string, args ...any)
 }
@@ -59,13 +60,16 @@ type Config struct {
 // Executor keeps nothing about instances. Every method reads the account, unless the executor
 // came from ForPass, in which case it answers from that pass's one read.
 type Executor struct {
-	clusterID string
-	prefix    string
-	apiURL    string
-	shapes    []Shape
-	provider  provider.Provider
+	clusterID     string
+	prefix        string
+	networkPrefix string
+	apiURL        string
+	shapes        []Shape
+	provider      provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
-	market        provider.Market
+	market provider.Market
+	// network is the provider's Networker capability, nil for a vendor that has none.
+	network       provider.Networker
 	demand        Demand
 	architectures []string
 	// imageNeeds is what the provider's ImageNeeder says a job's image must have, nil for one
@@ -97,10 +101,9 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.Provider == nil || cfg.Log == nil {
 		return nil, fmt.Errorf("cloudcompute: Provider and Log are required")
 	}
-	rented := provider.Bounded(cfg.Provider)
-	market, _ := rented.(provider.Market)
-	if market != nil && cfg.Demand == nil {
-		return nil, fmt.Errorf("cloudcompute: a provider with a market needs the cluster's Demand")
+	rented := provider.Bound(cfg.Provider)
+	if (rented.Market != nil || rented.Networker != nil) && cfg.Demand == nil {
+		return nil, fmt.Errorf("cloudcompute: a provider with a market or a network needs the cluster's Demand")
 	}
 	var imageNeeds []string
 	if needer, needs := cfg.Provider.(provider.ImageNeeder); needs {
@@ -111,12 +114,14 @@ func New(cfg Config) (*Executor, error) {
 		return nil, fmt.Errorf("cloudcompute: the provider rents machines of no architecture")
 	}
 	return &Executor{
-		market:        market,
+		market:        rented.Market,
+		network:       rented.Networker,
 		demand:        cfg.Demand,
 		architectures: architectures,
 		imageNeeds:    imageNeeds,
 		clusterID:     cfg.ClusterID,
 		prefix:        cfg.prefix(),
+		networkPrefix: provider.NetworkPrefix(cfg.Namespace),
 		apiURL:        cfg.APIURL,
 		shapes:        append([]Shape(nil), cfg.Shapes...),
 		provider:      rented,
@@ -144,6 +149,10 @@ func (cfg Config) Validate() error {
 		return fmt.Errorf("cloudcompute: at least one shape is required")
 	}
 	longest := (&Executor{prefix: cfg.prefix()}).instanceName
+	ranks := 0
+	for _, s := range cfg.Shapes {
+		ranks += s.MaxInstances
+	}
 	seen := map[string]bool{}
 	for _, s := range cfg.Shapes {
 		if err := provider.ValidateSegment("shape name", s.Name); err != nil {
@@ -164,7 +173,7 @@ func (cfg Config) Validate() error {
 				return fmt.Errorf("cloudcompute: shape %q: %w", s.Name, err)
 			}
 		}
-		if err := provider.ValidateName(longest(strings.Repeat("x", experimentIDBudget), attemptBudget, s.Name, s.MaxInstances-1)); err != nil {
+		if err := provider.ValidateName(longest(strings.Repeat("x", experimentIDBudget), attemptBudget, ranks-1, ranks, s.Name, s.MaxInstances-1)); err != nil {
 			return fmt.Errorf("cloudcompute: shape %q leaves no room for an experiment id in an instance name: %w", s.Name, err)
 		}
 	}
@@ -185,6 +194,6 @@ func (e *Executor) ForPass(ctx context.Context) (agentexec.Executor, error) {
 
 func (e *Executor) GetClusterID(context.Context) (string, error) { return e.clusterID, nil }
 
-// SupportsMultiNodeJobs is false: a job is one instance, and instances of one account share no
-// network a distributed job could rendezvous over.
-func (e *Executor) SupportsMultiNodeJobs() bool { return false }
+// SupportsMultiNodeJobs is whether the provider has private networks to join the nodes of a job
+// on.
+func (e *Executor) SupportsMultiNodeJobs() bool { return e.network != nil }

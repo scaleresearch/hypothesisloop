@@ -55,7 +55,7 @@ func TestARunIsTimedByTheWrapperHoweverLateTheVendorReportsIt(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := context.Background()
-			const instance = "hl-job-t1-exp-1-a0-cpu-0"
+			const instance = "hl-job-t1-exp-1-a0-r0of1-cpu-0"
 			mustCreate(t, e, job(t, "exp-1", 0, 0))
 
 			started := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
@@ -89,7 +89,7 @@ func TestARunIsReportedOnlyWithTheExitLineThatEndsIt(t *testing.T) {
 	} {
 		e, p := newTestExecutor(t)
 		mustCreate(t, e, job(t, "exp-1", 0, 0))
-		p.Exit("hl-job-t1-exp-1-a0-cpu-0", tc.lines...)
+		p.Exit("hl-job-t1-exp-1-a0-r0of1-cpu-0", tc.lines...)
 		observed, err := e.PollJobStatus(context.Background(), "exp-1")
 		if err != nil || observed.Phase != tc.phase || observed.EndedAt.IsZero() == tc.timed || observed.StartedAt.IsZero() == tc.timed {
 			t.Errorf("%s: %+v, %v", name, observed, err)

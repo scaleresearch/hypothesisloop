@@ -14,20 +14,27 @@ import (
 )
 
 // instance is a rented instance read back through its name. The name is the only thing a
-// provider stores for us, so it carries everything a later pass has to know: which job and which
-// attempt of it the instance runs, and which slot it occupies.
+// provider stores for us, so it carries everything a later pass has to know: which job, which
+// attempt of it and which of its ranks the instance runs, and which slot it occupies.
 type instance struct {
 	provider.Instance
 	experimentID string
 	attempt      int
+	rank, ranks  int
 	shape        string
 	index        int
 }
 
-// instanceName is hl-job-<namespace>-<experiment id>-a<attempt>-<shape>-<index>. The attempt
-// makes the name of a requeued job's instance differ from the one it replaces, which is the fence
-// between them.
-func (e *Executor) instanceName(experimentID string, attempt int, shape string, index int) string {
+// instanceName is hl-job-<namespace>-<experiment id>-a<attempt>-r<rank>of<ranks>-<shape>-<index>.
+// The attempt makes the name of a requeued job's instance differ from the one it replaces, which
+// is the fence between them.
+func (e *Executor) instanceName(experimentID string, attempt, rank, ranks int, shape string, index int) string {
+	return fmt.Sprintf("%s%s-a%d-r%dof%d-%s", e.prefix, experimentID, attempt, rank, ranks, slotName(shape, index))
+}
+
+// legacyInstanceName is the name an instance was rented under before a job could span several:
+// it has no rank part and reads as rank 0 of 1, so a deploy keeps the jobs it finds running.
+func (e *Executor) legacyInstanceName(experimentID string, attempt int, shape string, index int) string {
 	return fmt.Sprintf("%s%s-a%d-%s", e.prefix, experimentID, attempt, slotName(shape, index))
 }
 
@@ -48,20 +55,48 @@ func (e *Executor) parseInstanceName(name string) (parsed instance, ok bool) {
 	}
 	n := len(parts)
 	index, indexErr := strconv.Atoi(parts[n-1])
-	attempt, attemptErr := strconv.Atoi(strings.TrimPrefix(parts[n-3], "a"))
-	if indexErr != nil || attemptErr != nil {
+	parsed = instance{shape: parts[n-2], index: index, ranks: 1}
+	head := parts[:n-2]
+	_, rankErr := fmt.Sscanf(head[len(head)-1], "r%dof%d", &parsed.rank, &parsed.ranks)
+	legacy := rankErr != nil
+	if !legacy {
+		head = head[:len(head)-1]
+	}
+	if indexErr != nil || len(head) < 2 || parsed.rank < 0 || parsed.rank >= parsed.ranks {
 		return instance{}, false
 	}
-	parsed = instance{
-		experimentID: strings.Join(parts[:n-3], "-"),
-		attempt:      attempt,
-		shape:        parts[n-2],
-		index:        index,
+	attempt, attemptErr := strconv.Atoi(strings.TrimPrefix(head[len(head)-1], "a"))
+	if attemptErr != nil {
+		return instance{}, false
 	}
-	if parsed.experimentID == "" || e.instanceName(parsed.experimentID, parsed.attempt, parsed.shape, parsed.index) != name {
+	parsed.experimentID, parsed.attempt = strings.Join(head[:len(head)-1], "-"), attempt
+	built := e.instanceName(parsed.experimentID, parsed.attempt, parsed.rank, parsed.ranks, parsed.shape, parsed.index)
+	if legacy {
+		built = e.legacyInstanceName(parsed.experimentID, parsed.attempt, parsed.shape, parsed.index)
+	}
+	if parsed.experimentID == "" || built != name {
 		return instance{}, false
 	}
 	return parsed, true
+}
+
+// networkName is hl-net-<namespace>-<experiment id>-a<attempt>: the private network the ranks of
+// one attempt of a job that spans several nodes meet on, new for every attempt as their names are.
+func (e *Executor) networkName(experimentID string, attempt int) string {
+	return fmt.Sprintf("%s%s-a%d", e.networkPrefix, experimentID, attempt)
+}
+
+func (e *Executor) parseNetworkName(name string) (experimentID string, attempt int, ok bool) {
+	rest, found := strings.CutPrefix(name, e.networkPrefix)
+	cut := strings.LastIndex(rest, "-a")
+	if !found || cut <= 0 {
+		return "", 0, false
+	}
+	attempt, err := strconv.Atoi(rest[cut+2:])
+	if err != nil || e.networkName(rest[:cut], attempt) != name {
+		return "", 0, false
+	}
+	return rest[:cut], attempt, true
 }
 
 func (i instance) slot() string { return slotName(i.shape, i.index) }
@@ -81,8 +116,11 @@ type view struct {
 	instances []instance
 	unnamed   []instance
 	outputs   map[string]output
-	// market is Executor.rentable's answer for this view, nil until it is asked.
-	market *market
+	// demand is Executor.demanded's answer for this view, market Executor.rentable's and
+	// networks Executor.networked's, each nil until it is asked.
+	demand   *demand
+	market   *market
+	networks map[string]onOffer
 	// unstarting are the hosts of the instances this read found overdue. The pass destroys those
 	// instances, and what it rents is not rented on their hosts. Nothing carries a host into
 	// the next pass: once its instance is destroyed no list names it.
@@ -140,23 +178,31 @@ func (v *view) of(experimentID string) []instance {
 	return own
 }
 
-// newest returns experimentID's instance of the highest attempt: the one the control plane is
-// waiting on when a requeue has left an older one behind. Of two instances of that attempt,
-// which a vendor's lagging list or a create that failed after it succeeded can leave, it is the
-// one with the lowest id, the one ReapTerminal keeps.
+// gang returns the ranks of experimentID's highest attempt, lowest rank first: the attempt the
+// control plane is waiting on when a requeue has left an older one behind. Of two instances of
+// one rank, which a vendor's lagging list or a create that failed after it succeeded can leave,
+// it is the one with the lowest id, the one ReapTerminal keeps. A rank that is not rented, or no
+// longer, is missing from it.
 //
-// A status read has no desired state to tell it which slot the job is pinned to. CreateWorkload
+// A status read has no desired state to tell it which slots the job is pinned to. CreateWorkload
 // never rents an attempt while an instance of it stands in another slot, so there is one
 // placement of an attempt to report at a time.
-func (v *view) newest(experimentID string) (instance, bool) {
-	var found instance
-	ok := false
-	for _, i := range v.of(experimentID) {
-		if !ok || i.attempt > found.attempt {
-			found, ok = i, true
+func (v *view) gang(experimentID string) []instance {
+	own := v.of(experimentID)
+	newest := -1
+	for _, i := range own {
+		newest = max(newest, i.attempt)
+	}
+	var ranks []instance
+	seen := map[int]bool{}
+	for _, i := range own {
+		if i.attempt == newest && !seen[i.rank] {
+			seen[i.rank] = true
+			ranks = append(ranks, i)
 		}
 	}
-	return found, ok
+	sort.SliceStable(ranks, func(a, b int) bool { return ranks[a].rank < ranks[b].rank })
+	return ranks
 }
 
 func (v *view) add(i instance) {

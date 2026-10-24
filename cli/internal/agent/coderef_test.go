@@ -88,7 +88,7 @@ func TestJobSubmitWithNoHypothesisIsTheBaselinesOnItsBranch(t *testing.T) {
 	if pushed := clitest.MustGit(t, origin, "rev-parse", "refs/heads/hl/pe-1/baseline"); pushed != clitest.MustGit(t, clone, "rev-parse", "HEAD") {
 		t.Fatalf("origin has the baseline's branch at %s, want the submitted commit", pushed)
 	}
-	// Its check of the code as a researcher would run it goes on a branch beside the baseline's.
+	// Its check of the code as an executor would run it goes on a branch beside the baseline's.
 	clitest.MustGit(t, clone, "checkout", "-q", "-b", "hl/pe-1/baseline-check")
 	if code, stderr, sent = submit(t, "job.yaml"); code != 0 || sent["branch"] != "hl/pe-1/baseline-check" {
 		t.Fatalf("on the check branch: exit code = %d, sent = %v, stderr = %s, want it sent", code, sent, stderr)
@@ -213,7 +213,7 @@ func TestJobSubmitNamesTheRepositorysOwnAddressWhenGitIsSentElsewhere(t *testing
 	}
 }
 
-// A researcher's subagent submitted on a branch made before the run's best and had to redo the
+// An executor's subagent submitted on a branch made before the run's best and had to redo the
 // job. The submit tells it, from its checkout, when its commit does not contain the best: it
 // fetches the best's branch it never had, and says nothing once the best is merged in.
 func TestJobSubmitSaysWhenTheCommitDoesNotContainTheRunsBest(t *testing.T) {

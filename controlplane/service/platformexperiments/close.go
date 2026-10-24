@@ -359,13 +359,13 @@ func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedRea
 	return "did not finish: its machine was " + instance.Shown() + " at the close"
 }
 
-// CheckCoordinatorModel refuses a coordinator model a reopen names that is no model.
-func (s *Service) CheckCoordinatorModel(model string) error {
+// CheckCoordinatorModel refuses a coordinator model a reopen names that the platform does not serve.
+func (s *Service) CheckCoordinatorModel(ctx context.Context, model string) error {
 	if s.launch.CoordinatorModel == "" {
 		return auth.Internal(s.logger, "reopen platform experiment failed", errors.New("the handler has no agent launch settings"))
 	}
-	if err := domain.ValidateModel(model); err != nil {
-		return refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model: "+err.Error()).On("coordinator_model")
+	if err := s.checkModel(ctx, "coordinator_model", model); err != nil {
+		return s.refusal("reopen platform experiment", err)
 	}
 	return nil
 }

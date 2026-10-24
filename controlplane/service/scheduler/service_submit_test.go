@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -156,7 +157,7 @@ func humanIdeaSubmission() *domain.Experiment {
 	return &domain.Experiment{
 		ID: "human-idea-job", AgentID: "agent-1", PlatformExperimentID: "pe-1",
 		HypothesisID: "h-human", Theory: "t", EstimatedDurationHours: 1, AcceleratorCount: 1,
-		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40), Branch: "hl/pe-1/researcher-1/warmup-helps-abc123",
+		CodeRef: "https://example.com/repo.git@" + strings.Repeat("a", 40), Branch: "hl/pe-1/executor-1/warmup-helps-abc123",
 		Job: domain.JobSpec{
 			Command: []string{"python", "train.py"}, AcceleratorType: h100, AcceleratorCount: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries,
 		},
@@ -269,13 +270,13 @@ func (s unstartedStore) GetAgentSignup(context.Context, string, string) (*domain
 // accepted. Open, a platform experiment takes the one job there is to run before the start, the
 // baseline's, from an agent that was added to measure it, and tells everyone else to wait.
 func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T) {
-	researcher := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentType}
+	executor := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentType}
 	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}
 	planner := &domain.AgentSignup{Role: domain.SignupRolePlanner, AgentType: domain.PlannerAgentType}
 	caller := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1"})
 	for name, store := range map[string]unstartedStore{
 		"a draft's planner":           {status: domain.PlatformExpDraft, signup: planner},
-		"an open one's researcher":    {status: domain.PlatformExpOpen, signup: researcher},
+		"an open one's executor":      {status: domain.PlatformExpOpen, signup: executor},
 		"an open one's reviewer":      {status: domain.PlatformExpOpen, signup: &domain.AgentSignup{Role: domain.SignupRoleReviewer}},
 		"the planner once it is open": {status: domain.PlatformExpOpen, signup: planner},
 		"nobody of the open one":      {status: domain.PlatformExpOpen},
@@ -299,7 +300,7 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 	}
 
 	// The refusal is worded for its caller, so a request with none is the platform's failure.
-	nobody := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: researcher}, quota: waitingQuota{}, hypotheses: humanHypothesis("pe-1")}
+	nobody := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: executor}, quota: waitingQuota{}, hypotheses: humanHypothesis("pe-1")}
 	var admission *AdmissionError
 	if err := nobody.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, ErrNoCaller) || errors.As(err, &admission) {
 		t.Errorf("a submit with no caller in its context: got = %v, want the platform's error and no refusal", err)
@@ -333,7 +334,7 @@ func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
 			t.Errorf("%s: the job is on %q with text %q, want the objective pe-1 and no text", status, exp.HypothesisID, exp.Hypothesis)
 		}
 
-		// It checks its code as a researcher would on a branch beside the baseline's.
+		// It checks its code as an executor would on a branch beside the baseline's.
 		check := baselineSubmission()
 		check.Branch = "hl/pe-1/baseline-check"
 		if err := s.Submit(context.Background(), check); !errors.Is(err, errReachedScoring) {
@@ -368,7 +369,7 @@ func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
 		spoil(exp)
 		var refused *AdmissionError
 		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonMalformed {
-			t.Errorf("a researcher's job with %s: got = %v, want %s", name, err, ReasonMalformed)
+			t.Errorf("an executor's job with %s: got = %v, want %s", name, err, ReasonMalformed)
 		}
 	}
 }
@@ -787,7 +788,7 @@ func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
 // A job says which branch its commit was pushed on, and that branch is one of its platform
 // experiment's: a commit of the default branch, or of another experiment's branch, is refused.
 func TestSubmitRefusesABranchThatIsNotThePlatformExperiments(t *testing.T) {
-	for _, branch := range []string{"", "main", "hl/pe-1/", "hl/pe-other/researcher-1/warmup-abc123", "hl/pe-1/two words"} {
+	for _, branch := range []string{"", "main", "hl/pe-1/", "hl/pe-other/executor-1/warmup-abc123", "hl/pe-1/two words"} {
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
 		exp.Branch = branch
@@ -799,3 +800,15 @@ func TestSubmitRefusesABranchThatIsNotThePlatformExperiments(t *testing.T) {
 }
 
 var testExperimentImage = &domain.ExperimentImage{Image: "registry.test/image@sha256:abababababababababababababababababababababababababababababababab", Architecture: "amd64"}
+
+// A researcher of a running platform experiment steers the work and submits no job, whatever the
+// job holds.
+func TestAResearcherSubmitsNoJob(t *testing.T) {
+	store := unstartedStore{status: domain.PlatformExpRunning, signup: &domain.AgentSignup{Role: domain.SignupRoleResearcher, AgentType: domain.ResearcherAgentType}}
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: store, quota: waitingQuota{}, hypotheses: humanHypothesis("pe-1")}
+	caller := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1"})
+	var admission *AdmissionError
+	if err := s.Submit(caller, humanIdeaSubmission()); !errors.As(err, &admission) || admission.Reason != platformapi.ReasonResearcherSubmitsNoJob {
+		t.Fatalf("got = %v, want researcher_submits_no_job", err)
+	}
+}

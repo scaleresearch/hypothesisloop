@@ -37,7 +37,7 @@ type hypothesisWithJobs struct {
 	FindingCount    int                         `json:"finding_count"`
 	Comments        []*domain.HypothesisComment `json:"comments"`
 	CommentCount    int                         `json:"comment_count"`
-	Actions         []domain.HypothesisAction   `json:"actions" doc:"What the reader may do to it now, each a write the API accepts from them: edit (PATCH /hypotheses/{id}) and remove (DELETE /hypotheses/{id}) of an idea a person wrote that no agent acted on, link (POST /hypotheses/{id}/links, from an agent's hypothesis only by that agent) and comment (POST /hypotheses/{id}/comments). Empty for a reader who writes nothing of its platform experiment, and once it closed."`
+	Actions         []domain.HypothesisAction   `json:"actions" doc:"What the reader may do to it now, each a write the API accepts from them: edit (PATCH /hypotheses/{id}) and remove (DELETE /hypotheses/{id}) of an idea a person wrote that no agent acted on, link (POST /hypotheses/{id}/links, from an agent's hypothesis only by that agent or a researcher), comment (POST /hypotheses/{id}/comments), and for a researcher merge and retire of an open one and unlink (POST /hypotheses/{id}/merge, /retire, DELETE /hypotheses/{id}/links/{type}/{to}). A merged or retired one takes comments only. Empty for a reader who writes nothing of its platform experiment, and once it closed."`
 }
 
 // Each of the three sub-lists GET /hypotheses/{id} returns is bounded like every other list read
@@ -165,11 +165,49 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 		DefaultStatus: 201,
 		Description: "Adds one outgoing link: builds_on (to a hypothesis, or the platform_experiment_id for the " +
 			"objective), contradicts or related (to a hypothesis in the same platform experiment). Only the agent whose " +
-			"hypothesis it is may link from it, and one with no owning agent can be linked by anyone; others get 403. " +
+			"hypothesis it is and a researcher of its platform experiment may link from it, and one with no owning agent can be linked by anyone; others get 403. " +
+			"409 hypothesis_merged or hypothesis_retired from a merged or retired hypothesis, and 422 naming to for a link to one. " +
 			"agent_id says whose link it is, as on registering, and who made it is the caller, answered as actor: author is refused. " +
 			"422 naming to on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links " +
 			"are append-only and re-adding one changes nothing. " + closedRefusal + "Returns the hypothesis's outgoing links.",
 	}), a.addLink)
+
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
+		OperationID: "unlink-hypothesis", Method: "DELETE", Path: "/hypotheses/{id}/links/{type}/{to}",
+		Summary: "Remove a link of a hypothesis", Tags: []string{"hypotheses"},
+		Description: "A researcher's curation: removes the outgoing link of type to to, of any hypothesis of its platform experiment. " +
+			"A link that is not there changes nothing. The last builds_on of a hypothesis is never removed (422): to move a " +
+			"hypothesis, add its new builds_on first (POST /hypotheses/{id}/links), then remove the old one. hypothesis.unlink " +
+			"announces a removal. 403 researcher_only for anyone but a researcher, 409 hypothesis_merged or hypothesis_retired " +
+			"for a merged or retired hypothesis, whose links are its history. agent_id names the researcher: an agent token's own, " +
+			"named or not. " + closedRefusal + "Returns the hypothesis's outgoing links.",
+	}), a.unlink)
+
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
+		OperationID: "merge-hypothesis", Method: "POST", Path: "/hypotheses/{id}/merge",
+		Summary: "Merge a hypothesis into one that states its claim", Tags: []string{"hypotheses"},
+		Description: "A researcher's curation of an open hypothesis that states the claim of another, into, of the same platform " +
+			"experiment and neither merged nor retired: every link to it moves to into, with the agent, actor and time it was made, " +
+			"except one from into itself and one into already has. Its own links stay as its history, and it becomes merged " +
+			"with merged_into and status_reason, the reason given. From then on it takes no job, checkout, link or verdict: " +
+			"it is tested under into, and registering its text again returns it. Its findings and comments stay. Merging " +
+			"again into the same hypothesis changes nothing. hypothesis.status announces it, with value merged and detail into. " +
+			"403 researcher_only for anyone but a researcher, 409 hypothesis_not_open for one settled, merged or retired, " +
+			"409 hypothesis_in_flight while a job is queued or running on it, 422 naming into when into is it, unknown, of " +
+			"another platform experiment, merged or retired, builds on it alone, or would close a builds_on cycle through a " +
+			"moved link. agent_id names the researcher: an agent token's own, named or not. " + closedRefusal + "Returns the merged hypothesis.",
+	}), a.merge)
+
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
+		OperationID: "retire-hypothesis", Method: "POST", Path: "/hypotheses/{id}/retire",
+		Summary: "Retire an open idea no longer worth a job", Tags: []string{"hypotheses"},
+		Description: "A researcher's curation of an open hypothesis: it becomes retired with status_reason, the reason given, " +
+			"which is required (422). No verdict: nothing showed it right or wrong. From then on it takes no job, checkout, link " +
+			"or verdict; its links, findings and comments stay. Retiring it again changes nothing. hypothesis.status announces it, " +
+			"with value retired and detail the reason. 403 researcher_only for anyone but a researcher, 409 hypothesis_not_open " +
+			"for one settled, merged or retired, 409 hypothesis_in_flight while a job is queued or running on it. agent_id names " +
+			"the researcher: an agent token's own, named or not. " + closedRefusal + "Returns the retired hypothesis.",
+	}), a.retire)
 
 	register(doc, auth.AudienceAgent, read(afterClose(huma.Operation{
 		OperationID: "query-hypotheses", Method: "POST", Path: "/hypotheses/query",
@@ -194,7 +232,7 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 		Summary: "List hypotheses, optionally scoped to one platform experiment", Tags: []string{"hypotheses"},
 		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
 			"platform experiment's hypotheses are candidates (the operator-facing global view). " +
-			"Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive) " +
+			"Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive|merged|retired) " +
 			"for just that status, ?by=people for the ideas people registered, ?q for those whose text holds it, ignoring case, ?untaken=true for those no agent works on now (see working), ?limit (default 20, max 200, 422 invalid_page over it) and ?offset. " +
 			"The open ideas of people come first, those no agent has settled or built on yet, then the most recent. " +
 			"Total match count is returned in the X-Total-Count response header. Rows carry builds_on " +
@@ -287,10 +325,12 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 			"the control is named and despite stands in for nothing (409). A control that holds is the basis even with despite beside it. What a verdict " +
 			"rests on is kept as a comment on the hypothesis. " +
 			"Only the agent whose hypothesis it is may set it; anyone else gets 403. A " +
-			"hypothesis no agent owns may be settled by anyone who reaches it — an idea " +
-			"nobody owns would otherwise sit open forever however much evidence it collected. " +
+			"hypothesis no agent owns, a person's or a researcher's idea, is settled by an agent that ran a job of its own on it " +
+			"that completed or failed, else 403 verdict_needs_own_job; with no agent named it is only reopened (open), as the coordinator does. " +
+			"A researcher gives no verdict: 403 researcher_gives_no_verdict. " +
 			"agent_id says as which agent the verdict is given: an agent token's is its own, named or not, and any other caller names " +
-			"the owning agent to rule for it. Who gave it is the caller, answered as status_actor. " + closedRefusal,
+			"the owning agent, or the agent that tested one no agent owns, to rule for it. Who gave it is the caller, answered as status_actor. 409 hypothesis_merged or " +
+			"hypothesis_retired for a merged or retired one, which takes no verdict. " + closedRefusal,
 	}), a.setStatus)
 }
 
@@ -375,6 +415,9 @@ func (a hypothesesAPI) reader(ctx context.Context, platformExperimentID string) 
 	}
 	if r.OrgOwner, err = a.access.OwnsOrgOf(ctx, platformExperimentID); err != nil {
 		return r, auth.Internal(a.logger, "read the caller's org role", err)
+	}
+	if r.Curates, err = a.registry.Curates(ctx, platformExperimentID, r.Caller.AgentID); err != nil {
+		return r, auth.Internal(a.logger, "read whether the caller is a researcher", err)
 	}
 	if r.Closed, err = a.registry.PlatformExperimentClosed(ctx, platformExperimentID); err != nil {
 		return r, auth.Internal(a.logger, "read whether the platform experiment closed", err)
@@ -576,7 +619,7 @@ func (a hypothesesAPI) list(ctx context.Context, in *struct {
 	PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment. Omitted, every platform experiment's hypotheses are candidates -- the operator-facing global view."`
 	ProjectID            string                  `query:"project_id" doc:"Only hypotheses of this project's platform experiments."`
 	Agent                string                  `query:"agent_id" doc:"Only hypotheses registered by this agent."`
-	Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress."`
+	Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress -- or merged or retired, a researcher's curation."`
 	By                   string                  `query:"by" enum:"people" doc:"people: only the hypotheses a person registered, an API key or staff included."`
 	Search               string                  `query:"q" doc:"Only hypotheses whose text holds this, ignoring case."`
 	Untaken              bool                    `query:"untaken" doc:"true: only the hypotheses no agent works on now: no job of theirs queued or running and no checkout within two hours."`
@@ -587,7 +630,7 @@ func (a hypothesesAPI) list(ctx context.Context, in *struct {
 	TotalCount int `header:"X-Total-Count"`
 }, error) {
 	if in.Status != "" && !domain.ValidHypothesisStatus(in.Status) {
-		return nil, invalid("status", "status is open, confirmed, refuted or inconclusive")
+		return nil, invalid("status", "status is open, confirmed, refuted, inconclusive, merged or retired")
 	}
 	limit, offset, err := page(in.Limit, in.Offset)
 	if err != nil {
@@ -843,7 +886,7 @@ func (a hypothesesAPI) listComments(ctx context.Context, in *struct {
 }
 
 type verdictRequest struct {
-	AgentID string                  `json:"agent_id,omitempty" required:"false" doc:"The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which settles only a hypothesis no agent owns."`
+	AgentID string                  `json:"agent_id,omitempty" required:"false" doc:"The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which only reopens a hypothesis no agent owns."`
 	Status  domain.HypothesisStatus `json:"status"`
 	Against string                  `json:"against,omitempty" doc:"The control job a confirmed or refuted verdict compares with."`
 	Despite string                  `json:"despite,omitempty" doc:"Why a confirmed or refuted verdict holds without a repeated run and a control."`
@@ -853,8 +896,8 @@ func (a hypothesesAPI) setStatus(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body verdictRequest
 }) (*struct{ Body *domain.Hypothesis }, error) {
-	if !domain.ValidHypothesisStatus(in.Body.Status) {
-		return nil, invalid("status", "status must be one of: open, confirmed, refuted, inconclusive")
+	if !domain.ValidVerdictStatus(in.Body.Status) {
+		return nil, invalid("status", "status must be one of: open, confirmed, refuted, inconclusive; a researcher merges and retires with POST /hypotheses/{id}/merge and /retire")
 	}
 	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
 		return nil, err
@@ -869,4 +912,75 @@ func (a hypothesesAPI) setStatus(ctx context.Context, in *struct {
 		return nil, a.registry.WriteRefusal(err)
 	}
 	return &struct{ Body *domain.Hypothesis }{Body: hyp}, nil
+}
+
+func (a hypothesesAPI) merge(ctx context.Context, in *struct {
+	ID   string `path:"id"`
+	Body platformapi.MergeHypothesisRequest
+}) (*struct{ Body *domain.Hypothesis }, error) {
+	if in.Body.Into == "" {
+		return nil, invalid("into", "into is required: the hypothesis that states the same claim")
+	}
+	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	if err := a.referencesInScope(ctx, in.Body.Into); err != nil {
+		return nil, err
+	}
+	researcher, actor, err := a.access.Writer(ctx, in.Body.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	h, err := a.registry.MergeHypothesis(ctx, in.ID, in.Body.Into, researcher, actor, in.Body.Reason)
+	if err != nil {
+		a.logger.Info("merge hypothesis", zap.Error(err))
+		return nil, a.registry.MergeRefusal(err)
+	}
+	return &struct{ Body *domain.Hypothesis }{Body: h}, nil
+}
+
+func (a hypothesesAPI) retire(ctx context.Context, in *struct {
+	ID   string `path:"id"`
+	Body platformapi.RetireHypothesisRequest
+}) (*struct{ Body *domain.Hypothesis }, error) {
+	if strings.TrimSpace(in.Body.Reason) == "" {
+		return nil, invalid("reason", registry.ErrReasonRequired.Error())
+	}
+	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	researcher, actor, err := a.access.Writer(ctx, in.Body.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	h, err := a.registry.RetireHypothesis(ctx, in.ID, researcher, actor, in.Body.Reason)
+	if err != nil {
+		a.logger.Info("retire hypothesis", zap.Error(err))
+		return nil, a.registry.WriteRefusal(err)
+	}
+	return &struct{ Body *domain.Hypothesis }{Body: h}, nil
+}
+
+func (a hypothesesAPI) unlink(ctx context.Context, in *struct {
+	ID      string          `path:"id"`
+	Type    domain.LinkType `path:"type" doc:"builds_on, contradicts or related."`
+	To      string          `path:"to" doc:"The link's target: a hypothesis id, or the platform_experiment_id for the objective."`
+	AgentID string          `query:"agent_id" doc:"The researcher that removes it. Absent, the agent token's own."`
+}) (*struct{ Body []domain.Link }, error) {
+	if !domain.ValidLinkType(in.Type) {
+		return nil, invalid("type", "type must be one of: builds_on, contradicts, related")
+	}
+	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	researcher, _, err := a.access.Writer(ctx, in.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	links, err := a.registry.UnlinkHypothesis(ctx, in.ID, researcher, domain.LinkSpec{Type: in.Type, To: in.To})
+	if err != nil {
+		a.logger.Info("unlink hypothesis", zap.Error(err))
+		return nil, a.registry.LinkRefusal(err)
+	}
+	return &struct{ Body []domain.Link }{Body: links}, nil
 }

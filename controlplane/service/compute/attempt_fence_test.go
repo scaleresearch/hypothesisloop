@@ -25,7 +25,7 @@ func TestARequeuedJobReplacesTheRunningInstanceOfItsPreviousAttempt(t *testing.T
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
-	p.Start("hl-job-t1-exp-1-a1-h100-0")
+	p.Start("hl-job-t1-exp-1-a1-r0of1-h100-0")
 	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
@@ -41,7 +41,7 @@ func TestARequeuedJobReplacesTheRunningInstanceOfItsPreviousAttempt(t *testing.T
 	}
 	mustCreate(t, e, requeued)
 
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-r0of1-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 	if matches, err := e.WorkloadMatchesDesired(ctx, requeued); err != nil || !matches {
@@ -59,8 +59,8 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
-	p.Start("hl-job-t1-exp-1-a1-h100-0")
-	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitLine(1))
+	p.Start("hl-job-t1-exp-1-a1-r0of1-h100-0")
+	p.Exit("hl-job-t1-exp-1-a1-r0of1-h100-0", exitLine(1))
 	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseFailed || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
@@ -72,7 +72,7 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 		t.Fatalf("the exited instance is actual: %v", ids)
 	}
 	mustCreate(t, e, requeued)
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-h100-1"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-r0of1-h100-1"}) {
 		t.Fatalf("rented %v", names)
 	}
 	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || attempt != 2 {
@@ -88,20 +88,20 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 func TestALeftoverThatCannotBeDestroyedHoldsBackTheNewInstance(t *testing.T) {
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
-	p.Start("hl-job-t1-exp-1-a1-h100-0")
-	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitLine(1))
+	p.Start("hl-job-t1-exp-1-a1-r0of1-h100-0")
+	p.Exit("hl-job-t1-exp-1-a1-r0of1-h100-0", exitLine(1))
 	p.Fail = failing("Destroy", "")
 
 	requeued := on(job(t, "exp-1", 2, 1), "h100-1")
 	if err := e.CreateWorkload(context.Background(), requeued); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v", err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a1-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a1-r0of1-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 	p.Fail = nil
 	mustCreate(t, e, requeued)
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-h100-1"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a2-r0of1-h100-1"}) {
 		t.Fatalf("rented %v", names)
 	}
 }
@@ -113,7 +113,7 @@ func TestALeftoverThatCannotBeDestroyedHoldsBackTheNewInstance(t *testing.T) {
 func TestAPreemptedJobReadmittedUnderTheSameAttemptIsRentedOnItsNewSlot(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
+	const old, placed = "hl-job-t1-exp-1-a3-r0of1-h100-0", "hl-job-t1-exp-1-a3-r0of1-h100-1"
 	mustCreate(t, e, job(t, "exp-1", 3, 1))
 	p.Start(old)
 	readmitted := on(job(t, "exp-1", 3, 1), "h100-1")
@@ -146,7 +146,7 @@ func TestTheExitOfTheInstanceAJobWasPreemptedFromIsNotItsResult(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e, p := newTestExecutor(t)
 			ctx := context.Background()
-			const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
+			const old, placed = "hl-job-t1-exp-1-a3-r0of1-h100-0", "hl-job-t1-exp-1-a3-r0of1-h100-1"
 			mustCreate(t, e, job(t, "exp-1", 3, 1))
 			p.Start(old)
 			p.Exit(old, exitLine(143))

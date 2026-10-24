@@ -47,7 +47,7 @@ func (f fixedStandings) BestPerAgentOnMetric(_ context.Context, _ *domain.Platfo
 	return out, nil, nil
 }
 
-// In a live run a researcher's subagent submitted on a branch made before the run's best existed
+// In a live run an executor's subagent submitted on a branch made before the run's best existed
 // and had to redo the job. A submit's answer names the best, the commit it ran and its branch, for
 // the submitter's checkout to tell whether its commit contains it.
 func TestASubmitNamesTheRunsBestJobAndItsCommit(t *testing.T) {

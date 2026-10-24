@@ -11,7 +11,7 @@ import (
 // Once the baseline is declared an agent of role baseline has nothing left to do. A machine of it
 // that runs is told to stop and not replaced, and one that stopped is not asked for again when
 // the image or the launcher changes: it would build and record the experiment's image again,
-// and the researchers' jobs would run in another image than the baseline's.
+// and the executors' jobs would run in another image than the baseline's.
 func TestABaselineAgentGetsNoMachineOnceTheBaselineIsDeclared(t *testing.T) {
 	baseline := func(signup domain.AgentSignup) db.LauncherAgent {
 		signup.Role = domain.SignupRoleBaseline

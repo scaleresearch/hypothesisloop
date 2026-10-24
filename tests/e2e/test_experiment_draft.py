@@ -3,8 +3,8 @@
 POST /platform-experiments/drafts makes a draft with a planner the platform runs. The planner
 proposes the experiment's definition and runs nothing. A person asks for a change in a sentence,
 the planner proposes again, and the person accepts at a cost they state: the draft becomes an open
-platform experiment with a sandboxed coordinator, its researchers and one agent of role baseline. No
-researcher's machine is asked for and nothing starts until an agent of role baseline has measured
+platform experiment with a sandboxed coordinator, its executors and one agent of role baseline. No
+executor's machine is asked for and nothing starts until an agent of role baseline has measured
 the baseline and it is declared; then the platform starts the run. Here a second baseline agent,
 run by the test, measures it and the test declares its job.
 
@@ -60,7 +60,7 @@ def _proposal(accelerator_type: str, **more) -> dict:
         "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 45, "agents": [{"agent_type": "hyperparameter-search"}, {}],
         "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
-        "sizing_reason": "An estimate, nothing has run: a trial is assumed to take a minute, and two researchers with a few trials each fit in 2 hours of budget.",
+        "sizing_reason": "An estimate, nothing has run: a trial is assumed to take a minute, and two executors with a few trials each fit in 2 hours of budget.",
     } | more
 
 
@@ -143,7 +143,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert api.post(f"/platform-experiments/{pe_id}/hold").status_code == 200
 
         # A changed goal reaches the planner that is still there, and it proposes again from it.
-        goal = api.get_json(f"/platform-experiments/{pe_id}")["goal"] + " Use three researchers at most."
+        goal = api.get_json(f"/platform-experiments/{pe_id}")["goal"] + " Use three executors at most."
         revised = api.patch(f"/platform-experiments/{pe_id}", {"goal": goal})
         assert revised.status_code == 200 and "proposed_at" not in revised.json() and "planner_ends_at" not in revised.json(), revised.text
         assert (revised.json()["goal"], revised.json()["goal_version"]) == (goal, 2), revised.json()
@@ -161,28 +161,28 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         pe = accepted.json()
         assert (pe["status"], pe["name"], pe["budget_accelerator_hours"], pe["max_agents"]) == ("open", "Hidden layer width, accepted", 1, 2), pe
         assert pe["coordinator"]["launcher"] and pe["goal"] == GOAL
-        # The accept made the researchers, beside the one agent the proposal signed up to measure
+        # The accept made the executors, beside the one agent the proposal signed up to measure
         # the baseline.
         joined = [a for a in api.agents(pe_id) if a["agent_type"] != "planner"]
         assert all(a["in_agentsandbox"] for a in joined), joined
-        researchers = [a for a in joined if a["role"] == "competitor"]
-        assert sorted(a["agent_type"] for a in researchers) == ["data-search", "generalist"], researchers
+        executors = [a for a in joined if a["role"] == "competitor"]
+        assert sorted(a["agent_type"] for a in executors) == ["data-search", "generalist"], executors
         measurers = [a for a in joined if a["role"] == "baseline"]
         assert [a["name"] for a in measurers] == ["Baseline 1"] and len(joined) == 3, joined
         again = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 45, "agents": [{}]})
         assert (again.status_code, again.json()["reason"]) == (409, "invalid_transition"), again.text
 
         # Accepted, nothing has run and nothing starts: the baseline agent's machine is asked for
-        # and no researcher's, no researcher's job is taken, and it stays open while the baseline
+        # and no executor's, no executor's job is taken, and it stays open while the baseline
         # is measured.
         assert "baseline_job_id" not in pe, pe
-        assert _asked_for(api, pe_id, researchers) == [], "a researcher's machine is asked for before there is a baseline"
+        assert _asked_for(api, pe_id, executors) == [], "an executor's machine is asked for before there is a baseline"
         assert len(_asked_for(api, pe_id, measurers)) == 1, "the baseline agent of an accepted draft has no machine asked for"
-        assert all((a["instance"]["state"], a["status_reason"]["reason"]) == ("waiting", "baseline_measuring") for a in researchers), researchers
+        assert all((a["instance"]["state"], a["status_reason"]["reason"]) == ("waiting", "baseline_measuring") for a in executors), executors
         unstarted = api.get_json(f"/platform-experiments/{pe_id}")
         assert (unstarted["status"], unstarted["status_reason"]["reason"], unstarted["status_reason"]["waits_for"]) == ("open", "baseline_measuring", "platform"), unstarted
         assert unstarted["baseline_due_at"] and "ends_at" not in unstarted and "started_at" not in unstarted, unstarted
-        too_early = api.post_experiment_body(api.submission_body_for_id(f"job-{pe_id[-8:]}-r", pe_id, researchers[0]["agent_id"]))
+        too_early = api.post_experiment_body(api.submission_body_for_id(f"job-{pe_id[-8:]}-r", pe_id, executors[0]["agent_id"]))
         assert (too_early.status_code, too_early.json()["reason"]) == (422, "experiment_not_started"), too_early.text
         assert "baseline_measuring" in too_early.json()["message"], f"the refusal does not say what the start waits for: {too_early.text}"
 
@@ -193,17 +193,17 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert declared["baseline_job_id"] == baseline.job and declared["job_estimated_duration_hours"] > 0, declared
         eventually("the accepted draft to run once its baseline is declared", lambda: api.get_json(f"/platform-experiments/{pe_id}"),
                    accept=lambda p: p["status"] == "running", deadline=deadline, interval=2)
-        assert len(_asked_for(api, pe_id, researchers)) == len(researchers), "a running experiment's researchers have no machine asked for"
+        assert len(_asked_for(api, pe_id, executors)) == len(executors), "a running experiment's executors have no machine asked for"
         shares = {q["agent_id"]: q["guaranteed_accelerator_hours"] for q in api.platform_experiment_quotas(pe_id)}
         assert planner_id not in shares, "a planner holds a quota"
         # Half the budget.
         assert shares[baseline.agent] == pytest.approx(1 / 2), shares
-        # Two researchers are too few for a cut, so the run has one stage and each holds its whole
+        # Two executors are too few for a cut, so the run has one stage and each holds its whole
         # share of what the baseline left of the budget.
         assert [(s["length_pct"], s["evict_pct"]) for s in api.stages(pe_id)["stages"]] == [(100, 0)]
         spent = api.quota_field(pe_id, baseline.agent, "used_guaranteed_acch")
         assert spent > 0, "the baseline job cost nothing"
-        assert all(shares[a["agent_id"]] == pytest.approx((1 - spent) / 2, abs=1e-6) for a in researchers), \
+        assert all(shares[a["agent_id"]] == pytest.approx((1 - spent) / 2, abs=1e-6) for a in executors), \
             f"the baseline's cost was not taken from the budget before the shares: {shares}, baseline spent {spent}"
         assert not _asked(_planner(api, pe_id)), "the planner is run in the experiment it planned"
     finally:

@@ -27,28 +27,29 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool) string {
 	return pe.ID
 }
 
-func TestSandboxedSaysWhoThePlatformRuns(t *testing.T) {
+// The model proxy reads the model choice of whom the platform runs, and of nobody else.
+func TestTheProxiedModelIsOfWhomThePlatformRuns(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	coordinated := createTestPEWithCoordinator(t, pool)
 	plain := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, plain, 10)
-	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{InAgentSandbox: true}, domain.AgentSignup{})
+	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{InAgentSandbox: true, Model: "anthropic/own"}, domain.AgentSignup{})
 	for _, tc := range []struct {
 		name, pe, agent string
-		want            bool
+		want            *domain.ModelChoice
 	}{
-		{"a sandboxed coordinator", coordinated, "", true},
-		{"a coordinator the platform does not run", plain, "", false},
-		{"a sandboxed agent", plain, agents[0], true},
-		{"an agent run elsewhere", plain, agents[1], false},
-		{"an agent of another platform experiment", coordinated, agents[0], false},
-		{"no platform experiment", "pe-missing", "", false},
+		{"a sandboxed coordinator", coordinated, "", &domain.ModelChoice{Role: domain.AgentRoleCoordinator, Own: "model-1"}},
+		{"a coordinator the platform does not run", plain, "", nil},
+		{"a sandboxed agent", plain, agents[0], &domain.ModelChoice{Role: domain.AgentRoleExecutor, Own: "anthropic/own"}},
+		{"an agent run elsewhere", plain, agents[1], nil},
+		{"an agent of another platform experiment", coordinated, agents[0], nil},
+		{"no platform experiment", "pe-missing", "", nil},
 	} {
-		got, err := pes.InAgentSandbox(ctx, tc.pe, tc.agent)
-		if err != nil || got != tc.want {
-			t.Errorf("%s: got = %v, %v, want = %v", tc.name, got, err, tc.want)
+		got, err := pes.ProxiedModel(ctx, tc.pe, tc.agent)
+		if err != nil || (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+			t.Errorf("%s: got = %+v, %v, want = %+v", tc.name, got, err, tc.want)
 		}
 	}
 }

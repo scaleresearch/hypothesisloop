@@ -163,6 +163,9 @@ func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *clus
 		Spec: corev1.ServiceSpec{
 			ClusterIP: corev1.ClusterIPNone,
 			Selector:  map[string]string{workloadkeys.ExperimentID: exp.ID},
+			// Every rank's name resolves as soon as its pod has an address: a rank that starts
+			// while rank 0 still pulls its image dials rank 0 at once in the rendezvous.
+			PublishNotReadyAddresses: true,
 		},
 	}
 	created, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).Create(ctx, svc, metav1.CreateOptions{})
@@ -953,7 +956,8 @@ func jobPhase(job *batchv1.Job) clusterapi.JobPhase {
 // a configured type name (acceleratorNodeAffinity's mapping, in reverse). This is the only way
 // to observe which of the acceptable_accelerator_types the k8s scheduler actually chose.
 //
-// node is rank 0's k8s node name (or the first scheduled pod's, if rank 0 isn't up yet) —
+// node is rank 0's k8s node name, rank 0 of the job's first group for a grouped job (or the
+// first scheduled pod's, if rank 0 isn't up yet) —
 // piggybacked on this lookup since the only consumer (cluster-agent's status report loop)
 // always wants both together. This is the sole source of job->physical-node attribution in the
 // system; PushStatus forwards it straight into the metrics store (metricsdb.RecordJobStatuses),
@@ -981,7 +985,14 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 		if primary == nil {
 			primary = p
 		}
-		if p.Labels["batch.kubernetes.io/job-completion-index"] == "0" {
+		if p.Spec.Subdomain == "" {
+			continue
+		}
+		rank, _, err := podGangRank(p)
+		if err != nil {
+			return "", "", true, fmt.Errorf("workload: %s: %w", experimentID, err)
+		}
+		if rank == 0 {
 			primary = p
 			break
 		}

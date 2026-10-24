@@ -158,8 +158,8 @@ func (p *Proxy) authorize(ctx context.Context, pe string, write bool) (*grant, e
 	if signup == nil {
 		return nil, readOnly("agent " + principal.AgentID + " is not signed up to platform experiment " + pe)
 	}
-	if signup.Role == domain.SignupRolePlanner {
-		return nil, readOnly("a planner reads the repository it plans for")
+	if !signup.Role.SubmitsJobs() {
+		return nil, readOnly("a " + string(signup.Role) + " reads the repository and pushes nothing")
 	}
 	if signup.Role != domain.SignupRoleBaseline {
 		names, err := p.store.AgentNames(ctx, pe)

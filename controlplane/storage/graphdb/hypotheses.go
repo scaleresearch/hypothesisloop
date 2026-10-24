@@ -126,27 +126,21 @@ type LinkResult struct {
 	Out       []domain.Link
 }
 
-// AddLink adds one outgoing link from an existing hypothesis. Only its registering agent may, or
-// anyone when it was submitted by a human. Links are append-only. agentID is the agent whose link
-// it is, empty when no agent owns it, and actor whose credential adds it.
+// AddLink adds one outgoing link from an existing hypothesis that is neither merged nor retired.
+// Who may is the caller's to decide. agentID is the agent whose link it is, empty when no agent
+// owns it, and actor whose credential adds it.
 func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec) (*LinkResult, error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		from, err := getHypothesis(ctx, tx, fromID)
+		from, err := lockedHypothesis(ctx, tx, fromID)
 		if err != nil {
-			return nil, err
-		}
-		if from == nil {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, fromID)
-		}
-		if from.AgentID != "" && from.AgentID != agentID {
-			return nil, fmt.Errorf("%w: hypothesis %s belongs to agent %s; register your own hypothesis that builds_on it instead", ErrNotOwner, fromID, from.AgentID)
-		}
-		if err := lockExperiment(ctx, tx, from.PlatformExperimentID); err != nil {
 			return nil, err
 		}
 		if err := validateLinks(from.PlatformExperimentID, []domain.LinkSpec{spec}, false); err != nil {
 			return nil, err
+		}
+		if from.Curated() {
+			return nil, &CuratedError{Hypothesis: from, Refused: "takes no link"}
 		}
 		if err := checkTargets(ctx, tx, from.PlatformExperimentID, fromID, []domain.LinkSpec{spec}); err != nil {
 			return nil, err
@@ -189,21 +183,19 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domai
 func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus) (h *domain.Hypothesis, changed bool, err error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		h, err := getHypothesis(ctx, tx, id)
+		changed = false
+		h, err := lockedHypothesis(ctx, tx, id)
 		if err != nil {
 			return nil, err
-		}
-		if h == nil {
-			return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 		}
 		if h.AgentID != "" && h.AgentID != callerAgentID {
 			return nil, fmt.Errorf("%w: hypothesis %s belongs to agent %s", ErrNotOwner, id, h.AgentID)
 		}
+		if h.Curated() {
+			return nil, &CuratedError{Hypothesis: h, Refused: "takes no verdict"}
+		}
 		if h.Status == status {
 			return h, nil
-		}
-		if err := lockExperiment(ctx, tx, h.PlatformExperimentID); err != nil {
-			return nil, err
 		}
 		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at,
   h.status_actor_kind = $actor_kind, h.status_actor_id = $actor_id RETURN h`,
@@ -357,8 +349,8 @@ func validateLinks(platformExperimentID string, specs []domain.LinkSpec, require
 	return nil
 }
 
-// checkTargets verifies every hypothesis a link points at exists, belongs to platformExperimentID
-// and is not fromID itself.
+// checkTargets verifies every hypothesis a link points at exists, belongs to platformExperimentID,
+// is neither merged nor retired and is not fromID itself.
 func checkTargets(ctx context.Context, tx neo4j.ManagedTransaction, platformExperimentID, fromID string, specs []domain.LinkSpec) error {
 	var ids []string
 	for _, spec := range specs {
@@ -372,25 +364,29 @@ func checkTargets(ctx context.Context, tx neo4j.ManagedTransaction, platformExpe
 	if len(ids) == 0 {
 		return nil
 	}
-	records, err := collect(ctx, tx, `UNWIND $ids AS id MATCH (t:Hypothesis {id: id}) RETURN t.id, t.platform_experiment_id`, map[string]any{"ids": ids})
+	records, err := collect(ctx, tx, `UNWIND $ids AS id MATCH (t:Hypothesis {id: id}) RETURN t`, map[string]any{"ids": ids})
 	if err != nil {
 		return err
 	}
-	var d decoder
-	found := make(map[string]string, len(records))
+	found := make(map[string]*domain.Hypothesis, len(records))
 	for _, r := range records {
-		found[d.str(r.Values[0])] = d.str(r.Values[1])
-	}
-	if d.err != nil {
-		return d.err
+		h, err := hypothesisFromNode(r.Values[0].(neo4j.Node))
+		if err != nil {
+			return err
+		}
+		found[h.ID] = h
 	}
 	for _, id := range ids {
-		pe, ok := found[id]
-		if !ok {
+		h, ok := found[id]
+		switch {
+		case !ok:
 			return fmt.Errorf("%w: no hypothesis %q; a link targets an existing hypothesis id in platform experiment %s, or %s itself for the objective", ErrInvalidLink, id, platformExperimentID, platformExperimentID)
-		}
-		if pe != platformExperimentID {
-			return fmt.Errorf("%w: hypothesis %s belongs to platform experiment %s; links stay within %s", ErrInvalidLink, id, pe, platformExperimentID)
+		case h.PlatformExperimentID != platformExperimentID:
+			return fmt.Errorf("%w: hypothesis %s belongs to platform experiment %s; links stay within %s", ErrInvalidLink, id, h.PlatformExperimentID, platformExperimentID)
+		case h.Status == domain.HypothesisMerged:
+			return fmt.Errorf("%w: hypothesis %s was merged into %s; link to %s instead", ErrInvalidLink, id, h.MergedInto, h.MergedInto)
+		case h.Status == domain.HypothesisRetired:
+			return fmt.Errorf("%w: hypothesis %s was retired (%s) and takes no link", ErrInvalidLink, id, h.StatusReason)
 		}
 	}
 	return nil
@@ -486,6 +482,12 @@ func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {
 		}
 		h.StatusActor = &by
 	}
+	if v, ok := p["merged_into"]; ok && v != nil {
+		h.MergedInto = d.str(v)
+	}
+	if v, ok := p["status_reason"]; ok && v != nil {
+		h.StatusReason = d.str(v)
+	}
 	if d.err != nil {
 		return nil, fmt.Errorf("hypothesis %v: %w", p["id"], d.err)
 	}
@@ -510,7 +512,7 @@ func storedActor(d *decoder, props map[string]any, kindProp, idProp, agentID str
 // wrap prefixes err with op unless it is one of this package's own sentinel errors, whose message
 // is already written for the caller to act on.
 func wrap(op string, err error) error {
-	for _, sentinel := range []error{ErrNotFound, ErrNotOwner, ErrInvalidLink, ErrSimilar, ErrDuplicateText} {
+	for _, sentinel := range []error{ErrNotFound, ErrNotOwner, ErrInvalidLink, ErrSimilar, ErrDuplicateText, ErrNotOpen, ErrCurated} {
 		if errors.Is(err, sentinel) {
 			return err
 		}

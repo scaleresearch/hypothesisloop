@@ -168,16 +168,18 @@ def test_human_idea_joins_the_shared_pool_owning_nothing(api, experiment, run_id
     assert by_agent.status_code == 201 and by_agent.json()["agent_id"] == agent_a, by_agent.text
     assert by_agent.json()["actor"] == {"kind": "staff", "id": "", "name": "staff"}, "a note written for an agent names who wrote it"
 
-    # Status is the owner's verdict: an unowned (human) row may be settled by any agent...
+    # Status is the owner's verdict: an unowned (human) row is settled by an agent whose job tested it...
     assert human.get("status_actor") is None, "a hypothesis nobody ruled on names who ruled"
-    status_resp = api.set_hypothesis_status(human["id"], agent_a, "confirmed")
+    untested = api.set_hypothesis_status(human["id"], agent_a, "confirmed")
+    assert (untested.status_code, untested.json()["reason"]) == (403, "verdict_needs_own_job"), untested.text
+    status_resp = api.set_hypothesis_status(human["id"], agent_b, "confirmed")
     assert status_resp.status_code == 200
     settled = api.hypothesis(human["id"])
     # ...and who gave the verdict is the credential that sent it, whichever agent it was given as.
     assert settled["status"] == "confirmed" and settled["status_actor"] == {"kind": "staff", "id": "", "name": "staff"}, settled
     assert status_resp.json()["status_actor"] == {"kind": "staff", "id": "", "name": "staff"} and not settled["agent_id"], status_resp.text
     basis = [c for c in settled["comments"] if c["text"].startswith("Verdict confirmed")]
-    assert len(basis) == 1 and basis[0]["agent_id"] == agent_a and basis[0]["actor"] == {"kind": "staff", "id": "", "name": "staff"}, settled["comments"]
+    assert len(basis) == 1 and basis[0]["agent_id"] == agent_b and basis[0]["actor"] == {"kind": "staff", "id": "", "name": "staff"}, settled["comments"]
 
     # What the experiment has settled, in one read each: the judged hypothesis with its newest
     # finding and best job, and the count of hypotheses by status.

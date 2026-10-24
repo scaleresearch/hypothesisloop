@@ -11,7 +11,7 @@ import (
 )
 
 // nextStage is the boundary a running platform experiment has ahead: when the stage after the
-// current one starts and what the start gives each researcher still standing.
+// current one starts and what the start gives each executor still standing.
 type nextStage struct {
 	startsAt time.Time
 	credit   float64
@@ -19,7 +19,7 @@ type nextStage struct {
 }
 
 // nextStageRelease is when the stage after pe's current one starts by the clock and what each of
-// standing researchers is given of runBudget then, as the boundary releases it
+// standing executors is given of runBudget then, as the boundary releases it
 // (controller.applyCut): the incoming stage's part of the budget, split evenly. ok is false when
 // no boundary is ahead: pe is not running, its clock has not started, it is in its last stage, or
 // nobody stands.

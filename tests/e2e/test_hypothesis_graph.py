@@ -1,8 +1,10 @@
 """The hypothesis graph (Memgraph-backed): every hypothesis is placed with at least one builds_on
 link to the experiment's objective root or to existing hypotheses, links stay inside one platform
-experiment, builds_on stays acyclic, only a hypothesis's registering agent links from it, reads
-(get, list, graph, read-only Cypher through POST /hypotheses/query) agree with what was written,
-and an explicit link is a hypothesis.link watch event, live and on replay.
+experiment, builds_on stays acyclic, only a hypothesis's registering agent and a researcher link
+from it, reads (get, list, graph, read-only Cypher through POST /hypotheses/query) agree with what
+was written, and an explicit link is a hypothesis.link watch event, live and on replay. A
+researcher curates the graph: it merges duplicates, retires stale ideas and relinks, and an
+executor is refused each.
 
 API-only, parallel-safe (each test owns its platform experiments). The one job submission is
 cancelled as soon as it is accepted.
@@ -514,3 +516,103 @@ def test_agent_watch_carries_others_activity_on_its_hypotheses_and_resumes(api, 
     assert [(e["kind"], e["subject"]) for e in resumed] == [("comment.new", mine["id"])], (
         f"a resumed agent watch repeated or missed events: {second.stdout}"
     )
+
+
+@pytest.fixture
+def curated_pe(api, experiment, run_id):
+    agent_a = make_agent(api, run_id, "curate-a")
+    agent_b = make_agent(api, run_id, "curate-b")
+    researcher = make_agent(api, run_id, "curate-r")
+    pe_id = experiment("hypothesis-curation", [agent_a, agent_b, (researcher, "researcher")], budget=BUDGET)
+    return pe_id, agent_a, agent_b, researcher
+
+
+def _merge(api, hyp_id: str, into: str, agent_id: str, reason: str = ""):
+    return api.post(f"/hypotheses/{hyp_id}/merge", {"into": into, "agent_id": agent_id} | ({"reason": reason} if reason else {}))
+
+
+def _retire(api, hyp_id: str, agent_id: str, reason: str):
+    return api.post(f"/hypotheses/{hyp_id}/retire", {"agent_id": agent_id, "reason": reason})
+
+
+def _unlink(api, hyp_id: str, type_: str, to: str, agent_id: str):
+    return api.session.delete(api._url(f"/hypotheses/{hyp_id}/links/{type_}/{to}"), params={"agent_id": agent_id}, timeout=30)
+
+
+def test_a_researcher_merges_an_executors_duplicate(api, curated_pe, run_id):
+    pe_id, agent_a, agent_b, researcher = curated_pe
+    dup = api.register_hypothesis(pe_id, agent_a, f"cosine decay to zero beats a constant rate {run_id}")
+    into = api.register_hypothesis(pe_id, agent_b, f"annealing the rate to zero helps {run_id}", distinct_from=[dup["id"]])
+    child = api.register_hypothesis(pe_id, agent_b, f"a final rate of a tenth is enough {run_id}", links=[link("builds_on", dup["id"])],
+                                    distinct_from=[dup["id"], into["id"]])
+
+    refused = _merge(api, dup["id"], into["id"], agent_a)
+    assert refused.status_code == 403 and refused.json()["reason"] == "researcher_only", refused.text
+
+    merged = _merge(api, dup["id"], into["id"], researcher, "the same claim")
+    assert merged.status_code == 200, merged.text
+    assert (merged.json()["status"], merged.json()["merged_into"], merged.json()["status_reason"]) == ("merged", into["id"], "the same claim")
+
+    dup_view = api.hypothesis(dup["id"])
+    assert dup_view["status"] == "merged" and dup_view["merged_into"] == into["id"]
+    assert _in(dup_view) == set(), f"links still point at the merged hypothesis: {dup_view['links']['in']}"
+    assert _out(dup_view) == {("builds_on", pe_id)}, "the merged hypothesis's own links are its history"
+    moved = api.hypothesis(child["id"])
+    assert _out(moved) == {("builds_on", into["id"])}
+    assert next(lk for lk in moved["links"]["out"])["agent_id"] == agent_b, "the moved link keeps whose it was"
+
+    again = api.post_hypothesis(pe_id, f"cosine decay to zero beats a constant rate {run_id}", agent_id=agent_b)
+    assert again.status_code == 200 and again.json()["id"] == dup["id"] and again.json()["status"] == "merged", again.text
+
+    code, _ = api.submit_job_expect(pe_id, agent_b, hyp_id=dup["id"])
+    assert code == 409, f"a job on a merged hypothesis: got {code}, want 409 hypothesis_merged"
+
+
+def test_a_researcher_retires_an_idea_with_a_reason(api, curated_pe, run_id):
+    pe_id, agent_a, _, researcher = curated_pe
+    idea = api.register_hypothesis(pe_id, agent_a, f"a deeper stem helps small images {run_id}")
+
+    no_reason = _retire(api, idea["id"], researcher, "")
+    assert no_reason.status_code == 422, no_reason.text
+    refused = _retire(api, idea["id"], agent_a, "stale")
+    assert refused.status_code == 403 and refused.json()["reason"] == "researcher_only", refused.text
+
+    retired = _retire(api, idea["id"], researcher, "the stem sweep covers it")
+    assert retired.status_code == 200, retired.text
+    view = api.hypothesis(idea["id"])
+    assert (view["status"], view["status_reason"]) == ("retired", "the stem sweep covers it")
+
+    code, _ = api.submit_job_expect(pe_id, agent_a, hyp_id=idea["id"])
+    assert code == 409, f"a job on a retired hypothesis: got {code}, want 409 hypothesis_retired"
+
+
+def test_a_researcher_relinks_an_executors_hypothesis_and_the_last_builds_on_stays(api, curated_pe, run_id, tmp_path: Path):
+    pe_id, agent_a, agent_b, researcher = curated_pe
+    moved = api.register_hypothesis(pe_id, agent_a, f"label smoothing of a tenth lifts accuracy {run_id}")
+    parent = api.register_hypothesis(pe_id, agent_b, f"regularising the head helps {run_id}", distinct_from=[moved["id"]])
+
+    assert api.post_hypothesis_link(moved["id"], "builds_on", parent["id"], agent_id=agent_b).status_code == 403
+    assert api.post_hypothesis_link(moved["id"], "builds_on", parent["id"], agent_id=researcher).status_code == 201
+
+    refused = _unlink(api, moved["id"], "builds_on", pe_id, agent_a)
+    assert refused.status_code == 403 and refused.json()["reason"] == "researcher_only", refused.text
+    unlinked = _unlink(api, moved["id"], "builds_on", pe_id, researcher)
+    assert unlinked.status_code == 200, unlinked.text
+    assert {(lk["type"], lk["hypothesis_id"]) for lk in unlinked.json()} == {("builds_on", parent["id"])}
+    last = _unlink(api, moved["id"], "builds_on", parent["id"], researcher)
+    assert last.status_code == 422, f"unlinking the last builds_on: {last.status_code} {last.text}"
+    absent = _unlink(api, moved["id"], "related", parent["id"], researcher)
+    assert absent.status_code == 200, absent.text
+
+    replay = api.hl_expect("watch", "--all", "--platform-experiment", pe_id, "--kinds", "hypothesis.unlink", "--after", "0", "--no-wait", timeout=20)
+    assert replay.returncode == 0, replay.stderr
+    events = [json.loads(line) for line in replay.stdout.splitlines() if line.startswith("{")]
+    assert [(e["subject"], e["value"], e["detail"], e["agent_id"]) for e in events] == [(moved["id"], "builds_on", pe_id, researcher)], (
+        f"watch did not deliver exactly the one removal: {replay.stdout}"
+    )
+
+
+def test_a_researchers_idea_is_unowned(api, curated_pe, run_id):
+    pe_id, _, _, researcher = curated_pe
+    idea = api.register_hypothesis(pe_id, researcher, f"a cyclic schedule escapes the plateau {run_id}")
+    assert idea["agent_id"] == "", f"a researcher's hypothesis is owned by {idea['agent_id']!r}"

@@ -1,6 +1,9 @@
 package provider
 
-import "context"
+import (
+	"context"
+	"sort"
+)
 
 // Pauser is the capability of setting an instance aside without giving it up: a paused instance
 // keeps its identity and its disk and is not billed for compute, for as long as the vendor keeps
@@ -26,18 +29,23 @@ type Pauser interface {
 // CapabilityPause is the name Capabilities gives Pauser.
 const CapabilityPause = "pause"
 
-// Capabilities names what p can do beyond the core, for a process to say at start.
+// Capabilities names what p can do beyond the core, for a process to say at start. Of a Bounded
+// it names the capabilities the Bounded carries.
 func Capabilities(p Provider) []string {
+	b, ok := p.(Bounded)
+	if !ok {
+		b = Bound(p)
+	}
 	found := []string{}
-	if _, ok := p.(Pauser); ok {
-		found = append(found, CapabilityPause)
+	for name, has := range map[string]bool{
+		CapabilityPause: b.Pauser != nil, CapabilityMarket: b.Market != nil,
+		CapabilityWarm: b.Warmer != nil, CapabilityNetwork: b.Networker != nil,
+	} {
+		if has {
+			found = append(found, name)
+		}
 	}
-	if _, ok := p.(Market); ok {
-		found = append(found, CapabilityMarket)
-	}
-	if _, ok := p.(Warmer); ok {
-		found = append(found, CapabilityWarm)
-	}
+	sort.Strings(found)
 	return found
 }
 

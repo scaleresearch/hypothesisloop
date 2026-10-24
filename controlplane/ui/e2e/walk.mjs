@@ -27,7 +27,7 @@ const IDP = 'http://127.0.0.1:54399'
 const flag = (name, fallback) => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : fallback
 const until = flag('--until', 'done')
 const off = flag('--off', '').split(',').filter(Boolean)
-const RESEARCHERS = 2
+const EXECUTORS = 2
 const LONGEST = 60 * 60 * 1000
 const REPOSITORY = process.env.TEST_GIT_HOST_GITHUB_REPOSITORY
 const INSTALLATION = process.env.TEST_GIT_HOST_GITHUB_INSTALLATION
@@ -124,7 +124,7 @@ async function main() {
     passed('form-repository-chosen')
     await form.getByRole('button', { name: 'Next: budget and rules' }).click()
     await form.getByRole('button', { name: 'Sandboxed agents' }).click()
-    await form.getByLabel('Researchers').fill(String(RESEARCHERS))
+    await form.getByLabel('Max executors').fill(String(EXECUTORS))
     passed('form-competition-settings')
     if (until === 'filled') return
     await form.getByRole('button', { name: 'Create and run' }).click()
@@ -153,7 +153,7 @@ async function main() {
       const jobs = await read(`/experiments?platform_experiment_id=${experimentID}&limit=50`)
       const instances = [pe.coordinator?.instance, ...agents.map(a => a.instance)].filter(Boolean)
       if (instances.some(i => i.state === 'starting')) await mark('a-machine-starting')
-      if (instances.length > RESEARCHERS && instances.every(i => i.state === 'running')) await mark('all-machines-running')
+      if (instances.length > EXECUTORS && instances.every(i => i.state === 'running')) await mark('all-machines-running')
       if (instances.some(i => i.progress_at)) await mark('first-progress')
       if (jobs.length > 0) await mark('first-job')
       if (jobs.some(j => j.status === 'RUNNING')) await mark('job-running')

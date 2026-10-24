@@ -14,7 +14,7 @@ class GitIdentityTest(unittest.TestCase):
     # Every agent's commits carried the image's one name, so a branch's history did not say who
     # wrote what.
     def test_commits_carry_the_agents_own_id(self):
-        agent = SimpleNamespace(agent_id="ag-7", role="researcher", platform_experiment_id="pe-1")
+        agent = SimpleNamespace(agent_id="ag-7", role="executor", platform_experiment_id="pe-1")
         identity = core.git_identity(agent)
         self.assertEqual((identity["GIT_AUTHOR_NAME"], identity["GIT_COMMITTER_NAME"]), ("ag-7", "ag-7"))
         self.assertTrue(identity["GIT_AUTHOR_EMAIL"].startswith("ag-7@"))
@@ -61,7 +61,7 @@ class NoPromptFilesTest(unittest.TestCase):
 
 
 class CloneWorkspaceTest(unittest.TestCase):
-    # The CLI caches that its directory is no git repository: a researcher that cloned in its first
+    # The CLI caches that its directory is no git repository: an executor that cloned in its first
     # turn had every `isolation: "worktree"` subagent refused with "not in a git repository".
     def test_the_clone_is_there_before_the_cli_starts(self):
         with tempfile.TemporaryDirectory() as root:
@@ -92,7 +92,7 @@ class CloneWorkspaceTest(unittest.TestCase):
                 core.clone_workspace(missing, "main", workdir)
             self.assertIn("failed: Command 'git' timed out", str(timed_out.exception))
 
-    # The planner and every researcher clone with this one function, and nothing else in the
+    # The planner and every agent clone with this one function, and nothing else in the
     # harness runs a clone of its own.
     def test_the_harness_has_one_clone(self):
         package = pathlib.Path(hypothesisloop_agent.__file__).parent
@@ -101,3 +101,20 @@ class CloneWorkspaceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RolesTest(unittest.TestCase):
+    # A researcher keeps the graph and runs no job: it is never nudged for an empty queue, and a
+    # new machine sends it back to the graph, never to a checkout it cannot push.
+    def test_only_executors_and_baseline_agents_submit_jobs(self):
+        from hypothesisloop_agent import config
+        for role, submits in (("executor", True), ("baseline", True), ("researcher", False), ("planner", False), ("coordinator", False)):
+            self.assertEqual(config.submits_jobs(SimpleNamespace(role=role)), submits, role)
+        self.assertTrue(config.researches(SimpleNamespace(role="researcher")))
+
+    def test_a_researcher_on_a_new_machine_reads_the_graph_again(self):
+        from hypothesisloop_agent.claude import prompts
+        note = prompts._new_machine_note(SimpleNamespace(role="researcher"))
+        self.assertIn("read the graph", note)
+        self.assertNotIn("checkout", note)
+        self.assertIn("hl hypothesis checkout ID", prompts._new_machine_note(SimpleNamespace(role="executor")))

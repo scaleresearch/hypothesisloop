@@ -38,7 +38,25 @@ func (s *Service) WriteRefusal(err error) error {
 	if errors.As(err, &inRecord) {
 		return refusal.Refuse(http.StatusConflict, "hypothesis_in_record", inRecord.Error())
 	}
+	var curated *graphdb.CuratedError
+	if errors.As(err, &curated) {
+		return refusal.Refuse(http.StatusConflict, CuratedReason(curated.Hypothesis), curated.Error())
+	}
 	switch {
+	case errors.Is(err, ErrNotResearcher):
+		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonResearcherOnly, err.Error())
+	case errors.Is(err, ErrResearcherGivesNoVerdict):
+		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonResearcherGivesNoVerdict, err.Error())
+	case errors.Is(err, ErrVerdictNeedsOwnJob):
+		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonVerdictNeedsOwnJob, err.Error())
+	case errors.Is(err, ErrChecksOutNothing):
+		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonResearcherSubmitsNoJob, err.Error())
+	case errors.Is(err, ErrHypothesisInFlight):
+		return refusal.Refuse(http.StatusConflict, platformapi.ReasonHypothesisInFlight, err.Error())
+	case errors.Is(err, graphdb.ErrNotOpen):
+		return refusal.Refuse(http.StatusConflict, platformapi.ReasonHypothesisNotOpen, err.Error())
+	case errors.Is(err, ErrReasonRequired):
+		return refusal.Invalid(refusal.ReasonInvalidRequest, ErrReasonRequired.Error()).On("reason")
 	case errors.Is(err, graphdb.ErrDuplicateText):
 		return refusal.Refuse(http.StatusConflict, "duplicate_hypothesis", "another hypothesis of this platform experiment already states this text: "+
 			"nothing was changed. Test or comment on that one instead")
@@ -69,6 +87,23 @@ func (s *Service) LinkRefusal(err error) error {
 		return refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("to")
 	}
 	return s.WriteRefusal(err)
+}
+
+// MergeRefusal is WriteRefusal for a merge, whose request names the hypothesis it merges into in
+// into.
+func (s *Service) MergeRefusal(err error) error {
+	if errors.Is(err, graphdb.ErrInvalidLink) {
+		return refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("into")
+	}
+	return s.WriteRefusal(err)
+}
+
+// CuratedReason is the reason a refusal of work on the merged or retired h gives.
+func CuratedReason(h *domain.Hypothesis) string {
+	if h.Status == domain.HypothesisMerged {
+		return platformapi.ReasonHypothesisMerged
+	}
+	return platformapi.ReasonHypothesisRetired
 }
 
 // similarHypotheses is the 409 a registration gets while it reads close to hypotheses it has not

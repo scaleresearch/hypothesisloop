@@ -40,7 +40,7 @@ func spawnTestAgents(t *testing.T, pes *Store, pe string, signups ...domain.Agen
 }
 
 // setPEStatus puts pe in status, a closed one closed ago before now. A running one is given a
-// clock that runs, as a start with a researcher at work leaves it.
+// clock that runs, as a start with an executor at work leaves it.
 func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExperimentStatus, ago time.Duration) {
 	t.Helper()
 	ctx := context.Background()
@@ -221,7 +221,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	want := map[string]bool{}
 	expect := func(agent string, ending bool) { want[agent] = ending }
 
-	// No researcher's machine is rented before there is a baseline to start from: while a
+	// No executor's machine is rented before there is a baseline to start from: while a
 	// platform experiment is open its launcher runs the agents that measure the baseline and
 	// nobody else. One of them is done when it finishes, there and then.
 	open := newPE()
@@ -490,7 +490,7 @@ func TestASignupKeepsWhoseCredentialAddedTheAgent(t *testing.T) {
 	}
 }
 
-// A baseline agent and a researcher added after another left were both named "Researcher 2".
+// A baseline agent and an executor added after another left were both named "Executor 2".
 func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -514,18 +514,18 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 		}
 		return agent
 	}
-	first := want(domain.SignupRoleCompetitor, "Researcher 1")
+	first := want(domain.SignupRoleCompetitor, "Executor 1")
 	want(domain.SignupRoleBaseline, "Baseline 1")
-	want(domain.SignupRoleCompetitor, "Researcher 2")
+	want(domain.SignupRoleCompetitor, "Executor 2")
 	want(domain.SignupRoleReviewer, "Reviewer 1")
 
 	if err := pes.RemoveAgent(ctx, pe, first.ID); err != nil {
 		t.Fatalf("remove: got = %v, want = nil", err)
 	}
-	want(domain.SignupRoleCompetitor, "Researcher 1")
-	want(domain.SignupRoleCompetitor, "Researcher 3")
+	want(domain.SignupRoleCompetitor, "Executor 1")
+	want(domain.SignupRoleCompetitor, "Executor 3")
 	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: first.ID, Role: domain.SignupRoleCompetitor}); !errors.Is(err, ErrAgentNameTaken) || inserted {
-		t.Fatalf("the removed Researcher 1 joining beside the new one: got = %v, %v, want ErrAgentNameTaken", inserted, err)
+		t.Fatalf("the removed Executor 1 joining beside the new one: got = %v, %v, want ErrAgentNameTaken", inserted, err)
 	}
 	if _, err := add(domain.SignupRoleCompetitor, "Baseline 1"); !errors.Is(err, ErrAgentNameTaken) {
 		t.Fatalf("a stated name another agent carries: got = %v, want ErrAgentNameTaken", err)
@@ -537,7 +537,7 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 
 // What the platform declares as a baseline by itself is read from here: the COMPLETED jobs on the
 // objective of baseline agents that finished. A job of one still at work may be the first of two,
-// a failed one measured nothing, and a researcher's job is no baseline.
+// a failed one measured nothing, and an executor's job is no baseline.
 func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFinished(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -547,7 +547,7 @@ func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFin
 	createTestPE(t, pool, pe, 10)
 	measuring := domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"}
 	baselines := spawnTestAgents(t, pes, pe, measuring, measuring)
-	researcher := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, AgentType: "generalist"})[0]
+	executor := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, AgentType: "generalist"})[0]
 	if err := pes.FinishAgent(ctx, pe, baselines[0], "the baseline is measured"); err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFin
 	seed(baselines[0], domain.StatusFailed, true)
 	seed(baselines[0], domain.StatusCompleted, false)
 	seed(baselines[1], domain.StatusCompleted, true)
-	seed(researcher, domain.StatusCompleted, true)
+	seed(executor, domain.StatusCompleted, true)
 
 	left, err := jobs.FinishedBaselineJobs(ctx, pe)
 	if err != nil || len(left) != 1 || left[0].ID != measured {

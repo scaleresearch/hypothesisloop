@@ -68,7 +68,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	}
 
 	// After the ladders: a boundary crossed this pass has lowered the pools it cut from.
-	errs = append(errs, c.keepResearchers(ctx, pes, now)...)
+	errs = append(errs, c.keepAgents(ctx, pes, now)...)
 
 	// Evict active jobs belonging to closed platform experiments (spec op 7c).
 	// This runs on every tick, so it self-heals if the Close() call only updated DB
@@ -107,14 +107,14 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// keepResearchers keeps the researchers of each of pes at work as its pool says. One that cannot
+// keepAgents keeps the team of each of pes at work as its pool says. One that cannot
 // be kept now is logged and skipped, and the others are kept.
-func (c *Controller) keepResearchers(ctx context.Context, pes []*domain.PlatformExperiment, now time.Time) []error {
+func (c *Controller) keepAgents(ctx context.Context, pes []*domain.PlatformExperiment, now time.Time) []error {
 	var errs []error
 	for _, pe := range pes {
-		if err := c.researchers.KeepResearchers(ctx, pe, now); err != nil {
-			c.logger.Error("keep researchers", zap.String("pe", pe.ID), zap.Error(err))
-			errs = append(errs, fmt.Errorf("keep researchers of %s: %w", pe.ID, err))
+		if err := c.agentKeeper.KeepAgents(ctx, pe, now); err != nil {
+			c.logger.Error("keep agents", zap.String("pe", pe.ID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("keep agents of %s: %w", pe.ID, err))
 		}
 	}
 	return errs

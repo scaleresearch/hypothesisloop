@@ -12,7 +12,8 @@ from hypothesisloop_agent import config
 # Each role reads hl's listing, which holds the rules every command shares, and the help of the
 # commands it acts with; it reads the help of any other when it runs one. A planner runs nothing,
 # so the listing is not for it: it is shown its two commands.
-_HL_HELP = ([], ["hypothesis", "submit"])
+_HL_HELP_EXECUTOR = ([], ["hypothesis", "submit"], ["job", "submit"])
+_HL_HELP_RESEARCHER = ([], ["hypothesis"], ["hypothesis", "merge"], ["hypothesis", "retire"], ["hypothesis", "unlink"])
 _HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"])
 _HL_HELP_BASELINE = ([], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "update"], ["platform-experiments", "summary"],
@@ -22,13 +23,15 @@ _HL_HELP_COORDINATOR = ([], ["platform-experiments", "update"], ["platform-exper
 
 def hl_commands(cfg: config.Config) -> str:
     """hl's own listing of its commands and of the subcommands the briefing of cfg's role leans on."""
-    groups = _HL_HELP
+    groups = _HL_HELP_EXECUTOR
     if config.coordinates(cfg):
         groups = _HL_HELP_COORDINATOR
     elif config.plans(cfg):
         groups = _HL_HELP_PLANNER
     elif config.measures_baseline(cfg):
         groups = _HL_HELP_BASELINE
+    elif config.researches(cfg):
+        groups = _HL_HELP_RESEARCHER
     # hl prints the help of a group on stdout and the help of one command on stderr.
     return "\n\n".join(
         subprocess.run(["hl", *group, "--help"], check=True, text=True,

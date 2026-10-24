@@ -41,10 +41,10 @@ func emptyStore(t *testing.T) *Store {
 func TestEnsureSchemaCreatesEveryDeclaredTableAndNothingElse(t *testing.T) {
 	s := emptyStore(t)
 	ctx := context.Background()
-	if err := s.EnsureSchema(ctx); err != nil {
+	if err := s.EnsureSchema(ctx, nil); err != nil {
 		t.Fatalf("first start: got = %v, want nil", err)
 	}
-	if err := s.EnsureSchema(ctx); err != nil {
+	if err := s.EnsureSchema(ctx, nil); err != nil {
 		t.Fatalf("next start: got = %v, want nil", err)
 	}
 	rows, err := s.querySQLRows(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'`)
@@ -61,7 +61,7 @@ func TestEnsureSchemaCreatesEveryDeclaredTableAndNothingElse(t *testing.T) {
 func TestEveryWriterWritesOnlyDeclaredTablesAndLabels(t *testing.T) {
 	s := emptyStore(t)
 	ctx := context.Background()
-	if err := s.EnsureSchema(ctx); err != nil {
+	if err := s.EnsureSchema(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC().Truncate(time.Millisecond)
@@ -102,7 +102,7 @@ func TestEveryWriterWritesOnlyDeclaredTablesAndLabels(t *testing.T) {
 			t.Errorf("%s: got = %v, want nil", name, err)
 		}
 	}
-	if err := s.EnsureSchema(ctx); err != nil {
+	if err := s.EnsureSchema(ctx, nil); err != nil {
 		t.Fatalf("after every writer: got = %v, want the registry's schema unchanged", err)
 	}
 }
@@ -114,13 +114,13 @@ func TestEnsureSchemaRefusesAnUndeclaredColumnOrTable(t *testing.T) {
 		"a table":  {`CREATE TABLE stray (ts TIMESTAMP(3) TIME INDEX)`, "unexpected stray.ts timestamp(3) TIMESTAMP"},
 	} {
 		s := emptyStore(t)
-		if err := s.EnsureSchema(ctx); err != nil {
+		if err := s.EnsureSchema(ctx, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.execSQL(ctx, stray.ddl); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.EnsureSchema(ctx); err == nil || !strings.Contains(err.Error(), stray.named) {
+		if err := s.EnsureSchema(ctx, nil); err == nil || !strings.Contains(err.Error(), stray.named) {
 			t.Errorf("%s: got = %v, want a refusal naming %q", name, err, stray.named)
 		}
 	}
@@ -135,7 +135,7 @@ func TestEnsureSchemaRefusesAMissingColumn(t *testing.T) {
 	if err := s.execSQL(ctx, metricTable(aliveHeartbeatMetric, "experiment_id").create); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnsureSchema(ctx); err == nil || !strings.Contains(err.Error(), "missing "+aliveHeartbeatMetric+".pod_uid string TAG") {
+	if err := s.EnsureSchema(ctx, nil); err == nil || !strings.Contains(err.Error(), "missing "+aliveHeartbeatMetric+".pod_uid string TAG") {
 		t.Fatalf("got = %v, want a refusal naming the missing column", err)
 	}
 }
@@ -145,7 +145,7 @@ func TestEnsureSchemaRefusesAMissingColumn(t *testing.T) {
 func TestTheStoreRefusesARemoteWriteOfAnUndeclaredTableOrColumn(t *testing.T) {
 	s := emptyStore(t)
 	ctx := context.Background()
-	if err := s.EnsureSchema(ctx); err != nil {
+	if err := s.EnsureSchema(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	for name, g := range map[string]gauge{
@@ -157,7 +157,7 @@ func TestTheStoreRefusesARemoteWriteOfAnUndeclaredTableOrColumn(t *testing.T) {
 			t.Errorf("%s: got = nil, want the store to refuse it", name)
 		}
 	}
-	if err := s.EnsureSchema(ctx); err != nil {
+	if err := s.EnsureSchema(ctx, nil); err != nil {
 		t.Fatalf("after the refused writes: got = %v, want the registry's schema unchanged", err)
 	}
 }

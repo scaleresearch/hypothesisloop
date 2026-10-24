@@ -20,6 +20,9 @@ type Settings struct {
 	// ExcludedMachines are vendor machine ids never rented, for a host seen failing to start
 	// instances. The log names the machine of every instance rented and of every one stuck.
 	ExcludedMachines []int64 `yaml:"excluded_machines"`
+	// PrivateNetworks lets a multi-node job rent its ranks into one of the vendor's overlays.
+	// Off, Networked offers none.
+	PrivateNetworks bool `yaml:"private_networks"`
 
 	// Accelerators are the GPU models this account may rent, each under both of its names.
 	Accelerators []Accelerator `yaml:"accelerators"`

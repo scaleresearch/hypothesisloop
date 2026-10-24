@@ -17,7 +17,7 @@ import (
 func silenceController(observed ObservedState) *Controller {
 	return &Controller{
 		store:                 ceilingStore{},
-		researchers:           keptNothing{},
+		agentKeeper:           keptNothing{},
 		observed:              observed,
 		logger:                zap.NewNop(),
 		silenceMultiplier:     3,

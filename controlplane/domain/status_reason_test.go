@@ -8,8 +8,8 @@ import "testing"
 func TestEveryStatusReasonNamesWhoActs(t *testing.T) {
 	for reason, want := range map[string]Waiter{
 		"proposed": WaitsForOwner, "declined": WaitsForOwner, "planning": WaitsForPlatform,
-		"budget_below_baseline": WaitsForOwner, "baseline_breaks_constraint": WaitsForOwner, "no_researchers": WaitsForOwner, "budget_spent": WaitsForOwner,
-		"baseline_required": WaitsForCoordinator, "baseline_undeclared": WaitsForCoordinator, "baseline_missing_metric": WaitsForCoordinator, "researchers_done": WaitsForCoordinator,
+		"budget_below_baseline": WaitsForOwner, "baseline_breaks_constraint": WaitsForOwner, "no_executors": WaitsForOwner, "budget_spent": WaitsForOwner,
+		"baseline_required": WaitsForCoordinator, "baseline_undeclared": WaitsForCoordinator, "baseline_missing_metric": WaitsForCoordinator, "executors_done": WaitsForCoordinator,
 		"baseline_measuring": WaitsForPlatform, "starts_at_ahead": WaitsForPlatform, "starting": WaitsForPlatform, "agents_starting": WaitsForPlatform,
 	} {
 		if got, err := WaitsFor(reason, true); err != nil || got != want {

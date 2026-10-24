@@ -8,13 +8,17 @@ import (
 
 // FitsWhenIdle reports whether a cluster with nothing running on it holds exp: its installed
 // total covers the job, and each node of the job fits the cpu, memory and storage of some node
-// of the cluster. Nodes whose totals were not read are not judged.
+// of the cluster, a node of its own when the job spreads over hosts (RequiresDistinctHosts).
+// Nodes whose totals were not read are not judged.
 func FitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) bool {
 	if !fitsInstalled(total, exp) {
 		return false
 	}
 	if len(nodeTotals) == 0 {
 		return true
+	}
+	if RequiresDistinctHosts(exp) {
+		return SpreadHostsWhenIdle(nodeTotals, exp) == len(exp.NodeShapes())
 	}
 	for _, shape := range exp.NodeShapes() {
 		held := false
@@ -29,6 +33,39 @@ func FitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64
 		}
 	}
 	return true
+}
+
+// SpreadHostsWhenIdle is how many nodes of exp an idle cluster whose nodes have nodeTotals holds
+// with each on a host of its own: the largest matching of exp's nodes to hosts with room for them.
+func SpreadHostsWhenIdle(nodeTotals map[string]map[string]int64, exp *domain.Experiment) int {
+	shapes := exp.NodeShapes()
+	hosts := make([]string, 0, len(nodeTotals))
+	for host := range nodeTotals {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	holder := make(map[string]int, len(hosts))
+	var assign func(rank int, seen map[string]bool) bool
+	assign = func(rank int, seen map[string]bool) bool {
+		for _, host := range hosts {
+			if seen[host] || !NodeHasRoom(nodeTotals[host], shapes[rank].Resources) {
+				continue
+			}
+			seen[host] = true
+			if other, taken := holder[host]; !taken || assign(other, seen) {
+				holder[host] = rank
+				return true
+			}
+		}
+		return false
+	}
+	held := 0
+	for rank := range shapes {
+		if assign(rank, map[string]bool{}) {
+			held++
+		}
+	}
+	return held
 }
 
 // fitsInstalled reports whether total, a cluster's installed capacity, covers exp on one of the

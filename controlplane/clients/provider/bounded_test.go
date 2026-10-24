@@ -24,11 +24,13 @@ func TestAVendorThatEchoesTheRequestNeverPutsASecretInAnError(t *testing.T) {
 		echoed := fmt.Sprintf(`HTTP 400: {"env":{"HYPOTHESISLOOP_TOKEN":%q,"ACCELERATOR_TYPE":"small"},"image_login":"-u robot -p %s registry.example"}`, token, password)
 		return fmt.Errorf("%s: %w", echoed, provider.ErrNoOffer)
 	}
-	bounded := provider.Bounded(vendor)
+	bounded := provider.Bound(vendor)
 
 	_, createErr := bounded.Create(context.Background(), spec)
-	warmErr := bounded.(provider.Warmer).StartWarm(context.Background(), "some-id", spec)
-	for call, err := range map[string]error{"Create": createErr, "StartWarm": warmErr} {
+	warmErr := bounded.Warmer.StartWarm(context.Background(), "some-id", spec)
+	_, networkedErr := bounded.Networker.Networked(context.Background(), spec, 2, true)
+	networkErr := bounded.Networker.CreateNetwork(context.Background(), "hl-net-a", []provider.Spec{{Name: "other"}, spec}, true)
+	for call, err := range map[string]error{"Create": createErr, "StartWarm": warmErr, "Networked": networkedErr, "CreateNetwork": networkErr} {
 		if err == nil {
 			t.Fatalf("%s: the vendor's refusal was lost", call)
 		}

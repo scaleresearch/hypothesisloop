@@ -193,3 +193,36 @@ func TestADistributedJobsPodsReachEachOtherAndNoOtherPod(t *testing.T) {
 		t.Fatalf("get the policy of a single-node job: %v, want none: it has no peers to reach", err)
 	}
 }
+
+// Every group of a grouped job has a pod of completion index 0, and only the first group's is
+// rank 0: the node reported for the job is that pod's, whichever pod lists first.
+func TestAdmittedAcceleratorIsResolvedFromTheFirstGroupsRankZero(t *testing.T) {
+	actor, learner := gangPod("exp-gang-actor-0", 0, "actor", 1, "actor-node"), gangPod("exp-gang-learner-0", 0, "learner", 0, "learner-node")
+	c := pullTestClient(t, &actor, &learner)
+	accelerator, node, consistent, err := c.ResolveAdmittedAcceleratorType(context.Background(), "gang")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "learner-node" || accelerator != "type-a" || !consistent {
+		t.Errorf("resolved %q on %q (consistent %v), want type-a on learner-node", accelerator, node, consistent)
+	}
+}
+
+// A rank that starts while rank 0 still pulls its image dials rank 0 at once, so the Service
+// publishes a pod's address before it is Ready.
+func TestTheHeadlessServicePublishesRanksBeforeTheyAreReady(t *testing.T) {
+	ctx := context.Background()
+	c := pullTestClient(t)
+	exp := pullTestExperiment("exp-not-ready", testImage, nil)
+	exp.Job.NumNodes = 2
+	if err := c.CreateWorkload(ctx, exp); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).Get(ctx, jobName(exp.ID), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Spec.PublishNotReadyAddresses {
+		t.Error("the headless Service publishes only Ready pods, so a rank can dial rank 0 before its name exists")
+	}
+}

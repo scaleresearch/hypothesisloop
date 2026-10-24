@@ -18,7 +18,7 @@ def test_concurrent_same_agent_requests_race_one_quota_boundary(api, run_id):
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
     api.declare_baseline_and_wait_running(pe_id)
 
-    # A run of one researcher has one stage, so the agent holds its whole share from the start.
+    # A run of one executor has one stage, so the agent holds its whole share from the start.
     # Each job reserves 60% of it on its one core.
     allocation = api.quota_field(pe_id, agent, "guaranteed_accelerator_hours")
     hours = round(allocation * 0.6, 4)

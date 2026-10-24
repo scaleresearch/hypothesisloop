@@ -210,8 +210,8 @@ func TestTheCloseIsAnnouncedWithTheReasonGiven(t *testing.T) {
 	}
 }
 
-// A status_reason is derived on every read, so a run whose last researcher's machine stopped for
-// good read researchers_done and wrote no row: nothing woke the coordinator that was to close it.
+// A status_reason is derived on every read, so a run whose last executor's machine stopped for
+// good read executors_done and wrote no row: nothing woke the coordinator that was to close it.
 // The reason that waits for the coordinator is recorded, and that write announces the status,
 // once for each change, and never a reason of a status the row has left.
 func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusChange(t *testing.T) {
@@ -231,20 +231,20 @@ func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusChange(t *test
 	}
 	before := cursorNow(t, pool)
 
-	tell("", "researchers_done", "researchers_done")
-	// A researcher whose machine is asked for again leaves the run waiting for nobody, and the
+	tell("", "executors_done", "executors_done")
+	// An executor whose machine is asked for again leaves the run waiting for nobody, and the
 	// next time none is left is told again.
-	tell("", "researchers_done")
+	tell("", "executors_done")
 	got := changesAfter(t, store, filter, before)
-	if len(got) != 2 || got[0].Value != "running" || got[0].Detail != "researchers_done" || got[1].Detail != "researchers_done" {
-		t.Fatalf("changes: got = %+v, want = running researchers_done, twice", got)
+	if len(got) != 2 || got[0].Value != "running" || got[0].Detail != "executors_done" || got[1].Detail != "executors_done" {
+		t.Fatalf("changes: got = %+v, want = running executors_done, twice", got)
 	}
 
 	if err := store.ClosePlatformExperiment(ctx, peID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	before = cursorNow(t, pool)
-	tell("researchers_done")
+	tell("executors_done")
 	if got := changesAfter(t, store, filter, before); len(got) != 0 {
 		t.Fatalf("telling a closed one: got = %+v, want = nothing", got)
 	}
@@ -407,7 +407,7 @@ func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
 	}
 }
 
-// Two researchers ran one hypothesis and nobody noticed. A job submitted with the other agents'
+// Two executors ran one hypothesis and nobody noticed. A job submitted with the other agents'
 // jobs on its hypothesis keeps the sentence its submitter was told, and whoever steers the run is
 // told it as job.duplicate, once, with no other agent.
 func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) {
@@ -416,7 +416,7 @@ func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) 
 	agentID, peID, hypothesisID := seedRun(t, pool, "duplicate", true)
 	store := NewStore(pool, 3)
 	before := cursorNow(t, pool)
-	const sentence = "hypothesis h is tested by another agent too: job-a of Researcher 2 (RUNNING)"
+	const sentence = "hypothesis h is tested by another agent too: job-a of Executor 2 (RUNNING)"
 	exp := jobOf(agentID, peID, hypothesisID, "duplicate-job", "")
 	exp.SameHypothesis = sentence
 	queueJob(t, pool, exp)
@@ -555,11 +555,11 @@ func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testi
 	}
 }
 
-// dueOf is the researchers of peID due an idle notice: other tests leave runs of their own.
-func dueOf(t *testing.T, store *Store, peID string, after time.Duration) ([]IdleResearcher, error) {
+// dueOf is the executors of peID due an idle notice: other tests leave runs of their own.
+func dueOf(t *testing.T, store *Store, peID string, after time.Duration) ([]IdleExecutor, error) {
 	t.Helper()
-	all, err := store.IdleResearchers(context.Background(), after)
-	var due []IdleResearcher
+	all, err := store.IdleExecutors(context.Background(), after)
+	var due []IdleExecutor
 	for _, r := range all {
 		if r.PlatformExperimentID == peID {
 			due = append(due, r)
@@ -568,11 +568,11 @@ func dueOf(t *testing.T, store *Store, peID string, after time.Duration) ([]Idle
 	return due, err
 }
 
-// noticeIdle tells every researcher of peID due an idle notice, as the service does, with a
+// noticeIdle tells every executor of peID due an idle notice, as the service does, with a
 // detail that says the minutes of its stretch, and answers how many were told.
 func noticeIdle(t *testing.T, store *Store, peID string, after time.Duration) int {
 	t.Helper()
-	due, err := store.IdleResearchers(context.Background(), after)
+	due, err := store.IdleExecutors(context.Background(), after)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func noticeIdle(t *testing.T, store *Store, peID string, after time.Duration) in
 	return told
 }
 
-// Two passes that read the same due researcher tell it once: the second write finds the notice
+// Two passes that read the same due executor tell it once: the second write finds the notice
 // the first one wrote.
 func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 	pool := eventsTestDB(t)
@@ -600,7 +600,7 @@ func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
 	due, err := dueOf(t, store, peID, 10*time.Minute)
 	if err != nil || len(due) != 1 {
-		t.Fatalf("due %+v, %v, want the one researcher", due, err)
+		t.Fatalf("due %+v, %v, want the one executor", due, err)
 	}
 	if err := store.NoticeIdle(ctx, due[0], "first"); err != nil {
 		t.Fatal(err)
@@ -615,8 +615,8 @@ func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 }
 
 // A job running is activity, and the stretch starts when the last one ended. The roster says
-// what the researcher has in flight, and for how long it had none.
-func TestAResearcherWithAJobRunningIsNotIdle(t *testing.T) {
+// what the executor has in flight, and for how long it had none.
+func TestAnExecutorWithAJobRunningIsNotIdle(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, hypothesisID := seedRun(t, pool, "running", true)
 	store := NewStore(pool, 3)
@@ -664,10 +664,10 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	}
 }
 
-// A researcher worked 28 minutes on its own machine with nothing on the platform, and neither
-// it nor the coordinator was told. A lead told once rested from mid-run to the close. A researcher with no job submitted for the notice and none in flight is told so, new, and
+// An executor worked 28 minutes on its own machine with nothing on the platform, and neither
+// it nor the coordinator was told. A lead told once rested from mid-run to the close. An executor with no job submitted for the notice and none in flight is told so, new, and
 // again every notice while the stretch lasts, continues.
-func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *testing.T) {
+func TestAnExecutorWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *testing.T) {
 	pool := eventsTestDB(t)
 	before := cursorNow(t, pool)
 	agentID, peID, hypothesisID := seedRun(t, pool, "idle", true)
@@ -743,11 +743,11 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	exec(t, pool, `UPDATE experiment_signups SET finished_at = now() WHERE platform_experiment_id = $1`, peID)
 	exec(t, pool, `UPDATE experiment_signups SET idle_noticed_at = NULL WHERE platform_experiment_id = $1`, peID)
 	if told := noticeIdle(t, store, peID, 0); told != 0 {
-		t.Fatalf("a finished researcher: told %d, want none", told)
+		t.Fatalf("a finished executor: told %d, want none", told)
 	}
 }
 
-// A run's places stood free while its researchers had jobs in flight, and its coordinator was not
+// A run's places stood free while its executors had jobs in flight, and its coordinator was not
 // told. Places free for the notice are told, new, and again every notice while they stay free,
 // continues, to whoever steers the run and to no agent. A pass that sees none
 // free ends the stretch, and the next one starts over.

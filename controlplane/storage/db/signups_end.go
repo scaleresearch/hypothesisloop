@@ -66,7 +66,7 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 		}
 		tx.agentActivity(platformExpID, agentID, domain.ActivityLeft)
-		// Where the platform runs the researchers, the pool is what it runs: a researcher removed
+		// Where the platform runs the agents, the pool is what it runs: an agent removed
 		// before the start lowers its entry, or the platform would add another in its place.
 		if platformRuns && len(keys) > 0 {
 			if err := shrinkPoolToAtWorkTx(ctx, tx, platformExpID, keys[0]); err != nil {
@@ -88,7 +88,9 @@ var ErrWorkUnfinished = errors.New("the agent has a job in flight")
 // FinishAgent records that an agent of a running platform experiment has nothing left to do, or
 // that one that measures the baseline is done in an open one, where its work is. It answers
 // ErrSignupClosed anywhere else, domain.ErrNotSignedUp, and ErrWorkUnfinished. An agent that already
-// finished keeps the moment and the reason it has.
+// finished keeps the moment and the reason it has. A researcher's work lasts as long as the run, so
+// one that finishes leaves the agents for good (lowerPoolTx): nobody is added in its place, as
+// for one whose machine stopped.
 func (s *Store) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
 	return s.write(ctx, func(tx *Write) error {
 		var err error
@@ -96,6 +98,19 @@ func (s *Store) FinishAgent(ctx context.Context, platformExpID, agentID, reason 
 		// include it, and one that starts later reads the finish.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
 			return fmt.Errorf("platform_experiments_store.FinishAgent: lock: %w", err)
+		}
+		// A role never changes. A researcher's finish lowers the agents, whose row is locked before
+		// its signup's, in the order a join takes the two.
+		var researcher bool
+		err = tx.QueryRow(ctx, `SELECT role = '`+string(domain.SignupRoleResearcher)+`' FROM experiment_signups WHERE platform_experiment_id = $1 AND agent_id = $2`,
+			platformExpID, agentID).Scan(&researcher)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
+		}
+		if researcher {
+			if _, err := lockedPoolTx(ctx, tx, platformExpID); err != nil {
+				return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
+			}
 		}
 		var running, unfinished bool
 		var finishedAt *time.Time
@@ -128,6 +143,11 @@ RETURNING finished_reason`, platformExpID, agentID, reason).Scan(&told); err != 
 		}
 		tx.Change(domain.Change{Kind: platformapi.EventAgentFinished, Subject: agentID, Detail: told,
 			PlatformExperimentID: platformExpID, AgentID: agentID})
+		if researcher {
+			if err := lowerPoolTx(ctx, tx, platformExpID, []string{agentID}); err != nil {
+				return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
+			}
+		}
 		return nil
 	})
 }

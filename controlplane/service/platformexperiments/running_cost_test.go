@@ -273,7 +273,7 @@ func (f *reservingStore) AddDesiredQuotaUsage(_ context.Context, _ string, quota
 	return nil
 }
 
-// A researcher read 0.016 used of 0.029 while two of its jobs ran, beside 0.057 burst hours, and
+// An executor read 0.016 used of 0.029 while two of its jobs ran, beside 0.057 burst hours, and
 // was refused a job of 0.0075 at both priorities: a submit holds a running job's whole estimate,
 // and burst is spent from the share. The view answers what a submit would.
 func TestTheQuotaViewLeavesWhatASubmitWouldAndShowsNoBurstHoursBeyondTheShare(t *testing.T) {
@@ -349,5 +349,35 @@ func TestAnAgentsQuotaSaysWhatDataItHoldsAgainstTheCeiling(t *testing.T) {
 	}
 	if view.DataBytes == nil || *view.DataBytes != 1000 || view.MaxDataBytes != 4096 {
 		t.Errorf("got data_bytes %v of %d, want 1000 of 4096", view.DataBytes, view.MaxDataBytes)
+	}
+}
+
+type submittingStore struct {
+	grantedStore
+	recent int
+}
+
+func (s *submittingStore) RecentSubmissions(_ context.Context, agentID, platformExpID string, window time.Duration) (int, error) {
+	if agentID != "a" || platformExpID != "pe-1" || window != domain.SubmissionWindow {
+		return 0, fmt.Errorf("counted %s in %s over %s, want a in pe-1 over the submission window", agentID, platformExpID, window)
+	}
+	return s.recent, nil
+}
+
+// An executor spent its 100 submissions an hour in 10 minutes of 15-seed sweeps and learned of
+// the cap only from the refusal. Its quota says the cap and what the last hour leaves of it.
+func TestAnAgentsQuotaSaysHowManyJobsItMayStillSubmitThisHour(t *testing.T) {
+	metrics := aliveServer(t, time.Now().UTC(), 30*time.Second, 2*time.Minute)
+	defer metrics.Close()
+	for recent, want := range map[int]int{0: 100, 37: 63, 100: 0, 120: 0} {
+		svc := NewService(&submittingStore{recent: recent}, domain.QuotaConfig{MaxSubmissionsPerHour: 100}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
+		view, err := svc.QuotaView(context.Background(), "a", "pe-1")
+		if err != nil || view.MaxSubmissionsPerHour != 100 || view.SubmissionsLeft == nil || *view.SubmissionsLeft != want {
+			t.Errorf("%d submitted in the last hour: got %+v, %v, want 100 an hour with %d left", recent, view, err, want)
+		}
+	}
+	svc := NewService(&submittingStore{}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
+	if view, err := svc.QuotaView(context.Background(), "a", "pe-1"); err != nil || view.MaxSubmissionsPerHour != 0 || view.SubmissionsLeft != nil {
+		t.Errorf("with no cap: got %+v, %v, want no submission figures", view, err)
 	}
 }

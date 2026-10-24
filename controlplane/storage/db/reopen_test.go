@@ -13,7 +13,7 @@ import (
 )
 
 // ClosedRun is a run that was at work and closed an hour ago at staff's request, its machines
-// since released: Live is a researcher whose run ended only with the close, Finished one that
+// since released: Live is an executor whose run ended only with the close, Finished one that
 // finished before it, Cut one cut before it and Baseline the baseline agent that finished.
 type ClosedRun struct {
 	ID, Launcher, Live, Finished, Cut, Baseline string
@@ -119,7 +119,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 
 	agents := launcherAgentsOf(t, pes, domain.AgentWindDown, run.ID)
 	if len(agents) != 1 || agents[0].AgentID != run.Live || agents[0].Ended != "" || agents[0].Instance.Released || agents[0].Instance.Stopped || agents[0].Instance.Name != "" {
-		t.Fatalf("launcher agents = %+v, want the researcher the close ended, at work and with no machine", agents)
+		t.Fatalf("launcher agents = %+v, want the executor the close ended, at work and with no machine", agents)
 	}
 	coordinators := launcherCoordinatorsOf(t, pes, domain.CoordinatorWindDown, run.ID)
 	if len(coordinators) != 1 || coordinators[0].Ending || coordinators[0].Instance.Released || coordinators[0].Instance.Name != "" || coordinators[0].Model != "coordinator-2" {

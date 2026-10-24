@@ -11,19 +11,22 @@
 {{ required "secretName is required: the Secret that holds every secret of the deployment. The chart reads it and never creates it" .Values.secretName }}
 {{- end -}}
 
-{{/* One env entry reading a key of the Secret. call as: include "hypothesisloop.secretKey" (dict "env" "DATABASE_URL" "key" "DATABASE_URL" "root" $) */}}
+{{/* One env entry reading a key of the Secret, left unset when "optional" is true and the Secret has none. call as: include "hypothesisloop.secretKey" (dict "env" "DATABASE_URL" "key" "DATABASE_URL" "root" $) */}}
 {{- define "hypothesisloop.secretKey" -}}
 - name: {{ .env }}
   valueFrom:
     secretKeyRef:
       name: {{ include "hypothesisloop.secretName" .root }}
       key: {{ .key }}
+      {{- if .optional }}
+      optional: true
+      {{- end }}
 {{- end -}}
 
 {{/* Env entries named after the Secret keys they read. call as: include "hypothesisloop.secretEnv" (dict "keys" (list "A" "B") "root" $) */}}
 {{- define "hypothesisloop.secretEnv" -}}
 {{- range .keys }}
-{{ include "hypothesisloop.secretKey" (dict "env" . "key" . "root" $.root) }}
+{{ include "hypothesisloop.secretKey" (dict "env" . "key" . "root" $.root "optional" $.optional) }}
 {{- end }}
 {{- end -}}
 
@@ -41,9 +44,11 @@ from the values and every secret from the Secret, under the same name.
 A provider's secret is the Secret key <SECTION>_<NAME>_<FIELD>, as controlplane/config names it, NAME the
 section's provider or a cloud compute entry's cluster_name: the field the object store's, git host's and
 registry's providers each declare, and API_KEY, the account key, of the sandbox and each cloud compute entry.
+A model provider's credential is optional: the provider is served while it is set, and control-service does not
+start without the one of a default model's provider.
 */}}
 {{- define "hypothesisloop.controlServiceEnv" -}}
-{{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" (include "hypothesisloop.objectStoreSecretKey" .) -}}
+{{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" (include "hypothesisloop.objectStoreSecretKey" .) -}}
 {{- $gitHost := .Values.gitHost -}}
 {{- if eq $gitHost.provider "github" -}}
 {{- $keys = concat $keys (list "GIT_HOST_GITHUB_APP_PRIVATE_KEY" "GIT_HOST_GITHUB_CLIENT_SECRET") -}}
@@ -61,6 +66,7 @@ registry's providers each declare, and API_KEY, the account key, of the sandbox 
 - name: GRAPH_DB_URL
   value: {{ include "hypothesisloop.graphDBURL" . | quote }}
 {{ include "hypothesisloop.secretEnv" (dict "keys" (uniq $keys) "root" .) }}
+{{ include "hypothesisloop.secretEnv" (dict "keys" (list "MODEL_ANTHROPIC_OAUTH_TOKEN" "MODEL_OPENROUTER_API_KEY" "MODEL_OPENAI_AUTH_JSON") "root" . "optional" true) }}
 {{- end -}}
 
 {{/* The Secret key of the registry's credential file, with containerRegistry.provider gcp. */}}

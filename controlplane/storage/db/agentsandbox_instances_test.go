@@ -461,7 +461,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 	}
 	for i := range 2 {
 		if _, err := add(domain.SignupRoleCompetitor); err != nil {
-			t.Fatalf("researcher %d beside the coordinator: got = %v, want = nil", i+1, err)
+			t.Fatalf("executor %d beside the coordinator: got = %v, want = nil", i+1, err)
 		}
 	}
 	for _, role := range []domain.SignupRole{domain.SignupRoleCompetitor, domain.SignupRoleReviewer} {
@@ -483,7 +483,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		t.Fatalf("a second baseline agent once the first finished: got = %v, want = nil", err)
 	}
 	if _, err := add(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentSandboxesReached) {
-		t.Fatalf("a researcher in a full house: got = %v, want ErrMaxAgentSandboxesReached", err)
+		t.Fatalf("an executor in a full house: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 }
 

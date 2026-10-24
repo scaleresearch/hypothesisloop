@@ -37,7 +37,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 	stopped := measuring
 	stopped.Instance = &domain.AgentInstance{Stopped: true}
 	second := domain.AgentSignup{AgentID: "ag-c", Name: "Baseline 2", Role: domain.SignupRoleBaseline, InAgentSandbox: true}
-	researcher := domain.AgentSignup{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true}
+	executor := domain.AgentSignup{AgentID: "ag-r", Name: "Executor 1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true}
 	due := time.Now().UTC().Add(10*time.Minute - time.Second).Truncate(time.Second)
 	const add, declare = "`hl platform-experiments agents add --in-agentsandbox --role baseline --platform-experiment pe-1`", "`hl platform-experiments update --baseline-job JOB --platform-experiment pe-1`"
 	job := func(id string) *domain.Experiment {
@@ -59,9 +59,9 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 		reason       string
 		names, omits []string
 	}{
-		"no baseline agent":                      {waitingCoordinator, []domain.AgentSignup{researcher}, nil, nil, 6, "baseline_required", []string{add}, []string{declare}},
-		"a baseline agent at work":               {waitingCoordinator, []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Baseline 1", "the platform declares"}, []string{add, declare}},
-		"one that finished with no job":          {waitingPerson, []domain.AgentSignup{done, researcher}, nil, nil, 6, "baseline_required", []string{add, `Baseline 1 finished with the reason "train.py does not run"`}, []string{declare}},
+		"no baseline agent":                      {waitingCoordinator, []domain.AgentSignup{executor}, nil, nil, 6, "baseline_required", []string{add}, []string{declare}},
+		"a baseline agent at work":               {waitingCoordinator, []domain.AgentSignup{measuring, executor}, nil, nil, 6, "baseline_measuring", []string{"Baseline 1", "the platform declares"}, []string{add, declare}},
+		"one that finished with no job":          {waitingPerson, []domain.AgentSignup{done, executor}, nil, nil, 6, "baseline_required", []string{add, `Baseline 1 finished with the reason "train.py does not run"`}, []string{declare}},
 		"one whose machine stopped for good":     {waitingCoordinator, []domain.AgentSignup{stopped}, nil, nil, 6, "baseline_required", []string{add, "Baseline 1's machine stopped with no restart left"}, nil},
 		"a second at work after the first ended": {waitingCoordinator, []domain.AgentSignup{done, second}, nil, nil, 6, "baseline_measuring", []string{"Baseline 2"}, []string{add}},
 		"one that left two jobs":                 {waitingCoordinator, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1"), job("job-2")}, nil, 6, "baseline_undeclared", []string{"job-1, job-2", declare}, []string{add}},
@@ -69,11 +69,11 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 			[]string{"the platform did not declare job job-1", "its owner raises budget_accelerator_hours", "declares it in the request that clears this"}, []string{add, declare}},
 		"one that left a job the sweep has yet to declare": {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1")}, nil, 6, "baseline_declaring", []string{"job-1"}, []string{add, declare}},
 		"one that left the control and its check":          {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1"), check}, nil, 6, "baseline_declaring", []string{"job-1"}, []string{"job-2", add, declare}},
-		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish", "baseline_due_at is " + due.Format(time.RFC3339) + ", 9 minutes from now", "The run lasts its duration_hours, 1, from the moment the platform starts it, once its baseline is declared"}, []string{add, "cannot be met"}},
-		"the baseline agent whose job cannot end in time": {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, []*domain.Experiment{quick, building}, 6, "baseline_measuring",
+		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, executor}, nil, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish", "baseline_due_at is " + due.Format(time.RFC3339) + ", 9 minutes from now", "The run lasts its duration_hours, 1, from the moment the platform starts it, once its baseline is declared"}, []string{add, "cannot be met"}},
+		"the baseline agent whose job cannot end in time": {waitingAgent("ag-b"), []domain.AgentSignup{measuring, executor}, nil, []*domain.Experiment{quick, building}, 6, "baseline_measuring",
 			[]string{"job job-9 is QUEUED (capacity_unavailable) and its estimated_duration_hours is 0.5: started now it ends after baseline_due_at, 9 minutes from now, so baseline_due_at cannot be met by it"}, []string{"job-8"}},
 		"a baseline agent that finished": {waitingAgent("ag-b"), []domain.AgentSignup{done, second}, nil, nil, 6, "baseline_measuring", nil, []string{"Your job is admitted now", "Every job you submit"}},
-		"a researcher":                   {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn", "The run lasts its duration_hours, 1"}, []string{add, "baseline_due_at is"}},
+		"an executor":                    {waitingAgent("ag-r"), []domain.AgentSignup{measuring, executor}, nil, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn", "The run lasts its duration_hours, 1"}, []string{add, "baseline_due_at is"}},
 	} {
 		store := newRosterStore(domain.PlatformExpOpen, 2)
 		store.pe.CoordinatorInAgentSandbox, store.signups, store.left, store.objective = true, c.signups, c.left, c.objective
@@ -108,10 +108,10 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 	}
 }
 
-// A run whose last researcher had finished read running until its ends_at, with machines kept
-// and nobody told to close it. It reads researchers_done once no researcher can still work, and
+// A run whose last executor had finished read running until its ends_at, with machines kept
+// and nobody told to close it. It reads executors_done once no executor can still work, and
 // names who closes it: its coordinator where the platform hosts one, its owner otherwise.
-func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *testing.T) {
+func TestARunningPlatformExperimentWithNoExecutorLeftSaysSoAndWhoClosesIt(t *testing.T) {
 	finished := time.Now()
 	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
 	done := domain.AgentSignup{AgentID: "ag-2", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
@@ -130,8 +130,8 @@ func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *t
 	}{
 		"one at work beside those that ended":    {[]domain.AgentSignup{baseline, done, cut, stopped, atWork}, true, true, "running", domain.WaitsForPlatform},
 		"one its owner runs, which says nothing": {[]domain.AgentSignup{baseline, done, selfRun}, true, true, "running", domain.WaitsForPlatform},
-		"every one finished, cut or stopped":     {[]domain.AgentSignup{baseline, done, cut, stopped, reviewer}, true, true, "researchers_done", domain.WaitsForCoordinator},
-		"the same with a person coordinating":    {[]domain.AgentSignup{baseline, done, cut, stopped}, false, true, "researchers_done", domain.WaitsForOwner},
+		"every one finished, cut or stopped":     {[]domain.AgentSignup{baseline, done, cut, stopped, reviewer}, true, true, "executors_done", domain.WaitsForCoordinator},
+		"the same with a person coordinating":    {[]domain.AgentSignup{baseline, done, cut, stopped}, false, true, "executors_done", domain.WaitsForOwner},
 		"none up yet and its clock not started":  {[]domain.AgentSignup{baseline, stopped}, true, false, "agents_starting", domain.WaitsForPlatform},
 	} {
 		store := newRosterStore(domain.PlatformExpRunning, 5)
@@ -149,7 +149,7 @@ func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *t
 			continue
 		}
 		closes := strings.Contains(why.Message, "`hl platform-experiments close --platform-experiment pe-1`") && strings.Contains(why.Message, "`hl platform-experiments summary --file FILE --platform-experiment pe-1`")
-		if closes != (c.reason == "researchers_done") {
+		if closes != (c.reason == "executors_done") {
 			t.Errorf("%s: message %q names the summary and the close = %v", name, why.Message, closes)
 		}
 		if ends := "ends_at, " + store.pe.EndsAt.UTC().Format(time.RFC3339) + ", "; !strings.Contains(why.Message, ends) {
@@ -179,8 +179,8 @@ func (f *toldStore) TellCoordinator(_ context.Context, _, reason string) error {
 	return nil
 }
 
-// A coordinator was woken when the last researcher finished, by agent.finished, and by nothing
-// when the last one's machine stopped with no restart left: the run read researchers_done and
+// A coordinator was woken when the last executor finished, by agent.finished, and by nothing
+// when the last one's machine stopped with no restart left: the run read executors_done and
 // its coordinator slept until ends_at. The sweep records the reason that waits for a sandboxed
 // coordinator, and none while the experiment waits for someone else.
 func TestTheSweepTellsASandboxedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
@@ -195,8 +195,8 @@ func TestTheSweepTellsASandboxedCoordinatorTheReasonThatWaitsForIt(t *testing.T)
 		signups                   []domain.AgentSignup
 		told                      []string
 	}{
-		"a researcher at work":                    {domain.PlatformExpRunning, true, []domain.AgentSignup{atWork, cut}, []string{""}},
-		"the last one's machine stopped for good": {domain.PlatformExpRunning, true, []domain.AgentSignup{stopped, cut}, []string{"researchers_done"}},
+		"an executor at work":                     {domain.PlatformExpRunning, true, []domain.AgentSignup{atWork, cut}, []string{""}},
+		"the last one's machine stopped for good": {domain.PlatformExpRunning, true, []domain.AgentSignup{stopped, cut}, []string{"executors_done"}},
 		"the same with a person coordinating":     {domain.PlatformExpRunning, false, []domain.AgentSignup{stopped, cut}, nil},
 		"open with no baseline agent":             {domain.PlatformExpOpen, true, []domain.AgentSignup{atWork}, []string{"baseline_required"}},
 		"closed":                                  {domain.PlatformExpClosed, true, []domain.AgentSignup{stopped}, nil},
@@ -232,7 +232,7 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 		t.Errorf("a running machine: got = %+v, want no status_reason", roster[1].StatusReason)
 	}
 
-	// Before the start a researcher has no machine asked for, and says that and not a start.
+	// Before the start an executor has no machine asked for, and says that and not a start.
 	store.pe.Status = domain.PlatformExpOpen
 	store.signups = signups
 	roster, err = newSignupTestService(t, store).roster(context.Background(), "pe-1", signups[:1], domain.Actor{})
@@ -245,9 +245,9 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 	}
 }
 
-// A researcher read instance.state requested from the accept on, while no machine is asked for
+// An executor read instance.state requested from the accept on, while no machine is asked for
 // until the start.
-func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *testing.T) {
+func TestAnExecutorsInstanceReadsWaitingUntilThePlatformExperimentStarts(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.signups = []domain.AgentSignup{
 		{AgentID: "dana", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{}},
@@ -279,7 +279,7 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 		t.Fatal(err)
 	}
 	if got := state(roster[0]); got != "waiting" || roster[0].StatusReason == nil {
-		t.Errorf("a researcher before the start: state %q with %+v, want waiting beside its status_reason", got, roster[0].StatusReason)
+		t.Errorf("an executor before the start: state %q with %+v, want waiting beside its status_reason", got, roster[0].StatusReason)
 	}
 	if got := state(roster[1]); got != "requested" {
 		t.Errorf("a baseline agent, whose machine starts at once: state %q, want requested", got)
@@ -296,13 +296,13 @@ func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *tes
 		t.Fatal(err)
 	}
 	if got := state(roster[0]); got != "requested" {
-		t.Errorf("a researcher after the start: state %q, want requested", got)
+		t.Errorf("an executor after the start: state %q, want requested", got)
 	}
 }
 
-// A researcher of an experiment that closed before its run started read stopped with no reason,
+// An executor of an experiment that closed before its run started read stopped with no reason,
 // as if its machine had failed.
-func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t *testing.T) {
+func TestAnExecutorOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpClosed, 5)
 	store.pe.CloseReason = domain.CloseBaselineLimitReached
 	store.submitted = map[string]int{"bo": 2}
@@ -316,7 +316,7 @@ func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t 
 		t.Fatal(err)
 	}
 	if why := roster[0].StatusReason; why == nil || why.Reason != "never_launched" || !strings.Contains(why.Message, string(domain.CloseBaselineLimitReached)) || !strings.Contains(why.Message, "2 jobs were submitted to measure its baseline") || why.WaitsFor != "" {
-		t.Errorf("a researcher whose run never started: got = %+v, want never_launched naming the close_reason, the baseline jobs submitted, and waiting for nobody", why)
+		t.Errorf("an executor whose run never started: got = %+v, want never_launched naming the close_reason, the baseline jobs submitted, and waiting for nobody", why)
 	}
 	if roster[1].StatusReason != nil {
 		t.Errorf("the baseline agent, whose machine ran: got = %+v, want no reason", roster[1].StatusReason)

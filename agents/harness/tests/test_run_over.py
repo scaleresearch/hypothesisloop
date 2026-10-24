@@ -12,14 +12,14 @@ BROKEN = api_client.APIError("GET", "http://api/x", 500, '{"reason":"internal","
 
 
 def setup(answer):
-    """A researcher whose signup read answers with answer(), a dict or an error to raise."""
+    """An agent whose signup read answers with answer(), a dict or an error to raise."""
     async def get_signup(*_):
         result = answer()
         if isinstance(result, Exception):
             raise result
         return result
 
-    cfg = SimpleNamespace(agent_id="ag-1", role="researcher", platform_experiment_id="pe-1")
+    cfg = SimpleNamespace(agent_id="ag-1", role="executor", platform_experiment_id="pe-1")
     return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_signup=get_signup))
 
 

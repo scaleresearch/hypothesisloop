@@ -10,7 +10,7 @@ import (
 )
 
 // ConcernsAgent reports, per event, whether a hypothesis event concerns a hypothesis agentID
-// registered: the subject of a comment, finding or status, the target of a link, or a target of
+// registered: the subject of a comment, finding or status, the target of a link added or removed, or a target of
 // the links a new hypothesis was registered with. A comment on the objective, whose subject is the
 // platform experiment's id, concerns every agent: the objective is everyone's. A link added to a
 // new hypothesis later is its own event, so it does not make the hypothesis.new concern the agent.
@@ -22,7 +22,7 @@ func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []doma
 		case onObjective(e):
 		case e.Kind == platformapi.EventHypothesisNew:
 			created = append(created, e.Subject)
-		case e.Kind == platformapi.EventHypothesisLink:
+		case linkEvent(e):
 			targets = append(targets, e.Detail)
 		default:
 			targets = append(targets, e.Subject)
@@ -62,12 +62,17 @@ RETURN DISTINCT h.id`, created},
 	result := make([]bool, len(events))
 	for i, e := range events {
 		id := e.Subject
-		if e.Kind == platformapi.EventHypothesisLink {
+		if linkEvent(e) {
 			id = e.Detail
 		}
 		result[i] = onObjective(e) || concerned[id]
 	}
 	return result, nil
+}
+
+// linkEvent is a link added or removed, which concerns the agent of its target.
+func linkEvent(e domain.Event) bool {
+	return e.Kind == platformapi.EventHypothesisLink || e.Kind == platformapi.EventHypothesisUnlink
 }
 
 // onObjective is a comment on the objective, the root of its platform experiment's graph.

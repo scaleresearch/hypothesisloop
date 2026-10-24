@@ -135,6 +135,10 @@ function LiveCapacity() {
         {clusters.map(cluster => (
           <Stack as="section" gap="sm" key={cluster.cluster_name} aria-label={cluster.cluster_name} className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0">
             <Heading level={3} className="font-mono">{cluster.cluster_name}</Heading>
+            <Text variant="note" title="A job of more than one node runs only on a cluster that runs jobs over several nodes, and with topology.spread_across_hosts on one with at least as many nodes as the job">
+              {cluster.hosts} {cluster.hosts === 1 ? 'node' : 'nodes'}
+              {' · '}{cluster.multi_node ? 'runs a job over several nodes' : 'runs a job on one node only'}
+            </Text>
             {!cluster.on_demand && cluster.resources && (
               <Text variant="note">
                 {cluster.resources.cpu_cores_available} of {unitCount('cpu', cluster.resources.cpu_cores_total)} free

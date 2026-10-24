@@ -22,9 +22,13 @@ _LIMIT_WAITED = ("The model provider refused your calls from {since} UTC, its us
 _NEW_MACHINE_NOTE = (
     "The machine you ran on was replaced. Your conversation is the one you had, and nothing else "
     "came with it: files you wrote and did not push are gone, and so is every process you started. ")
-_NEW_MACHINE_RESEARCHER = (
+_NEW_MACHINE_EXECUTOR = (
     "Clone the repository again, run `hl hypothesis checkout ID` for the hypothesis you work on, "
     "and look at the state of your jobs and hypotheses with hl before you go on.")
+# A researcher's clone is read-only and holds nothing of its own: the graph is its work.
+_NEW_MACHINE_RESEARCHER = (
+    "Clone the repository again to read it, and read the graph with hl (`hl hypothesis get root`, "
+    "`hl hypothesis list`) before you go on.")
 _NEW_MACHINE_BASELINE = (
     "Clone the repository again, check out your branch, and look at the state of your jobs with "
     "hl before you go on.")
@@ -44,7 +48,9 @@ def _new_machine_note(cfg) -> str:
         return _NEW_MACHINE_NOTE + _NEW_MACHINE_COORDINATOR
     if config.plans(cfg):
         return _NEW_MACHINE_NOTE + _NEW_MACHINE_PLANNER
-    return _NEW_MACHINE_NOTE + (_NEW_MACHINE_BASELINE if config.measures_baseline(cfg) else _NEW_MACHINE_RESEARCHER)
+    if config.researches(cfg):
+        return _NEW_MACHINE_NOTE + _NEW_MACHINE_RESEARCHER
+    return _NEW_MACHINE_NOTE + (_NEW_MACHINE_BASELINE if config.measures_baseline(cfg) else _NEW_MACHINE_EXECUTOR)
 
 
 # A planner's machine is released some minutes after its answer and a goal changed later starts

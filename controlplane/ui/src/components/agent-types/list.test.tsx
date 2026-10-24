@@ -10,7 +10,7 @@ import type { Me, OrgAction, OrgRole } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
-vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn(), createAgentType: vi.fn() }))
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn(), createAgentType: vi.fn(), fetchAgentRoles: vi.fn(async () => (await import('@/test-agent-types')).ROLES) }))
 
 const at = '2026-01-01T00:00:00Z'
 // What the API lets each role do to the org.
@@ -36,39 +36,43 @@ function show(role: OrgRole = 'owner') {
 
 beforeEach(() => {
   navigation.push.mockReset()
-  vi.mocked(fetchAgentTypes).mockImplementation(async () => [...CATALOG, agentType('at-old', 'Old sweeper', 'researcher', { archived_at: at })].map(t => seenBy(viewer, t)))
-  vi.mocked(createAgentType).mockResolvedValue(agentType('at-new', 'Copy', 'researcher'))
+  vi.mocked(fetchAgentTypes).mockImplementation(async () => [...CATALOG, agentType('at-old', 'Old sweeper', 'executor', { archived_at: at })].map(t => seenBy(viewer, t)))
+  vi.mocked(createAgentType).mockResolvedValue(agentType('at-new', 'Copy', 'executor'))
 })
 
 describe('the agent types page', () => {
   it('groups types by role, built-in first marked read-only, archived last', async () => {
     show()
-    const researchers = within(await screen.findByRole('table', { name: 'Researcher types' }))
-    const names = researchers.getAllByRole('link').map(l => l.textContent)
+    const executors = within(await screen.findByRole('table', { name: 'Executor types' }))
+    const names = executors.getAllByRole('link').map(l => l.textContent)
     expect(names).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper', 'Old sweeper'])
-    expect(researchers.getAllByText('Built-in, read-only')).toHaveLength(4)
-    expect(researchers.getByText('Archived')).toBeTruthy()
-    expect(researchers.queryByRole('columnheader', { name: 'In use' })).toBeNull()
-    for (const role of ['Baseline', 'Planner', 'Coordinator']) expect(screen.getByRole('table', { name: `${role} types` })).toBeTruthy()
+    expect(executors.getAllByText('Built-in, read-only')).toHaveLength(4)
+    expect(executors.getByText('Archived')).toBeTruthy()
+    expect(executors.queryByRole('columnheader', { name: 'In use' })).toBeNull()
+    // Each role is titled and described as the API names it.
+    expect(screen.getByText('Implements experiments and runs their jobs.')).toBeTruthy()
+    for (const role of ['Researcher', 'Baseline', 'Planner', 'Coordinator']) expect(screen.getByRole('table', { name: `${role} types` })).toBeTruthy()
   })
 
-  it('duplicates a researcher or baseline type, built-in ones included, and opens the copy', async () => {
+  it('duplicates an executor or baseline type, built-in ones included, and opens the copy', async () => {
     show()
     const row = (await screen.findByRole('link', { name: 'Data search' })).closest('tr')!
     await userEvent.click(within(row).getByRole('button', { name: 'Duplicate' }))
     expect(createAgentType).toHaveBeenCalledExactlyOnceWith('org_a', { from: 'data-search' })
     expect(navigation.push).toHaveBeenCalledWith('/orgs/org_a/settings/agent-types/at-new')
-    for (const role of ['Planner', 'Coordinator']) {
+    for (const role of ['Researcher', 'Planner', 'Coordinator']) {
       expect(within(screen.getByRole('table', { name: `${role} types` })).queryByRole('button', { name: 'Duplicate' })).toBeNull()
     }
   })
 
-  it('starts a new type from the built-in one of the role chosen, a researcher or a baseline', async () => {
+  it('starts a new type from the built-in one of the role chosen, an executor or a baseline', async () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'New type' }))
     const dialog = within(screen.getByRole('dialog'))
     expect(dialog.queryByRole('button', { name: 'Coordinator' })).toBeNull()
     expect(dialog.queryByRole('button', { name: 'Planner' })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Researcher' })).toBeNull()
+    expect(dialog.getByText('Implements experiments and runs their jobs. The role is fixed once made.')).toBeTruthy()
     await userEvent.click(dialog.getByRole('button', { name: 'Baseline' }))
     expect(dialog.getByText('Starts as a copy of Baseline.')).toBeTruthy()
     await userEvent.type(dialog.getByLabelText('Name'), 'Strict baseline')
@@ -87,7 +91,7 @@ describe('the agent types page', () => {
 
   it('lets a member read every type and says only an owner changes them', async () => {
     show('member')
-    await screen.findByRole('table', { name: 'Researcher types' })
+    await screen.findByRole('table', { name: 'Executor types' })
     expect(screen.getByRole('note').textContent).toMatch(/Only an owner of Lab can create, edit or archive agent types/)
     expect(screen.queryByRole('button', { name: 'Duplicate' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'New type' })).toBeNull()

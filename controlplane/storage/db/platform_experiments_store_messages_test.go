@@ -52,7 +52,7 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	// The owner's messages count apart from the coordinator's: they never spend its steering.
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
 	for range domain.MaxAgentMessagesPerHour {
-		if _, _, err := pes.SendAgentMessages(ctx, peID, nil, "to every researcher", owner); err != nil {
+		if _, _, err := pes.SendAgentMessages(ctx, peID, nil, "to the team", owner); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -83,8 +83,8 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrAgentEnded) {
 		t.Errorf("to a finished agent: got = %v, want = %v", err, ErrAgentEnded)
 	}
-	if _, _, err := pes.SendAgentMessages(ctx, peID, nil, "hello", coordinator); !errors.Is(err, ErrNoResearcherAtWork) {
-		t.Errorf("to every researcher with none at work: got = %v, want = %v", err, ErrNoResearcherAtWork)
+	if _, _, err := pes.SendAgentMessages(ctx, peID, nil, "hello", coordinator); !errors.Is(err, ErrNoAgentAtWork) {
+		t.Errorf("to the team with none at work: got = %v, want = %v", err, ErrNoAgentAtWork)
 	}
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
 	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
@@ -178,7 +178,7 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 		t.Error("the coordinator's stream does not carry the message")
 	}
 	if (domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(live) {
-		t.Error("a researcher's stream carries the coordinator's message")
+		t.Error("an agent's stream carries the coordinator's message")
 	}
 
 	for range domain.MaxAgentMessagesPerHour - 1 {
@@ -191,7 +191,7 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 		t.Fatalf("past the hourly limit: got = %v, want MessagesRateLimited for the coordinator", err)
 	}
 	if allowance, err := pes.MessageAllowance(ctx, peID, domain.Actor{Kind: domain.ActorCoordinator}); err != nil || allowance[agentID].LeftThisHour != domain.MaxAgentMessagesPerHour {
-		t.Fatalf("the researcher's allowance: got = (%+v, %v), want it untouched", allowance, err)
+		t.Fatalf("the agent's allowance: got = (%+v, %v), want it untouched", allowance, err)
 	}
 	if kept, err := pes.ListAgentMessages(ctx, peID, domain.CoordinatorRecipient); err != nil || len(kept) != domain.MaxAgentMessagesPerHour {
 		t.Fatalf("kept: got = (%d, %v), want the %d sent", len(kept), err, domain.MaxAgentMessagesPerHour)
@@ -268,9 +268,9 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator', $
 	}
 }
 
-// A message to every researcher reaches those the sender may still message and names the rest as
+// A message to every agent reaches those the sender may still message and names the rest as
 // refused, and is refused whole only when none can be sent. The allowance is the reader's own.
-func TestAMessageToEveryResearcherSkipsThoseRateLimited(t *testing.T) {
+func TestAMessageToEveryAgentSkipsThoseRateLimited(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -309,5 +309,36 @@ func TestAMessageToEveryResearcherSkipsThoseRateLimited(t *testing.T) {
 	var limited *MessagesRateLimited
 	if sent, refused, err = pes.SendAgentMessages(ctx, peID, nil, "to all", owner); !errors.As(err, &limited) || len(sent) != 0 || len(refused) != 0 {
 		t.Fatalf("to all with every one limited: sent %+v, refused %+v, %v, want MessagesRateLimited alone", sent, refused, err)
+	}
+}
+
+// A message to every agent reaches the executors and researchers at work, and no baseline or
+// planner.
+func TestAMessageToEveryAgentReachesTheExecutorsAndResearchers(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewStore(pool, 3)
+	executor, peID, _ := seedRun(t, pool, "team", true)
+	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
+	roles := map[string]domain.SignupRole{executor: domain.SignupRoleCompetitor}
+	for _, role := range []domain.SignupRole{domain.SignupRoleResearcher, domain.SignupRoleBaseline, domain.SignupRolePlanner} {
+		agent, _, _ := seedRun(t, pool, "team-"+string(role), true)
+		t.Cleanup(func() { exec(t, pool, `DELETE FROM experiment_signups WHERE agent_id = $1`, agent) })
+		roles[agent] = role
+	}
+	for agent, role := range roles {
+		exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', $3)`, peID, agent, string(role))
+	}
+
+	sent, refused, err := pes.SendAgentMessages(ctx, peID, nil, "to the team", domain.Actor{Kind: domain.ActorCoordinator, ID: peID})
+	if err != nil || len(refused) != 0 {
+		t.Fatalf("to the team: refused %+v, %v", refused, err)
+	}
+	got := map[domain.SignupRole]int{}
+	for _, m := range sent {
+		got[roles[m.AgentID]]++
+	}
+	if len(sent) != 2 || got[domain.SignupRoleCompetitor] != 1 || got[domain.SignupRoleResearcher] != 1 {
+		t.Fatalf("to the team: sent %+v, want the executor and the researcher alone", sent)
 	}
 }

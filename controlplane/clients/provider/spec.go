@@ -30,6 +30,11 @@ func (s Spec) Validate() error {
 	if s.CPUMillis <= 0 || s.MemoryBytes <= 0 || s.DiskBytes <= 0 {
 		return fmt.Errorf("spec %q must state cpu, memory and disk", s.Name)
 	}
+	if s.Network != "" {
+		if err := ValidateNetworkName(s.Network); err != nil {
+			return fmt.Errorf("spec %q: %w", s.Name, err)
+		}
+	}
 	for name := range s.Env {
 		if !envNamePattern.MatchString(name) {
 			return fmt.Errorf("spec %q: %q is not an environment variable name", s.Name, name)

@@ -28,7 +28,7 @@ a leading quote.
     name: |
       short title
     description: |
-      the description, the only thing the baseline and researchers read: the objective first, then
+      the description, the only thing the baseline and the team read: the objective first, then
       the metric, gate, control, references and levers. How they are measured is the baseline's
       to choose. The platform adds the baseline job, its code_ref and values once declared.
     report_interval_seconds: 30        # how often a job is to report
@@ -61,19 +61,24 @@ a leading quote.
   baseline_minutes: 60                 # what measuring the baseline needs from the accept, from
                                        # planning.min_baseline_minutes (45) to
                                        # planning.baseline_limit_minutes
-  agents:                              # one entry per researcher
-    - agent_type: data-search          # optional: generalist (the default), architecture-search,
-      hyperparameters:                 #   hyperparameter-search or data-search. The direction you
-        direction: |                   #   give a researcher goes in hyperparameters, any keys.
+  agents:                              # the team, one entry per agent: executors, which run the
+    - agent_type: ...                  # jobs and count toward max_agents, and researchers, which
+      model: ...                       # keep the graph, run no job and count toward nothing.
+      hyperparameters:                 # agent_type is optional: an agent type by id, left out the
+        direction: |                   # built-in executor type; researcher for a researcher. A
           the approach this one explores: a mechanism, never a list of values to try, since
-          its researcher makes each claim under it a hypothesis of its own
-    - {}
+          its executor makes each claim under it a hypothesis of its own
+    - {}                               # --check with an id that is none lists the valid ones.
+    - agent_type: researcher           # model is optional: a <provider>/<model id> hl models
+                                       # lists, left out the agent type's (a researcher's is the
+                                       # coordinator's). The direction you give an agent goes in
+                                       # hyperparameters, any keys.
   metric_reason: |
     why this metric is the goal, in plain words
   measurement: |
     how it is measured, in plain words
   sizing_reason: |
-    why this budget, duration and number of researchers are the least that reach the goal,
+    why this budget, duration and number of executors are the least that reach the goal,
     worded as the estimate it is
   out_of_scope:                        # optional, and so are risks and questions
     - |

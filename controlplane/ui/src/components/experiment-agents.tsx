@@ -22,7 +22,10 @@ import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Secret } from '@/components/ui/secret'
 import { Activity } from '@/components/agent-at-work'
 import { InstanceHealth } from '@/components/instance-health'
-import { DEFAULT_AGENT_TYPE, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
+import { ModelName } from '@/components/model-name'
+import { ModelPicker } from '@/components/model-picker'
+import { DEFAULT_AGENT_TYPE, RESEARCHER_AGENT_TYPE, typeLabel, typeName, useAgentRoles, useAgentTypes } from '@/lib/agent-types'
+import { inheritedModel, useModels } from '@/lib/models'
 import { useTenant } from '@/lib/tenant'
 import { errorMessage } from '@/lib/errors'
 import { Select } from '@/components/ui/select'
@@ -30,7 +33,7 @@ import { formatDate, relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import type { Tone } from '@/lib/colors'
 import { keys } from '@/lib/keys'
-import type { AgentMessage, JoinedAgent, ListedAgentType, PlatformExperiment } from '@/types/api'
+import type { AgentMessage, AgentRole, AgentRoleInfo, JoinedAgent, ListedAgentType, PlatformExperiment } from '@/types/api'
 
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is
@@ -43,19 +46,32 @@ function envFile(agent: JoinedAgent): string {
 function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: JoinedAgent[]) => Promise<unknown> }) {
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
+  const { data: roles } = useAgentRoles()
+  const { data: models } = useModels()
+  // The roles an agent added to a team plays, each with the signup it is added as.
+  const choices = (roles ?? []).filter(r => r.in_team && r.signup_role)
+  const [roleID, setRoleID] = useState<AgentRole | null>(null)
+  const role = choices.find(r => r.role === roleID) ?? choices[0]
   const [sandboxed, setSandboxed] = useState(true)
   const [agentType, setAgentType] = useState(DEFAULT_AGENT_TYPE)
   const [model, setModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // A role of one type, as a researcher's, is offered no type to choose.
+  const types = (catalog ?? []).filter(t => t.role === role?.role && !t.archived_at)
+  const chooses = types.length > 1
+  const typeID = chooses ? agentType : role?.agent_type ?? agentType
+  const researcher = typeID === RESEARCHER_AGENT_TYPE
+  const { inherited, inheritedFrom } = inheritedModel(catalog?.find(t => t.id === typeID)?.current.settings.model, researcher, pe.coordinator?.model || models?.coordinator_model)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (!role?.signup_role) return
     setBusy(true)
     setError('')
     try {
       await onAdded(await addPlatformExperimentAgents(pe.id, {
-        in_agentsandbox: sandboxed, agent_type: agentType, role: 'competitor', model: model.trim() || undefined,
+        in_agentsandbox: sandboxed, agent_type: typeID, role: role.signup_role, model: model.trim() || undefined,
       }))
     } catch (e) {
       setError(errorMessage(e))
@@ -67,24 +83,35 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   return (
     <Stack>
       <Inline as="form" align="end" onSubmit={submit}>
-        <FormField label="Type">
-          <Select
-            fieldSize="sm"
-            className="w-56"
-            value={agentType}
-            placeholder={typeName(agentType, catalog)}
-            options={researcherTypes(catalog).map(t => ({ value: t.id, label: t.builtin ? t.name : `${t.name} (v${t.current_version})` }))}
-            onChange={setAgentType}
-          />
-        </FormField>
+        <Stack gap="xs" role="group" aria-label="Role">
+          <Eyebrow>Role</Eyebrow>
+          <Inline gap="xs" nowrap>
+            {choices.map(r => (
+              <Chip key={r.role} type="button" active={r.role === role?.role} title={r.description} onClick={() => setRoleID(r.role)}>{r.name}</Chip>
+            ))}
+          </Inline>
+        </Stack>
+        {chooses && (
+          <FormField label="Type">
+            <Select
+              fieldSize="sm"
+              className="w-56"
+              value={agentType}
+              placeholder={typeName(agentType, catalog)}
+              options={types.sort((a, b) => Number(b.builtin) - Number(a.builtin)).map(t => ({ value: t.id, label: typeLabel(t) }))}
+              onChange={setAgentType}
+            />
+          </FormField>
+        )}
         <FormField label="Model">
-          <Input
+          <ModelPicker
             fieldSize="sm"
-            mono
-            className="w-56"
-            placeholder={catalog?.find(t => t.id === agentType)?.current.settings.model || 'platform default'}
+            className="w-72"
+            inherited={inherited}
+            inheritedFrom={inheritedFrom}
+            coordinator={researcher}
             value={model}
-            onChange={e => setModel(e.target.value)}
+            onChange={setModel}
           />
         </FormField>
         <Stack gap="xs" role="group" aria-label="Run by">
@@ -94,8 +121,9 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
             <Chip type="button" active={!sandboxed} onClick={() => setSandboxed(false)}>Me</Chip>
           </Inline>
         </Stack>
-        <Button size="sm" variant="primary" type="submit" loading={busy}>Add agent</Button>
+        <Button size="sm" variant="primary" type="submit" loading={busy} disabled={!role}>Add agent</Button>
       </Inline>
+      {role && <Text variant="hint">{role.description}</Text>}
       <Text variant="hint">
         {sandboxed
           ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent finishes or is cut.'
@@ -111,7 +139,7 @@ function statusOf(agent: JoinedAgent): { label: string; tone: Tone; detail?: str
   const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.summary].filter(Boolean).join(' ') || undefined
   switch (agent.ended) {
     case 'finished': return { label: `Finished ${relTime(agent.finished_at!)}`, tone: 'neutral', detail }
-    case 'cut': return { label: agent.cut_reason === 'max_agents_lowered' ? 'Cut, max researchers lowered' : 'Cut at a stage boundary', tone: 'neutral', detail }
+    case 'cut': return { label: agent.cut_reason === 'max_agents_lowered' ? 'Cut, max executors lowered' : 'Cut at a stage boundary', tone: 'neutral', detail }
     case 'closed': return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
     case 'planned': return { label: 'Answered the draft', tone: 'neutral', detail }
   }
@@ -179,7 +207,11 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
   )
 }
 
-/** Everything about one agent that its row has no room for. */
+/** The name of the role an agent was added as, as the API names roles; a signup no role is added as by its own word. */
+function signupRoleName(agent: JoinedAgent, roles: AgentRoleInfo[] | undefined): string {
+  return roles?.find(r => r.signup_role === agent.role)?.name ?? agent.role
+}
+
 /** The agent type an agent runs, by name. */
 function AgentTypeLabel({ agent, catalog }: { agent: JoinedAgent; catalog: ListedAgentType[] | undefined }) {
   if (!agent.agent_type) return <span className="text-muted">default</span>
@@ -193,7 +225,7 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
         ['Id', agent.agent_id],
         ['Run by', agent.in_agentsandbox ? 'the platform' : 'its operator'],
         ['Type', <AgentTypeLabel key="type" agent={agent} catalog={catalog} />],
-        ['Model', agent.model ?? 'default'],
+        ['Model', agent.model ? <ModelName key="model" model={agent.model} /> : 'default'],
         ['Joined', formatDate(agent.signed_up_at)],
       ]} />
       {agent.finished_at && (
@@ -211,7 +243,7 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
   )
 }
 
-/** The anchor of the agents card, for a link that says to add a researcher. */
+/** The anchor of the agents card, for a link that says to add an executor. */
 export const AGENTS_CARD = 'agents'
 
 /** Who takes part in a platform experiment, and adding and removing them as the API allows the caller. */
@@ -225,6 +257,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [open, setOpen] = useState<string | null>(null)
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
+  const { data: roles } = useAgentRoles()
   const { data: messages, mutate: mutateMessages } = useSWR(
     pe.status === 'draft' ? null : keys.messages(pe.id),
     () => fetchPlatformExperimentMessages(pe.id),
@@ -279,7 +312,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             <InsetCard role="group" aria-label="Coordinator">
               <Inline align="baseline">
                 <Eyebrow>Coordinator</Eyebrow>
-                <Text as="span" variant="note">run by the platform · model <Code>{pe.coordinator.model}</Code></Text>
+                <Text as="span" variant="note">run by the platform · model <ModelName model={pe.coordinator.model} /></Text>
               </Inline>
               <InstanceHealth instance={pe.coordinator.instance} />
               {pe.coordinator.activity && <Activity activity={pe.coordinator.activity} />}
@@ -323,7 +356,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                             </Text>
                           )}
                         </td>
-                        <td className="text-xs">{agent.role}</td>
+                        <td className="text-xs">{signupRoleName(agent, roles)}</td>
                         <td className="whitespace-nowrap text-xs"><AgentTypeLabel agent={agent} catalog={catalog} /></td>
                         <td><StatusLabel tone={status.tone} title={status.detail}>{status.label}</StatusLabel></td>
                         <td>

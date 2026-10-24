@@ -293,11 +293,11 @@ type AuthConfig struct {
 type AgentsConfig struct {
 	// Image is what every sandboxed agent's machine boots.
 	Image string `yaml:"image"`
-	// DefaultModel is the model an agent runs on when it joins without naming one. It is
-	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
+	// DefaultModel is the model reference an agent runs on when it joins without naming one. It
+	// is resolved onto the agent's signup at that moment, so changing it moves new agents only.
 	DefaultModel string `yaml:"default_model"`
-	// CoordinatorModel is the model a sandboxed coordinator runs on when the create request names
-	// none. It is written onto the platform experiment when it is created.
+	// CoordinatorModel is the model reference a sandboxed coordinator runs on when the create
+	// request names none. It is written onto the platform experiment when it is created.
 	CoordinatorModel string `yaml:"coordinator_model"`
 	// BootLimitSeconds is how long an agent sandbox may go unreported after it was asked for, or
 	// stay starting after it was first reported, before it is given up on as an exited one is.
@@ -310,28 +310,37 @@ type AgentsConfig struct {
 	// MaxAgentSandboxesPerPlatformExperiment is how many machines the platform runs for one platform
 	// experiment: its sandboxed agents of every role and its coordinator.
 	MaxAgentSandboxesPerPlatformExperiment int `yaml:"max_agentsandboxes_per_platform_experiment"`
-	// IdleNoticeMinutes is how long a researcher of a running platform experiment may go with no
+	// IdleNoticeMinutes is how long an executor of a running platform experiment may go with no
 	// job of its own on the platform before it and the coordinator are told (agent.idle), and how
 	// long a run's capacity may hold places beyond its queued jobs before the coordinator is told
 	// (capacity.idle).
 	IdleNoticeMinutes int `yaml:"idle_notice_minutes"`
 }
 
-// ModelsConfig is whose models sandboxed agents run on. The control plane holds that provider's
+// ModelsConfig is whose models sandboxed agents run on. The control plane holds each provider's
 // credential, from the environment, and makes every model call of a sandboxed agent for it
-// (httpapi/modelproxy), so no agent's machine holds the credential.
+// (httpapi/modelproxy), so no agent's machine holds the credential. A provider is served while its
+// credential is set, and a model of any other is refused.
 type ModelsConfig struct {
-	Provider string `yaml:"provider"`
-	// Catalog is every model a sandboxed agent or coordinator may call, with its price. A call
-	// naming another is refused, and the prices are what a platform experiment's model budget
-	// is spent at.
-	Catalog domain.ModelCatalog `yaml:"catalog"`
+	Anthropic AnthropicModelsConfig `yaml:"anthropic"`
+	OpenAI    OpenAIModelsConfig    `yaml:"openai"`
 	// MaxCallsInFlightPerOrg is how many model calls the platform makes for one org at once.
 	MaxCallsInFlightPerOrg int `yaml:"max_calls_in_flight_per_org"`
 }
 
-// ModelProviderAnthropic is Claude, which sandboxed agents run through Claude Code.
-const ModelProviderAnthropic = "anthropic"
+// AnthropicModelsConfig is Claude, which the platform calls with a Claude subscription token.
+type AnthropicModelsConfig struct {
+	// Catalog is every model a call to Anthropic may name, with its price. A call naming another
+	// is refused, and each call is priced at it.
+	Catalog domain.ModelCatalog `yaml:"catalog"`
+}
+
+// OpenAIModelsConfig is OpenAI's models, which the platform calls with a ChatGPT subscription.
+type OpenAIModelsConfig struct {
+	// Catalog is every model a call to OpenAI may name, with its price, required while the
+	// provider's credential is set. A call naming another is refused, and each call is priced at it.
+	Catalog domain.ModelCatalog `yaml:"catalog"`
+}
 
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
 // agent the platform runs, before a person accepts its proposal. The platform pays for its machine.

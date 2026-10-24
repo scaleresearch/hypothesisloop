@@ -169,8 +169,6 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 	parallelism := int32(group.Replicas)
 	distributed := plan.totalNodes > 1
 
-	backoff := int32(*spec.MaxRetries)
-
 	terminationGrace, checkpointGrace, err := spec.ResolvedGrace()
 	if err != nil {
 		return nil, fmt.Errorf("workload: experiment %s: %w", exp.ID, err)
@@ -189,24 +187,6 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 	priorityClass := PriorityClassGuaranteed
 	if exp.CapacityTier == clusterapi.CapacityBurst {
 		priorityClass = PriorityClassBurst
-	}
-
-	restartPolicy := corev1.RestartPolicyOnFailure
-	if distributed {
-		// PodFailurePolicy (below) requires RestartPolicy=Never, and the requirement is not
-		// incidental: the policy acts on failed *pods*, so a container the kubelet restarts in
-		// place never surfaces as one and a dead rank would go unnoticed by the rule meant to
-		// tear the gang down.
-		restartPolicy = corev1.RestartPolicyNever
-	} else if spec.MaxRetries != nil && *spec.MaxRetries == 0 {
-		// Retries happen at two independent layers: BackoffLimit recreates the pod, and
-		// RestartPolicy=OnFailure has the kubelet restart the container in place. max_retries
-		// only reaches the first, so under OnFailure a job asking for zero retries still got
-		// restarted — observed live as restart_count=1 with max_retries=0, on a diagnostic run
-		// chosen specifically to fail once and cheaply. Honour the request: with no retries
-		// asked for there is no reason to keep the in-place layer, and Never makes the failure
-		// surface as a failed pod instead.
-		restartPolicy = corev1.RestartPolicyNever
 	}
 
 	resources := corev1.ResourceRequirements{
@@ -261,48 +241,22 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		// --master-addr/--master-port), Ray (`ray start --head` on node 0, `ray start
 		// --address=...` on the rest), etc. One address for the whole job, groups included: a
 		// learner and its actors meet at exactly the same place two ranks of one Job would.
-		masterAddr := plan.masterAddr
+		//
+		// A pod's index within its group is its completion index, which only the downward API
+		// hands it: every pod of a group shares one template. Kubernetes cannot add the group's
+		// offset to it either, which is why a grouped pod is told the two terms apart.
 		rankFieldRef := &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{
 				FieldPath: "metadata.annotations['batch.kubernetes.io/job-completion-index']",
 			},
 		}
-		worldSize := fmt.Sprintf("%d", plan.totalNodes)
-		masterPort := fmt.Sprintf("%d", DistributedMasterPort)
-		env = append(env,
-			corev1.EnvVar{Name: jobenv.WorldSize, Value: worldSize},
-			corev1.EnvVar{Name: jobenv.MasterAddr, Value: masterAddr},
-			corev1.EnvVar{Name: jobenv.MasterPort, Value: masterPort},
-			// Standard unprefixed names torch.distributed.init_process_group(env://) and
-			// torchrun read directly, alongside the HYPOTHESISLOOP_-prefixed vars above. One
-			// process per pod, so LOCAL_RANK is always 0.
-			corev1.EnvVar{Name: jobenv.TorchLocalRank, Value: "0"},
-			corev1.EnvVar{Name: jobenv.TorchWorldSize, Value: worldSize},
-			corev1.EnvVar{Name: jobenv.TorchMasterAddr, Value: masterAddr},
-			corev1.EnvVar{Name: jobenv.TorchMasterPort, Value: masterPort},
-		)
-		if plan.grouped {
-			// A grouped job's global rank is this group's offset plus the pod's index within the
-			// group, and Kubernetes cannot express that sum: the downward API can hand a pod its
-			// completion index, and env expansion concatenates strings, but nothing adds. So the
-			// two terms are published separately and the workload adds them
-			// (RANK=$((HYPOTHESISLOOP_RANK_OFFSET + HYPOTHESISLOOP_GROUP_RANK))).
-			//
-			// RANK/HYPOTHESISLOOP_RANK are deliberately NOT set here. Setting them to the
-			// group-local index would be silently wrong for every group after the first — two
-			// pods claiming rank 0 in one process group is a hang or a corrupt all-reduce, not an
-			// error anyone sees — and an absent variable fails loudly at the workload's first read.
-			env = append(env,
-				corev1.EnvVar{Name: jobenv.Group, Value: group.Name},
-				corev1.EnvVar{Name: jobenv.GroupRank, ValueFrom: rankFieldRef},
-				corev1.EnvVar{Name: jobenv.GroupReplicas, Value: fmt.Sprintf("%d", group.Replicas)},
-				corev1.EnvVar{Name: jobenv.RankOffset, Value: fmt.Sprintf("%d", plan.rankOffset)},
-			)
-		} else {
-			env = append(env,
-				corev1.EnvVar{Name: jobenv.Rank, ValueFrom: rankFieldRef},
-				corev1.EnvVar{Name: jobenv.TorchRank, ValueFrom: rankFieldRef},
-			)
+		for _, v := range workloadenv.Gang(spec, group, plan.rankOffset, 0, plan.masterAddr) {
+			switch v.Name {
+			case jobenv.Rank, jobenv.TorchRank, jobenv.GroupRank:
+				env = append(env, corev1.EnvVar{Name: v.Name, ValueFrom: rankFieldRef})
+			default:
+				env = append(env, corev1.EnvVar{Name: v.Name, Value: v.Value})
+			}
 		}
 	}
 
@@ -359,7 +313,10 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 			},
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit: &backoff,
+			// The control plane is the one retry authority (clusterapi.JobSpec.MaxRetries): a pod
+			// is never recreated and a container never restarted in place, and a failure surfaces
+			// as a failed pod, which is what the gang's PodFailurePolicy acts on.
+			BackoffLimit: new(int32),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -388,7 +345,7 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 				Spec: corev1.PodSpec{
 					PriorityClassName:             priorityClass,
 					AutomountServiceAccountToken:  new(bool),
-					RestartPolicy:                 restartPolicy,
+					RestartPolicy:                 corev1.RestartPolicyNever,
 					Containers:                    []corev1.Container{container},
 					Volumes:                       volumes,
 					Affinity:                      c.buildAffinity(exp.ID, spec, placement, distributed),
@@ -443,15 +400,6 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		// already left. The gang burned its full allocation and then failed anyway — the exact
 		// cost the per-index budget was meant to avoid.
 		//
-		// Note the retry budget is NOT expressed here. BackoffLimit cannot restart a gang: on an
-		// Indexed Job it recreates the failed *index* and leaves the survivors blocked, which is
-		// the behaviour above under another name, and FailJob is terminal so it bypasses
-		// BackoffLimit entirely. Gang retry is therefore a control-plane decision written as
-		// desired state (see the scheduler's job watcher), and BackoffLimit is pinned to 0 so
-		// there is exactly one retry authority rather than two disagreeing ones.
-		zero := int32(0)
-		job.Spec.BackoffLimit = &zero
-
 		// No custom SuccessPolicy: every distributed job uses k8s's default Indexed Job
 		// semantics — Complete only once *all* indexes succeed. A policy keyed on index 0
 		// would let k8s declare success and terminate other ranks on a lone rank-0 success,

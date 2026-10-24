@@ -69,14 +69,14 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "Another job of the baseline agent measured better than the declared one, and the baseline must be the strongest. " + next("declare that configuration's job")
 		},
 		"baseline_breaks_constraint": func() string {
-			return "The baseline fails a metric's bound, which would disqualify every researcher. Change that bound to continue."
+			return "The baseline fails a metric's bound, which would disqualify every executor. Change that bound to continue."
 		},
 		"budget_below_baseline": func() string {
-			return "The budget is too small for each researcher to run one trial at the baseline's measured cost. Raise the budget or allow fewer researchers."
+			return "The budget is too small for each executor to run one trial at the baseline's measured cost. Raise the budget or allow fewer executors."
 		},
 		"starts_at_ahead": func() string { return "The baseline is ready. The run starts by itself in " + in(pe.StartsAt) + "." },
-		"no_researchers": func() string {
-			return "The baseline is ready, but there is no researcher to run. Add a researcher and the run starts."
+		"no_executors": func() string {
+			return "The baseline is ready, but there is no executor to run. Add an executor and the run starts."
 		},
 		"budget_spent": func() string {
 			return "Measuring the baseline used the whole budget. Raise the budget to start the run."
@@ -84,11 +84,11 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		"starting": func() string { return "Everything is ready. The run starts within a minute." },
 
 		"agents_starting": func() string {
-			return "The researchers' machines are starting. If none is running in " + in(pe.AgentsDueAt) + ", the platform closes the experiment."
+			return "The executors' machines are starting. If none is running in " + in(pe.AgentsDueAt) + ", the platform closes the experiment."
 		},
-		"running": func() string { return "The researchers are at work. The run ends in " + in(pe.EndsAt) + "." },
-		"researchers_done": func() string {
-			return "No researcher is left to submit jobs. " + next("add a researcher, or write the summary and close the experiment") + " It closes by itself in " + in(pe.EndsAt) + "."
+		"running": func() string { return "The executors are at work. The run ends in " + in(pe.EndsAt) + "." },
+		"executors_done": func() string {
+			return "No executor is left to submit jobs. " + next("add an executor, or write the summary and close the experiment") + " It closes by itself in " + in(pe.EndsAt) + "."
 		},
 
 		string(domain.CloseEndTimeReached): func() string { return "Closed: it reached its end time." },
@@ -106,7 +106,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		string(domain.CloseProposalExpired):      func() string { return "Closed: nobody accepted the plan or changed the goal in time." },
 		string(domain.CloseBaselineLimitReached): func() string {
 			if pe.BaselineJobID != "" {
-				return "Closed: the baseline was ready, but no researcher or budget started the run in time."
+				return "Closed: the baseline was ready, but no executor or budget started the run in time."
 			}
 			return "Closed: no baseline was measured in time."
 		},
@@ -114,7 +114,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "Closed: the planner's machine failed before it answered."
 		},
 		string(domain.CloseAgentsNotStarted): func() string {
-			return "Closed: no researcher's machine started in time."
+			return "Closed: no executor's machine started in time."
 		},
 		string(domain.CloseRepositoryNotCreated): func() string {
 			return "Closed: its repository couldn't be created: " + pe.RepositoryError

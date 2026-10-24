@@ -69,12 +69,12 @@ declares or raises the baseline, nothing else.
 
 --baseline-job JOB declares the baseline while the platform experiment is open. The platform
 writes JOB, its code_ref and what it measured into a block of the description it keeps through
-later changes, and starts the run in that request when a researcher has joined and no starts_at
+later changes, and starts the run in that request when an executor has joined and no starts_at
 is ahead. The line printed after says whether it started, with status_reason. Refusals:
 no_baseline (JOB is no baseline agent's job here), baseline_not_completed,
 baseline_not_on_branch (JOB ran a branch other than hl/PE/baseline),
 baseline_without_finding (no summary filed), baseline_missing_metric, baseline_breaks_constraint
-and budget_below_baseline (the budget does not hold one trial per researcher at JOB's
+and budget_below_baseline (the budget does not hold one trial per executor at JOB's
 estimate); the last two are the owner's to change.
 
 --baseline-job JOB --reason TEXT raises the baseline while the run goes on, to a stronger
@@ -90,11 +90,11 @@ standings against JOB from then on. Verdicts already given stay as recorded. Ref
 (baseline_not_running: the baseline agent's job is declared then) and once it is closed.
 
 FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
-researchers, duration_hours, metrics, report_interval_seconds): any while it is open, only name,
-description, duration_hours, max_agents and researchers once it runs. The result is checked like a create, so name and description stay
-non-empty. Once it runs, max_agents below the researchers at work cuts the newest of them
+agents, duration_hours, metrics, report_interval_seconds): any while it is open, only name,
+description, duration_hours, max_agents and agents once it runs. The result is checked like a create, so name and description stay
+non-empty. Once it runs, max_agents below the executors at work cuts the newest of them
 (agent.cut with detail max_agents_lowered) and nobody takes their places; before that it is
-409 max_agents_below_researchers, which says how many are signed up.`, stderr)
+409 max_agents_below_executors, which says how many are signed up.`, stderr)
 	pe := command.ExperimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	descriptionFlag := command.NewTextFlag(fs, "description", "the new description")
@@ -177,7 +177,7 @@ func PlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr i
 The platform experiment: its status, description, metrics, stages and current_stage, and in
 consumed_accelerator_hours what it spent of its budget. While it is open, stages are the ones
 declared. From the start they are the ones the run has: a single stage of its whole length
-where fewer than 5 researchers joined, since a boundary cuts nobody from so few. One moment says when the platform
+where fewer than 5 executors joined, since a boundary cuts nobody from so few. One moment says when the platform
 closes it if nobody does: planning_ends_at on a draft being planned, proposal_expires_at once
 its planner answered, baseline_due_at while it is open, and ends_at, which is starts_at plus
 duration_hours, once it runs. status_reason says where one that is not closed stands: reason
@@ -191,9 +191,9 @@ state. The reasons:
     baseline_not_on_branch,
     baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint,
     budget_below_baseline
-  open, its baseline declared: starts_at_ahead, no_researchers, budget_spent, starting
-  running: agents_starting while no researcher's machine is up yet, then running
-  running, every researcher finished, cut or stopped for good: researchers_done
+  open, its baseline declared: starts_at_ahead, no_executors, budget_spent, starting
+  running: agents_starting while no executor's machine is up yet, then running
+  running, every executor finished, cut or stopped for good: executors_done
 An agent of the roster adds instance_starting (hl platform-experiments agents list).
 Once the baseline is declared, baseline_branch and baseline_code_ref name the branch and commit
 of its job, where its harness is: the default branch may hold none of it.
@@ -202,7 +202,7 @@ with its best on its primary metric. Each is read as your own with --platform-ex
 any read: its summary, results, jobs and hypotheses. continues names the one this run carries on, whose
 baseline_code_ref is the commit this one's baseline starts from.
 On an open one the message begins with your own next step, worded for your token: the command
-a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
+a coordinator or a person runs, what a baseline agent measures, or that an executor's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,
 and nothing is written beside the JSON, so the output parses whole.`, stderr)
 	pe := command.ExperimentFlag(fs)

@@ -6,8 +6,8 @@ import (
 	"sort"
 )
 
-// ModelPrice is what the model provider charges for one model, in US dollars per million tokens
-// of each kind it counts. Writing to the cache is priced at the one-hour cache's rate, the one
+// ModelPrice is what a provider charges for one model, in US dollars per million tokens of each
+// kind it counts. Writing to the cache is priced at the one-hour cache's rate, the one
 // the platform's agents write at.
 type ModelPrice struct {
 	InputUSDPerMTok      float64 `yaml:"input_usd_per_mtok" json:"input_usd_per_mtok"`
@@ -16,18 +16,18 @@ type ModelPrice struct {
 	CacheReadUSDPerMTok  float64 `yaml:"cache_read_usd_per_mtok" json:"cache_read_usd_per_mtok"`
 }
 
-// ModelCatalog is every model a sandboxed agent or coordinator may call through the platform,
-// by the name a call states, with its price.
+// ModelCatalog is every model of one provider a sandboxed agent or coordinator may call through
+// the platform, by the model id a call states, with its price.
 type ModelCatalog map[string]ModelPrice
 
-// Validate refuses a catalog with no model, a name no agent can be started on, or a price that
-// is not positive.
-func (c ModelCatalog) Validate() error {
+// Validate refuses a catalog with no model, an id no model reference of provider holds, or a price
+// that is not positive.
+func (c ModelCatalog) Validate(provider string) error {
 	if len(c) == 0 {
 		return errors.New("the model catalog names no model")
 	}
 	for name, p := range c {
-		if err := ValidateModel(name); err != nil {
+		if _, err := NewModelRef(provider, name); err != nil {
 			return fmt.Errorf("model %q: %w", name, err)
 		}
 		if p.InputUSDPerMTok <= 0 || p.OutputUSDPerMTok <= 0 || p.CacheWriteUSDPerMTok <= 0 || p.CacheReadUSDPerMTok <= 0 {
@@ -53,25 +53,16 @@ type ModelTokens struct {
 	Input, Output, CacheWrite, CacheRead int64
 }
 
-// SpendUSD is what used cost at the catalog's prices. A model the catalog does not price is an
-// error: no call to it was served, so its usage was recorded under a catalog that priced it.
-func (c ModelCatalog) SpendUSD(used []ModelTokens) (float64, error) {
-	var usd float64
-	for _, u := range used {
-		p, ok := c[u.Model]
-		if !ok {
-			return 0, fmt.Errorf("model %q has usage and no price in the model catalog", u.Model)
-		}
-		usd += (float64(u.Input)*p.InputUSDPerMTok + float64(u.Output)*p.OutputUSDPerMTok +
-			float64(u.CacheWrite)*p.CacheWriteUSDPerMTok + float64(u.CacheRead)*p.CacheReadUSDPerMTok) / 1e6
-	}
-	return usd, nil
+// CostUSD is what t cost at p.
+func (p ModelPrice) CostUSD(t ModelTokens) float64 {
+	return (float64(t.Input)*p.InputUSDPerMTok + float64(t.Output)*p.OutputUSDPerMTok +
+		float64(t.CacheWrite)*p.CacheWriteUSDPerMTok + float64(t.CacheRead)*p.CacheReadUSDPerMTok) / 1e6
 }
 
 // ModelBudget is what a platform experiment may spend on model calls and what it spent.
 type ModelBudget struct {
 	BudgetUSD float64 `json:"model_budget_usd" doc:"What its agents and coordinator may spend on model calls the platform makes for them, in US dollars: its model_budget_usd, or the platform's default when it states none."`
-	UsedUSD   float64 `json:"model_used_usd" doc:"What their model calls cost so far, at the platform's prices. Once it reaches model_budget_usd every further model call is refused with 429 model_budget_spent until the budget is raised."`
+	UsedUSD   float64 `json:"model_used_usd" doc:"What their model calls cost so far, the sum of the cost recorded with each call. Once it reaches model_budget_usd every further model call is refused with 429 model_budget_spent until the budget is raised."`
 }
 
 // Spent reports whether no further model call may be made.
@@ -88,8 +79,11 @@ func ModelBudgetUSD(stated *float64, platformDefault float64) float64 {
 
 // The reasons the model proxy refuses a call with.
 const (
-	// ReasonModelNotServed: the call names a model outside the platform's model catalog.
+	// ReasonModelNotServed: the call or the choice names a model the platform does not serve.
 	ReasonModelNotServed = "model_not_served"
+	// ReasonModelNotTheCallers: the call goes to another provider than its caller's model's, or
+	// names another model where the provider serves the caller's alone.
+	ReasonModelNotTheCallers = "model_not_the_callers"
 	// ReasonModelBudgetSpent: the platform experiment's model calls cost its model budget.
 	ReasonModelBudgetSpent = "model_budget_spent"
 	// ReasonModelCallsInFlight: the org has as many model calls in flight as the platform

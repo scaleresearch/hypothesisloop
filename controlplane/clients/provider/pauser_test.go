@@ -10,82 +10,67 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/fake"
 )
 
-// core is a provider with the required calls and nothing more.
-type core struct{ provider.Provider }
-
-// some is a provider that has the capabilities of its fields that are set.
-func some(p *fake.Provider, pauses, counts, warms bool) provider.Provider {
-	type (
-		P = provider.Pauser
-		M = provider.Market
-		W = provider.Warmer
-	)
-	c := core{p}
-	switch {
-	case pauses && counts && warms:
-		return p
-	case pauses && counts:
-		return struct {
-			core
-			P
-			M
-		}{c, p, p}
-	case pauses && warms:
-		return struct {
-			core
-			P
-			W
-		}{c, p, p}
-	case counts && warms:
-		return struct {
-			core
-			M
-			W
-		}{c, p, p}
-	case pauses:
-		return struct {
-			core
-			P
-		}{c, p}
-	case counts:
-		return struct {
-			core
-			M
-		}{c, p}
-	case warms:
-		return struct {
-			core
-			W
-		}{c, p}
+// core is a provider with the required calls and nothing more, and each of the others has one
+// capability beside them.
+type (
+	core   struct{ provider.Provider }
+	pauses struct {
+		core
+		provider.Pauser
 	}
-	return c
-}
+	counts struct {
+		core
+		provider.Market
+	}
+	warms struct {
+		core
+		provider.Warmer
+	}
+	networks struct {
+		core
+		provider.Networker
+	}
+)
 
 func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing.T) {
 	pausing := fake.New()
-	for _, pauses := range []bool{false, true} {
-		for _, counts := range []bool{false, true} {
-			for _, warms := range []bool{false, true} {
-				want := []string{}
-				for name, has := range map[string]bool{provider.CapabilityPause: pauses, provider.CapabilityMarket: counts, provider.CapabilityWarm: warms} {
-					if has {
-						want = append(want, name)
-					}
-				}
-				sort.Strings(want)
-				one := some(pausing, pauses, counts, warms)
-				for _, p := range []provider.Provider{one, provider.Bounded(one)} {
-					got := provider.Capabilities(p)
-					sort.Strings(got)
-					if !reflect.DeepEqual(got, want) {
-						t.Fatalf("Capabilities of %T = %v, want %v: the wrapper hid what it wraps or made up what it does not", p, got, want)
-					}
-				}
+	c := core{pausing}
+	for _, tc := range []struct {
+		p    provider.Provider
+		want []string
+	}{
+		{c, []string{}},
+		{pauses{c, pausing}, []string{provider.CapabilityPause}},
+		{counts{c, pausing}, []string{provider.CapabilityMarket}},
+		{warms{c, pausing}, []string{provider.CapabilityWarm}},
+		{networks{c, pausing}, []string{provider.CapabilityNetwork}},
+		{pausing, []string{provider.CapabilityMarket, provider.CapabilityNetwork, provider.CapabilityPause, provider.CapabilityWarm}},
+	} {
+		got := provider.Capabilities(tc.p)
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("Capabilities of %T = %v, want %v", tc.p, got, tc.want)
+		}
+		b := provider.Bound(tc.p)
+		carried := []string{}
+		for name, has := range map[string]bool{
+			provider.CapabilityPause: b.Pauser != nil, provider.CapabilityMarket: b.Market != nil,
+			provider.CapabilityWarm: b.Warmer != nil, provider.CapabilityNetwork: b.Networker != nil,
+		} {
+			if has {
+				carried = append(carried, name)
 			}
+		}
+		sort.Strings(carried)
+		if !reflect.DeepEqual(carried, tc.want) {
+			t.Fatalf("Bound(%T) carries %v, want %v: the wrapper hid what it wraps or made up what it does not", tc.p, carried, tc.want)
+		}
+		if got := provider.Capabilities(b); !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("Capabilities of Bound(%T) = %v, want %v: what the wrapper carries", tc.p, got, tc.want)
 		}
 	}
 	pausing.Market = func(provider.Spec) provider.Supply { return provider.Supply{Count: 3} }
-	if supply, err := provider.Bounded(pausing).(provider.Market).Rentable(context.Background(), provider.Spec{}, 5); err != nil || supply.Count != 3 {
+	if supply, err := provider.Bound(pausing).Market.Rentable(context.Background(), provider.Spec{}, 5); err != nil || supply.Count != 3 {
 		t.Fatalf("Rentable through the wrapper = %+v, %v", supply, err)
 	}
 
@@ -95,7 +80,7 @@ func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing
 		t.Fatal(err)
 	}
 	pausing.Start("hl-a")
-	bounded := provider.Bounded(pausing).(provider.Pauser)
+	bounded := provider.Bound(pausing).Pauser
 	if err := bounded.Pause(ctx, id); err != nil {
 		t.Fatal(err)
 	}

@@ -235,7 +235,7 @@ func TestOpenSlotsAreDealtToEveryArchitectureTheProviderRents(t *testing.T) {
 	exp := on(job(t, "exp-arm", 0, 1), "h100-1")
 	exp.ResolvedJob.NodeSelector[clusterapi.NodeArchitectureLabel] = "arm64"
 	mustCreate(t, e, exp)
-	if got := p.Spec(e.instanceName("exp-arm", 0, "h100", 1)).Architecture; got != "arm64" {
+	if got := p.Spec(e.instanceName("exp-arm", 0, 0, 1, "h100", 1)).Architecture; got != "arm64" {
 		t.Fatalf("rented on %q, want arm64", got)
 	}
 	_, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)

@@ -12,10 +12,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// A researcher that joins a running platform experiment takes the place of one that ended, or one
+// An executor that joins a running platform experiment takes the place of one that ended, or one
 // max_agents gained, and its share first from what the ones that ended left unspent, then from the
-// researchers at work, and max_agents counts the researchers at work.
-func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *testing.T) {
+// executors at work, and max_agents counts the executors at work.
+func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -53,7 +53,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 		return id, pes.JoinRunning(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role}, late)
 	}
 	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
-		t.Fatalf("a third researcher at work: got = %v, want = ErrMaxAgentsReached", err)
+		t.Fatalf("a third executor at work: got = %v, want = ErrMaxAgentsReached", err)
 	}
 	if err := pes.FinishAgent(ctx, pe, ended, "done"); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	}
 	newcomer, err := join(domain.SignupRoleCompetitor)
 	if err != nil {
-		t.Fatalf("a researcher in the place of one that finished: got = %v, want = nil", err)
+		t.Fatalf("an executor in the place of one that finished: got = %v, want = nil", err)
 	}
 	// 3 + 4 unspent over the one at work and the newcomer, at most the 4 the ended one left.
 	for id, want := range map[string]float64{newcomer: 3.5, ended: 1.5, atWork: 5} {
@@ -74,7 +74,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	}
 	late.Used[newcomer] = 0
 	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
-		t.Fatalf("a researcher past max_agents at work: got = %v, want = ErrMaxAgentsReached", err)
+		t.Fatalf("an executor past max_agents at work: got = %v, want = ErrMaxAgentsReached", err)
 	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_agents = 5 WHERE id = $1`, pe); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	late.MinShare = 2
 	added, err := join(domain.SignupRoleCompetitor)
 	if err != nil {
-		t.Fatalf("a researcher in a place max_agents gained: got = %v, want = nil", err)
+		t.Fatalf("an executor in a place max_agents gained: got = %v, want = nil", err)
 	}
 	// Nothing left by the one that ended: 3 + 3.5 unspent over three, given by the two at work
 	// above it, each keeping what it used.

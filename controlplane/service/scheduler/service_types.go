@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -12,9 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
-
-// submission rate-limit window.
-const submissionRateLimitWindow = time.Hour
 
 // Store is the persistence interface required by the Scheduler.
 type Store interface {
@@ -63,7 +59,7 @@ type Standings interface {
 // dimension (Accelerator-hours, CPU-core-hours, RAM-GB-hours, storage-GB-hours).
 type QuotaService interface {
 	agentQuotas
-	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error)
+	AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, inserted func(context.Context) error) (db.AdmitDecision, error)
 	// Describe sets on an open platform experiment why it is not running yet and what reader does
 	// about it (StatusReason): the one wording of it, which a refused submit repeats.
 	Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error

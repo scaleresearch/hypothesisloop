@@ -5,8 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { PhaseStrip } from '@/components/phase-strip'
 import { formatDate } from '@/lib/format'
+import { resolveTenant, TenantContext } from '@/lib/tenant'
 import type { StoredProposal } from '@/lib/planning'
-import type { JoinedAgent, PlatformExperiment, PlatformExperimentStatus, StatusReason } from '@/types/api'
+import type { JoinedAgent, Me, PlatformExperiment, PlatformExperimentStatus, StatusReason } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -14,6 +15,10 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/agent-types', async () => {
+  const { CATALOG, ROLES } = await import('@/test-agent-types')
+  return { fetchAgentTypes: vi.fn(async () => CATALOG), fetchAgentRoles: vi.fn(async () => ROLES) }
+})
 vi.mock('@/components/platform-experiment-form', () => ({
   PlatformExperimentDialog: ({ initial }: { initial: PlatformExperiment }) => <div role="dialog">Edit experiment {initial.name}, budget {initial.budget_accelerator_hours}</div>,
 }))
@@ -35,8 +40,17 @@ function agent(role: JoinedAgent['role'], more: Partial<JoinedAgent> = {}): Join
   }
 }
 
+const me: Me = {
+  kind: 'user', user_id: 'u1', name: 'Ada',
+  orgs: [{ id: 'org_a', name: 'Lab', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] }],
+  projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
+}
+const resolved = resolveTenant(me, 'prj_1')
+if (resolved.state !== 'selected') throw new Error('no tenant')
+const tenant = resolved.tenant
+
 function show(pe: PlatformExperiment) {
-  return render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={pe} jobs={[]} /></SWRConfig>)
+  return render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><PhaseStrip pe={pe} jobs={[]} /></TenantContext.Provider></SWRConfig>)
 }
 
 const phases = () => within(screen.getByRole('list', { name: 'Phase' })).getAllByRole('listitem')
@@ -92,11 +106,11 @@ describe('whose move it is', () => {
     experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { waits_for: who, summary: `It waits: ${reason}.` })
   const strip = () => within(screen.getByRole('region', { name: 'Where this experiment stands' }))
 
-  it('says so prominently when it is the owner\'s, in the API\'s words, with the way to add a researcher', () => {
-    show(waits('no_researchers', 'owner'))
+  it('says so prominently when it is the owner\'s, in the API\'s words, with the way to add an executor', () => {
+    show(waits('no_executors', 'owner'))
     expect(strip().getByText('Your move')).toBeTruthy()
-    expect(sentence()).toBe('It waits: no_researchers.')
-    expect(strip().getByRole('link', { name: 'Add a researcher' }).getAttribute('href')).toBe('#agents')
+    expect(sentence()).toBe('It waits: no_executors.')
+    expect(strip().getByRole('link', { name: 'Add an executor' }).getAttribute('href')).toBe('#agents')
     expect(strip().queryByText(/Nothing is needed from you/)).toBeNull()
   })
 
@@ -126,8 +140,8 @@ describe('whose move it is', () => {
   })
 
   it('tells a reader of a shared experiment neither, and a closed one needs nobody', () => {
-    const shared = render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={{ ...waits('no_researchers', 'owner'), actions: [] }} /></SWRConfig>)
-    expect(sentence()).toBe('It waits: no_researchers.')
+    const shared = render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={{ ...waits('no_executors', 'owner'), actions: [] }} /></SWRConfig>)
+    expect(sentence()).toBe('It waits: no_executors.')
     expect(strip().queryByText('Your move')).toBeNull()
     expect(strip().queryByRole('link')).toBeNull()
     shared.unmount()
@@ -191,7 +205,7 @@ describe('the proposal of an accepted experiment', () => {
     expect(screen.getByText('The planner had planned on: 32 only.')).toBeTruthy()
     expect(screen.getByText('Schedules on tiny transformers')).toBeTruthy()
     expect(screen.getByText('val_loss, lower is better')).toBeTruthy()
-    expect(screen.getByText('Researcher 2')).toBeTruthy()
+    expect(await screen.findAllByText('Executor')).toHaveLength(2)
     expect(screen.queryAllByRole('textbox')).toHaveLength(0)
     expect(screen.queryAllByRole('spinbutton')).toHaveLength(0)
     for (const name of ['Accept and run', 'Accept now', 'Edit', 'Reject']) expect(screen.queryByRole('button', { name })).toBeNull()

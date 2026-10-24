@@ -57,7 +57,7 @@ func messagesRouter(t *testing.T, store *messageStore, caller auth.Principal) ht
 	return r
 }
 
-// The coordinator and the owner message an agent, or every researcher; an agent messages nobody
+// The coordinator and the owner message an agent, or every agent of the team; an agent messages nobody
 // and reads only its own; a send past the hourly limit says when the next can go.
 func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.T) {
 	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
@@ -93,7 +93,7 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 		t.Errorf("past the limit: got = %d %v, want 429 rate_limited with when", code, out)
 	}
 
-	// A message to every researcher reaches those not rate limited and names the others.
+	// A message to every agent reaches those not rate limited and names the others.
 	partial := &messageStore{limited: []db.MessagesRateLimited{{AgentID: "dana", From: "owner", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}}
 	code, out = call(t, messagesRouter(t, partial, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"queue more trials"}`)
 	refused, _ := out["refused"].([]any)
@@ -112,6 +112,9 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 	allLimited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "dana", From: "owner", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
 	if code, out := call(t, messagesRouter(t, allLimited, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "rate_limited" {
 		t.Errorf("all with every one limited: got = %d %v, want 429", code, out)
+	}
+	if code, out := call(t, messagesRouter(t, &messageStore{refuse: db.ErrNoAgentAtWork}, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"x"}`); code != http.StatusConflict || out["reason"] != "no_agent_at_work" {
+		t.Errorf("all with none at work: got = %d %v, want 409 no_agent_at_work", code, out)
 	}
 
 	// A person steers the coordinator the same way, and is told where none is sandboxed.

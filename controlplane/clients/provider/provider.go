@@ -18,9 +18,9 @@
 //     gone, is not an error.
 //   - It has a check in providertest that every adapter claiming it runs against its real
 //     vendor, and fake implements it.
-//   - A wrapper of a Provider passes on the capabilities of what it wraps (Bounded does).
+//   - A wrapper of a Provider carries the capabilities of what it wraps (Bounded does).
 //
-// Pauser, Market and Warmer are the capabilities there are. The ones foreseen, to be shaped the same way when
+// Pauser, Market, Warmer and Networker are the capabilities there are. The ones foreseen, to be shaped the same way when
 // something needs them and not before:
 //
 //   - Snapshotter: Snapshot(ctx, id) (ref, error) and a Spec field naming a snapshot to create
@@ -77,9 +77,14 @@ var namePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 // ValidateName is the rule every Spec.Name meets: lowercase letters, digits and dashes, at most
 // MaxNameLength long. An adapter whose vendor cannot hold such a name as it is (a shorter limit,
 // another alphabet) keeps its own mapping and still returns the name unchanged from List.
-func ValidateName(name string) error {
+func ValidateName(name string) error { return validateName("instance name", name) }
+
+// ValidateNetworkName is ValidateName for the name of a Networker's network.
+func ValidateNetworkName(name string) error { return validateName("network name", name) }
+
+func validateName(what, name string) error {
 	if len(name) > MaxNameLength || !namePattern.MatchString(name) {
-		return fmt.Errorf("instance name %q must be 1 to %d characters of a-z, 0-9 and dash", name, MaxNameLength)
+		return fmt.Errorf("%s %q must be 1 to %d characters of a-z, 0-9 and dash", what, name, MaxNameLength)
 	}
 	return nil
 }
@@ -114,6 +119,11 @@ type Spec struct {
 	// caller found unable to start an instance. A vendor that names no host in List is never
 	// given any.
 	AvoidHosts []string
+
+	// Network is the private network of a Networker the instance is rented in the place of and
+	// joins, empty for none. Create of a spec with one returns once the instance's
+	// PrivateAddress is known (Networker).
+	Network string
 }
 
 // ImageLogin is a login to the registry host Registry.
@@ -146,6 +156,9 @@ type Instance struct {
 	PricePerHour     float64
 	// Architecture is that of the machine's CPU, as image manifests name it.
 	Architecture string
+	// PrivateAddress is the address the other instances of its network reach it at, set for an
+	// instance created on one from the moment its Create returns, and empty for any other.
+	PrivateAddress string
 }
 
 // Provider rents and returns instances. Offer search, bidding, region choice and every other

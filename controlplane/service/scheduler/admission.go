@@ -178,6 +178,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
+	if len(exp.Job.Slots) > 0 {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.slots", Message: "job.slots may not be stated: the slots a job holds are set by the platform"}
+	}
 	if err := domain.ValidateCommand(exp.Job); err != nil {
 		return &AdmissionError{Reason: ReasonRequired, Field: "job.command", Message: err.Error()}
 	}

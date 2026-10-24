@@ -43,7 +43,7 @@ Required: metadata.hypothesis_id (or --hypothesis), any agent's registered hypot
 hypothesis and a branch are two things), and metadata.theory (or --theory), what you predict
 the job will show. A baseline agent's job names neither (baseline_tests_no_hypothesis) and runs
 on branch hl/PE/baseline (git checkout -b hl/PE/baseline), or on hl/PE/baseline-check to try
-the code as a researcher would. Only a job of hl/PE/baseline is declared the baseline.
+the code as an executor would. Only a job of hl/PE/baseline is declared the baseline.
 --secret-env NAME sends $NAME from this environment as job.secret_env, which no read of the
 job shows; FILE may not carry job.secret_env. An agent's token says whose job it is and where;
 a person or an API key states --agent and --platform-experiment.

@@ -42,7 +42,7 @@ func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *platforme
 func declareJobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*platformexperiments.Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
-	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)
+	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithServedModels(testModels)
 	svc.WithBaselineRead(func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*platformexperiments.Baseline, error) {
 		for _, job := range jobs {
 			if job != nil && job.Job.ID == jobID {
@@ -111,7 +111,7 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 	}{
 		"a job that does not exist": {map[string]any{"baseline_job_id": "job-2"}, nil, "no_baseline"},
 		"no job named":              {map[string]any{"baseline_job_id": ""}, nil, "no_baseline"},
-		"a researcher's job": {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) {
+		"an executor's job": {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) {
 			b.OwnerRole = domain.SignupRoleCompetitor
 		}, "no_baseline"},
 		"a job of another experiment": {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) {
@@ -127,7 +127,7 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 		"a metric the job never reported": {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) { delete(b.Reported, "val_loss") }, "baseline_missing_metric"},
 		"a gate the baseline fails":       {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) { b.Reported["exact_match"] = 0.97 }, "baseline_breaks_constraint"},
 		// The baseline cost 0.4 and a trial holds 0.6, its estimate: a budget of 1 covered the
-		// cost twice and neither researcher's first job.
+		// cost twice and neither executor's first job.
 		"a budget below one trial apiece": {declaration, func(_ *platformexperiments.Baseline, pe *domain.PlatformExperiment) { pe.BudgetAcceleratorHours = 1 }, "budget_below_baseline"},
 	} {
 		pe, baseline := openExperiment(), measuredBaseline()
@@ -189,7 +189,7 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 		reason string
 	}{
 		"a budget one run apiece no longer fits": {map[string]any{"budget_accelerator_hours": 0.3}, "budget_below_baseline"},
-		"more researchers than the budget fits":  {map[string]any{"max_agents": 40}, "budget_below_baseline"},
+		"more executors than the budget fits":    {map[string]any{"max_agents": 40}, "budget_below_baseline"},
 		"a metric the baseline never reported":   {map[string]any{"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}}}, "baseline_missing_metric"},
 	} {
 		store, patch := declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
@@ -203,29 +203,29 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 		t.Errorf("a budget the baseline fits: got = %d %v, want 200 and the baseline kept", code, out)
 	}
 
-	// max_agents counts the researchers that joined, so it is never set under them.
+	// max_agents counts the executors that joined, so it is never set under them.
 	// What a declared experiment still waits for is read on it.
 	store, patch = declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
-	if code, out := patch(map[string]any{"budget_accelerator_hours": 8}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "no_researchers" {
-		t.Errorf("a declared experiment nobody joined: got = %d %v, want status_reason no_researchers", code, out["status_reason"])
+	if code, out := patch(map[string]any{"budget_accelerator_hours": 8}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "no_executors" {
+		t.Errorf("a declared experiment nobody joined: got = %d %v, want status_reason no_executors", code, out["status_reason"])
 	}
 	if code, _ := patch(map[string]any{"description": "The brief, rewritten."}); code != http.StatusOK || store.created[0].Description != "The brief, rewritten."+theMeasuredBlock || store.started != 0 {
 		t.Errorf("a brief that drops what the platform wrote: got = %d, brief %q, %d starts, want the block kept and no start", code, store.created[0].Description, store.started)
 	}
-	store.researchers = []string{"ag-1", "ag-2"}
-	if code, out := patch(map[string]any{"max_agents": 1}); code != http.StatusConflict || out["reason"] != "max_agents_below_researchers" || store.created[0].MaxAgents != 2 {
-		t.Errorf("max_agents under the researchers that joined: got = %d %v, want 409 max_agents_below_researchers and nothing changed", code, out)
+	store.agentIDs = []string{"ag-1", "ag-2"}
+	if code, out := patch(map[string]any{"max_agents": 1}); code != http.StatusConflict || out["reason"] != "max_agents_below_executors" || store.created[0].MaxAgents != 2 {
+		t.Errorf("max_agents under the executors that joined: got = %d %v, want 409 max_agents_below_executors and nothing changed", code, out)
 	}
 	if code, out := patch(map[string]any{"max_agents": 3}); code != http.StatusOK || store.created[0].MaxAgents != 3 || store.started != 1 ||
 		out["status"] != "running" || out["status_reason"].(map[string]any)["reason"] != "running" {
-		t.Errorf("a stored change with its baseline and its researchers: got = %d %v, %d starts, want 200 and the run started in this request", code, out, store.started)
+		t.Errorf("a stored change with its baseline and its executors: got = %d %v, %d starts, want 200 and the run started in this request", code, out, store.started)
 	}
 
-	// The declaration itself starts the run when a researcher already joined.
+	// The declaration itself starts the run when an executor already joined.
 	store, patch = declareAPI(t, openExperiment(), measuredBaseline(), theCoordinator)
-	store.researchers = []string{"ag-1"}
+	store.agentIDs = []string{"ag-1"}
 	if code, out := patch(map[string]any{"baseline_job_id": "job-1"}); code != http.StatusOK || store.started != 1 || out["status"] != "running" || out["started_at"] == nil {
-		t.Errorf("declaring with a researcher joined: got = %d %v, %d starts, want the run started by the declaration", code, out, store.started)
+		t.Errorf("declaring with an executor joined: got = %d %v, %d starts, want the run started by the declaration", code, out, store.started)
 	}
 
 	// A patch states the report interval it carries: 0 was stored as it came.

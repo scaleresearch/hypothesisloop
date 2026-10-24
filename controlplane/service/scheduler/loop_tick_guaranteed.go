@@ -181,7 +181,7 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 	slots := placement.HasSlots(c.nodeLabels[cluster])
 	totalCovers := scalarFits && !slots
 	promised := !slots && !scalarFits && domain.Fits(t.desiredFree[cluster], fp)
-	leaving := ""
+	var leaving []string
 	if slots {
 		if p.vacating[cluster] == nil {
 			claimed, err := c.resolveCache.loadClaimed(ctx)
@@ -191,9 +191,12 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 			}
 			p.vacating[cluster] = placement.VacatingSlots(cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster], claimed)
 		}
-		if node, free, _ := placement.SlotFor(exp, cluster, c.nodeResourcesTotal[cluster], p.vacating[cluster], c.nodeLabels[cluster]); free {
-			leaving, promised = c.nodeLabels[cluster][node][domain.NodeSlotLabel], true
-			delete(p.vacating[cluster], node)
+		if nodes, free, _ := placement.SlotsFor(exp, cluster, c.nodeResourcesTotal[cluster], p.vacating[cluster], c.nodeLabels[cluster]); free {
+			for _, node := range nodes {
+				leaving = append(leaving, c.nodeLabels[cluster][node][domain.NodeSlotLabel])
+				delete(p.vacating[cluster], node)
+			}
+			promised = true
 		}
 	}
 	var committed bool
@@ -250,12 +253,13 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 			t.errs = append(t.errs, fmt.Errorf("experiment %s: disbalance eviction on %s: %w", exp.ID, cluster, err))
 		}
 	}
-	noOffer := noOfferReason(exp, cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster])
+	slotWait := slotWaitReason(exp, cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster])
 	neverFits := c.whenIdle.neverFitsReason(exp)
+	noArchitecture := noNodeOfArchitectureReason(exp, cluster, c.nodeLabels[cluster])
 	reason := ""
 	switch {
-	case leaving != "":
-		reason = waitingForSlotReason(cluster, leaving)
+	case len(leaving) > 0:
+		reason = waitingForSlotsReason(cluster, leaving)
 	case waitingForScaleUp:
 		reason = waitingForScaleUpReason(cluster)
 	case allSpeculativeCandidatesTried(exp, t.autoscalerEnabled, t.connected, c.clusterIDs, c.registered, l.triedClusterTTL):
@@ -264,8 +268,10 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 		reason = misfit
 	case neverFits != "":
 		reason = neverFits
-	case noOffer != "":
-		reason = noOffer
+	case slotWait != "":
+		reason = slotWait
+	case noArchitecture != "":
+		reason = noArchitecture
 	default:
 		fitAtTickStart := domain.Fits(t.gAvailInitial[cluster], fp) &&
 			placement.TopologyFits(c.nodeAvailAtTickStart[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster], exp)

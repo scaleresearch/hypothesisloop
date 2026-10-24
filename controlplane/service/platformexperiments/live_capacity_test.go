@@ -104,7 +104,7 @@ func TestCapacitySaysWhichClustersRentOnDemand(t *testing.T) {
 	withOnDemand(clusters, map[string]map[string]map[string]string{
 		"rack": {"node-1": {"gpu.product": "L40"}},
 		"rented": {
-			"gpu-0": {domain.NodeSlotLabel: "gpu-0", "gpu.product": "L40"},
+			"gpu-0": {domain.NodeSlotLabel: "gpu-0", "gpu.product": "L40", domain.NodeSlotStartupLabel: "300"},
 			"gpu-1": {domain.NodeSlotLabel: "gpu-1", domain.NodeSlotNoOfferLabel: "shape gpu: no vast offer of its size passes regions"},
 			"gpu-2": {domain.NodeSlotLabel: "gpu-2", domain.NodeSlotNoOfferLabel: "shape gpu: no vast offer of its size passes regions"},
 			"cpu-0": {domain.NodeSlotLabel: "cpu-0", domain.NodeSlotNoOfferLabel: "shape cpu: vast has no on-demand offer of its size"},
@@ -115,6 +115,9 @@ func TestCapacitySaysWhichClustersRentOnDemand(t *testing.T) {
 	}
 	if want := []string{"shape cpu: vast has no on-demand offer of its size", "shape gpu: no vast offer of its size passes regions"}; !reflect.DeepEqual(clusters[1].NoOffer, want) || clusters[0].NoOffer != nil {
 		t.Errorf("no offer = %q and %q, want each reason of the cluster of slots once: %q", clusters[0].NoOffer, clusters[1].NoOffer, want)
+	}
+	if clusters[0].StartupSeconds != 0 || clusters[1].StartupSeconds != 300 {
+		t.Errorf("startup = %d and %d, want only the cluster of slots to say how long its machines take", clusters[0].StartupSeconds, clusters[1].StartupSeconds)
 	}
 }
 
@@ -214,5 +217,19 @@ func TestCapacityNamesWhatEachClustersNodesNeedInAnImage(t *testing.T) {
 	raw, _ := json.Marshal(clusters[1])
 	if clusters[1].ImageNeeds != nil || strings.Contains(string(raw), "image_needs") {
 		t.Errorf("box: %s, want no image_needs", raw)
+	}
+}
+
+// Capacity counts each cluster's nodes, so an agent knows how many ranks a job spread over
+// distinct hosts can have there.
+func TestCapacityCountsEachClustersNodes(t *testing.T) {
+	clusters := []ClusterCapacity{{ClusterName: "rack"}, {ClusterName: "box"}, {ClusterName: "silent"}}
+	node := map[string]int64{domain.NodeResourceCPUMillicores: 8000, domain.NodeResourceMemoryBytes: 1 << 30}
+	withPerNode(clusters, map[string]map[string]map[string]int64{
+		"rack": {"a": node, "b": node, "c": node},
+		"box":  {"only": node},
+	}, nil, nil)
+	if clusters[0].Hosts != 3 || clusters[1].Hosts != 1 || clusters[2].Hosts != 0 {
+		t.Errorf("hosts = %d, %d, %d, want 3, 1 and 0", clusters[0].Hosts, clusters[1].Hosts, clusters[2].Hosts)
 	}
 }

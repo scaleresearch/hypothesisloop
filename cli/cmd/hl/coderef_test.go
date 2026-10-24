@@ -28,7 +28,7 @@ func TestJobSubmitFlagsOverrideTheCommittedSpecWithoutACommit(t *testing.T) {
 	if metadata["hypothesis_id"] != "hyp-9" || metadata["theory"] != "wider wins" || metadata["platform_experiment_id"] != "pe-flag" {
 		t.Fatalf("metadata = %+v", metadata)
 	}
-	// A researcher refused for quota wrote five copies of the spec, each committed and pushed,
+	// An executor refused for quota wrote five copies of the spec, each committed and pushed,
 	// to change these two fields.
 	if metadata["estimated_duration_hours"] != 0.05 || metadata["capacity_tier"] != "burst" {
 		t.Fatalf("metadata = %+v, want the estimate and the tier of the flags", metadata)

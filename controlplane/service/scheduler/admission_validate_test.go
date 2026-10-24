@@ -347,6 +347,14 @@ func TestASubmittedNodeSelectorMayNotNameAPlatformLabel(t *testing.T) {
 	}
 }
 
+// The slots a job holds are admission's to choose, for the same reason as its node selector's
+// platform labels.
+func TestASubmittedJobMayNotStateItsSlots(t *testing.T) {
+	exp := validSubmission()
+	exp.Job.Slots = []string{"h100-0"}
+	mustReject(t, exp, "job.slots")
+}
+
 func TestASecretEnvNameAlsoSetInTheOpenIsRejected(t *testing.T) {
 	exp := validSubmission()
 	exp.Job.Env = map[string]string{"HF_TOKEN": "open"}

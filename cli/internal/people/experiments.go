@@ -181,7 +181,7 @@ agent whose run ended only with the close is at work again, and so is a sandboxe
 --coordinator-model when it is given. An agent that finished or was cut before the close stays as
 it ended.`, stderr)
 	endsAt := fs.String("ends-at", "", "when the run closes again, RFC 3339")
-	model := fs.String("coordinator-model", "", "the model the sandboxed coordinator runs on from now (default the one it has)")
+	model := fs.String("coordinator-model", "", "the model the sandboxed coordinator runs on from now, <provider>/<model id> such as anthropic/claude-opus-5-5 (see hl models); default the one it has")
 	pe := command.ExperimentFlag(fs)
 	if err := command.ParseNone(fs, args); err != nil {
 		return command.ParseExit(err)

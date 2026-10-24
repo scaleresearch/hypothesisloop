@@ -35,7 +35,7 @@ type Baseline struct {
 
 // BaselineHeadroom is how far over the baseline's observed hours the estimate of a job that
 // states none is set. A job holds its whole estimate of its agent's quota until it ends: an
-// estimate of 2.2 times the run let one job at a time fit a researcher's share, and one under
+// estimate of 2.2 times the run let one job at a time fit an executor's share, and one under
 // the run reserves less than the job spends.
 const BaselineHeadroom = 1.5
 
@@ -88,7 +88,7 @@ func refusedBaseline(reason, format string, args ...any) error {
 }
 
 // checkBaseline holds pe, as it would be stored, to what the job it names as its baseline really
-// did. Every researcher starts from the baseline and is ranked against it, so one whose
+// did. Every executor starts from the baseline and is ranked against it, so one whose
 // measurement did not happen is refused.
 func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if baseline == nil || baseline.Job == nil || baseline.Job.PlatformExperimentID != pe.ID || baseline.OwnerRole != domain.SignupRoleBaseline {
@@ -108,7 +108,7 @@ func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
 		return refusedBaseline("baseline_not_completed", "baseline job %s is %s: a run rests on a baseline that ran to the end. Wait for it, or have it fixed and run again", baseline.Job.ID, baseline.Job.Status)
 	}
 	if !baseline.Finding {
-		return refusedBaseline("baseline_without_finding", "baseline job %s has no finding: its agent files what it measured with `hl job summary`, so the researchers start from it", baseline.Job.ID)
+		return refusedBaseline("baseline_without_finding", "baseline job %s has no finding: its agent files what it measured with `hl job summary`, so the executors start from it", baseline.Job.ID)
 	}
 	var missing []string
 	for _, metric := range pe.Metrics {
@@ -134,7 +134,7 @@ func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
 // strongerOwnJob refuses baseline, as its agent's declaration, when another COMPLETED job of the
 // same agent in pe, of the baseline branch or one beside it, held every constraint, reported the
 // first ranking metric and beat baseline on it. A baseline agent declared a default its own
-// check had beaten, and the researchers were ranked against the weaker control. It names the
+// check had beaten, and the executors were ranked against the weaker control. It names the
 // strongest such job.
 func (s *Service) strongerOwnJob(ctx context.Context, pe *domain.PlatformExperiment, baseline *Baseline) error {
 	ranked, ok := domain.PrimaryRankingMetric(pe.Metrics)
@@ -209,7 +209,7 @@ func checkRaiseRequest(pe *domain.PlatformExperiment, patch PlatformExperimentPa
 // raisedBaseline holds a raise of the running pe's baseline to the job patched names: a completed
 // job of the experiment, whoever ran it on whichever branch, that ran the baseline's commit
 // unchanged, measured as a baseline is (checkMeasurement) and strictly better than the baseline it
-// replaces on the first ranking metric. Only its arguments or environment differ, so a researcher's
+// replaces on the first ranking metric. Only its arguments or environment differ, so an executor's
 // new method never becomes the bar; reason says which configuration it measured. It answers the
 // raise to record and the block the description is given. The estimate of a job that states none stays
 // the declared baseline's.
@@ -258,7 +258,7 @@ func (s *Service) raisedBaseline(ctx context.Context, pe, patched *domain.Platfo
 }
 
 // MeasuredBaselineHeader opens the block of the description the platform writes: what the
-// declared baseline job is, from the platform's own records. The description is all a researcher reads,
+// declared baseline job is, from the platform's own records. The description is all an agent reads,
 // and a coordinator that copied these lines into it by hand got one of them wrong and waited.
 const MeasuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
 
@@ -349,9 +349,9 @@ func withMeasuredBaseline(description, block string) string {
 	return authored + "\n\n" + block
 }
 
-// budgetCoversTrials refuses a budget that cannot hold one trial for each researcher. A trial is
+// budgetCoversTrials refuses a budget that cannot hold one trial for each executor. A trial is
 // the baseline's job submitted again with no estimate stated, sized as the submit sizes it, so
-// the floor is what the first job of each researcher will hold. A baseline too short to be
+// the floor is what the first job of each executor will hold. A baseline too short to be
 // observed leaves no estimate and no floor.
 func budgetCoversTrials(pe *domain.PlatformExperiment, baseline *domain.Experiment) error {
 	held, err := trialHeld(pe, baseline)
@@ -359,12 +359,12 @@ func budgetCoversTrials(pe *domain.PlatformExperiment, baseline *domain.Experime
 		return err
 	}
 	if floor := held * float64(pe.MaxAgents); pe.BudgetAcceleratorHours < floor {
-		return refusedBaseline("budget_below_baseline", "a trial holds %.3f accelerator-hours of its researcher's share (%g h, the estimate measured on the baseline job), so %d researchers each running one need %.3f, and the budget is %.3f: its owner raises budget_accelerator_hours or lowers max_agents", held, pe.JobEstimatedDurationHours, pe.MaxAgents, floor, pe.BudgetAcceleratorHours)
+		return refusedBaseline("budget_below_baseline", "a trial holds %.3f accelerator-hours of its executor's share (%g h, the estimate measured on the baseline job), so %d executors each running one need %.3f, and the budget is %.3f: its owner raises budget_accelerator_hours or lowers max_agents", held, pe.JobEstimatedDurationHours, pe.MaxAgents, floor, pe.BudgetAcceleratorHours)
 	}
 	return nil
 }
 
-// trialHeld is what one trial of baseline holds of a researcher's share (budgetCoversTrials), 0
+// trialHeld is what one trial of baseline holds of an executor's share (budgetCoversTrials), 0
 // when the baseline left no estimate.
 func trialHeld(pe *domain.PlatformExperiment, baseline *domain.Experiment) (float64, error) {
 	trial := *baseline

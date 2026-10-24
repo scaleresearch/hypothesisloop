@@ -64,6 +64,14 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 	amd64Job.ImageArchitecture = "amd64"
 	short := domain.NewFootprint()
 	short.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, 1<<30)
+	gang := *h100Job("gang", "2")
+	gang.Job.NumNodes, gang.AcceleratorCount = 2, 2
+	networkSizes := map[string]map[string]int64{"h100-0": size(8000, 32, 100), "h100-1": size(8000, 32, 100)}
+	noNetwork := map[string]map[string]string{}
+	for node := range networkSizes {
+		noNetwork[node] = map[string]string{domain.NodeSlotLabel: node, domain.NodeSlotAcceleratorsLabel: "1", h100LabelKey: "NVIDIA-H100-80GB-HBM3",
+			domain.NodeSlotNetworkLabel: "0", domain.NodeSlotNoNetworkLabel: "no vast cluster has 2 machines of the shape"}
+	}
 	produced := map[string][]string{
 		domain.NotAdmittedAwaitingAdmission: {domain.QueueReasonAwaitingAdmission},
 		domain.NotAdmittedCapacityUnavailable: {
@@ -73,7 +81,9 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 			notAdmittedReasonFor(false, true, false, short, "cluster-a", holders{}),
 			notAdmittedReasonFor(false, false, false, domain.NewFootprint(), "", holders{}),
 			notAdmittedReasonFor(false, false, true, short, "cluster-a", holders{}),
-			waitingForSlotReason("cluster-a", "h100-0"),
+			waitingForSlotsReason("cluster-a", []string{"h100-0"}),
+			waitingForSlotsReason("cluster-a", []string{"h100-0", "h100-1"}),
+			noNetworkReason(&gang, "cluster-a", networkSizes, networkSizes, noNetwork),
 		},
 		domain.NotAdmittedOutranked:               {notAdmittedReasonFor(true, false, false, short, "cluster-a", holders{})},
 		domain.NotAdmittedStageCut:                {stageCutReason()},
@@ -109,5 +119,35 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 		if _, known := notAdmittedCodes(t)[code]; !known {
 			t.Errorf("%q is produced and is no code of the domain package", code)
 		}
+	}
+}
+
+// A gang spread over more hosts than a cluster has never runs there, and its reason says how many
+// hosts it needs, how many the cluster has, and how to let its nodes share one.
+func TestNeverFitsReasonOfASpreadGangOverTooFewHosts(t *testing.T) {
+	exp := holdJob("gang", domain.CapacityBurst, h100, 1, "1")
+	exp.Job.NumNodes = 3
+	exp.AcceleratorCount = 3
+	host := map[string]int64{domain.NodeResourceCPUMillicores: 8000, domain.NodeResourceMemoryBytes: 8 << 30, domain.NodeResourceStorageBytes: 8 << 30}
+	in := installed{
+		registered: map[string]domain.Cluster{"k8s": {Name: "k8s"}},
+		totals:     map[string]domain.Footprint{"k8s": domain.CapacityFootprint(16, map[string]int64{string(h100): 8}, 16<<30, 16<<30)},
+		nodeTotals: map[string]map[string]map[string]int64{"k8s": {"a": host, "b": host}},
+		multiNode:  map[string]bool{"k8s": true},
+	}
+	reason := in.neverFitsReason(exp)
+	if code := reasonCode(reason); code != domain.NotAdmittedExceedsClusterCapacity {
+		t.Fatalf("reason = %q, want %s", reason, domain.NotAdmittedExceedsClusterCapacity)
+	}
+	for _, want := range []string{"3 hosts", "2 of its 2 hosts", "topology.spread_across_hosts: false"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q does not say %q", reason, want)
+		}
+	}
+
+	stack := false
+	exp.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &stack}
+	if reason := in.neverFitsReason(exp); reason != "" {
+		t.Fatalf("a gang whose nodes may share a host is refused: %q", reason)
 	}
 }

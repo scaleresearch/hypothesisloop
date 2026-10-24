@@ -11,6 +11,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
@@ -43,7 +44,7 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "The only way an agent joins, while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. " +
-			"While it runs, its coordinator or a person adds a researcher (role competitor, and no other role) in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents: it is given an even part, with the researchers at work, of what all researchers left unspent, taken first from what the ones that ended left and then from the researchers at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the researcher a declared baseline still waited for starts the run in this request. " +
+			"While it runs, its coordinator or a person adds an executor (role competitor) in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents, or a researcher: an executor is given an even part, with the executors at work, of what all executors left unspent, taken first from what the ones that ended left and then from the executors at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the executor a declared baseline still waited for starts the run in this request. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +
@@ -53,10 +54,10 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 			"agent_type and model are resolved here and stored: the answer shows what the agent runs. " +
 			"in_agentsandbox=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. A coordinator's token is returned none: a person or an API key of the org asks for it. " +
-			"role decides ranking: \"competitor\" (default) is a researcher, whatever its agent type: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
-			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
-			"409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. " +
-			"An agent of role baseline measures the baseline before the start: its machine, when sandboxed, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
+			"role decides what the agent does (GET /agent-roles): \"competitor\" (default) is an executor, whatever its agent type: it runs jobs, is ranked, cut-eligible and counted against max_agents; \"researcher\" runs the built-in researcher type unless agent_type names it, runs no job (422 researcher_submits_no_job), pushes nothing, holds no quota (404 researcher_has_no_quota), is never ranked or cut, counts toward no max_agents and defaults to the coordinator's model (coordinator_model) when neither model nor its agent type names one; \"baseline\" and " +
+			"\"reviewer\" are not ranked or cut, though their jobs are billed and gated identically. " +
+			"409 max_agents_reached for an executor past max_agents, which counts the executors at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but executor and researcher once the run started, and for every one once it closed. " +
+			"An agent of role baseline measures the baseline before the start: its machine, when sandboxed, starts at once, it holds a quota from the moment it joins (half the budget, which no executor can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, a.add)
 
@@ -90,8 +91,8 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 		DefaultStatus: 200,
 		Description: "Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, " +
 			"its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished, and open_hypotheses, the id and text of each hypothesis of the agent that still has no verdict: the finish is taken whatever they are. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. " +
-			"A researcher's finished_reason, which agent.finished carries to the coordinator, ends with the time and quota it left, after the blocker it named. " +
-			"409 time_and_quota_left, saying how much of each is left, for a researcher that has more than a tenth of the run's time and of its quota left and names no blocker. " +
+			"finished_reason, which agent.finished carries to the coordinator, is the reason headed by why the agent stopped when it gave because (Blocked, or Nothing left worth a job), and for an executor ends with the time and quota it left. " +
+			"409 time_and_quota_left, saying how much of each is left, for an executor that has more than a tenth of the run's time and of its quota left and more time than its jobs typically take, and gives no because. " +
 			"409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing. " +
 			"The finish of an agent of role baseline in an open platform experiment hands over what it measured: with baseline_job_id the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. " +
 			"The job must be the agent's own and pass every check of that PATCH, or the finish is refused with its 422 (no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, budget_below_baseline and the others) and nothing is stored, so the agent fixes what it says and finishes again. " +
@@ -182,9 +183,9 @@ func (a experimentAgentsAPI) remove(ctx context.Context, in *struct {
 }
 
 type finishAgentRequest struct {
-	Reason        string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
-	Blocker       string `json:"blocker,omitempty" doc:"What stops the agent that the time and quota it has left cannot fix. Required of a researcher with more than a tenth of the run's time and of its quota left."`
-	BaselineJobID string `json:"baseline_job_id,omitempty" doc:"For an agent of role baseline: its COMPLETED job the platform declares as the baseline in this request, the control the run is ranked against. Needed when it left several jobs that report the ranking metric."`
+	Reason        string               `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, what stops the agent that the time and quota it has left cannot fix, or what was tried and why no further idea is worth a job."`
+	Because       domain.FinishBecause `json:"because,omitempty" enum:"blocked,nothing_left" doc:"Why the agent stops while it has time and quota: blocked, by what reason names, or nothing_left, no idea left worth a job after what reason says was tried. Required of an executor with more than a tenth of the run's time and of its quota left."`
+	BaselineJobID string               `json:"baseline_job_id,omitempty" doc:"For an agent of role baseline: its COMPLETED job the platform declares as the baseline in this request, the control the run is ranked against. Needed when it left several jobs that report the ranking metric."`
 }
 
 func (a experimentAgentsAPI) finish(ctx context.Context, in *struct {
@@ -204,7 +205,7 @@ func (a experimentAgentsAPI) finish(ctx context.Context, in *struct {
 	}
 	out := &struct{ Body finishedAgent }{}
 	out.Body.Agents, out.Body.OpenHypotheses, err = a.experiments.Finish(ctx, a.graph, in.ID, in.AgentID, in.Body.Reason,
-		strings.TrimSpace(in.Body.Blocker), strings.TrimSpace(in.Body.BaselineJobID), caller.Actor())
+		in.Body.Because, strings.TrimSpace(in.Body.BaselineJobID), caller.Actor())
 	if err != nil {
 		return nil, refused(a.logger, "finish agent", err)
 	}

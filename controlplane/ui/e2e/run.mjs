@@ -265,7 +265,7 @@ async function fillNewExperiment(page, form, name) {
   await metric.fill('val_acc')
   await page.getByRole('option', { name: /^Val Accuracy/ }).click()
   await form.getByRole('button', { name: 'Next', exact: true }).click()
-  await form.getByLabel('Max researchers').waitFor()
+  await form.getByLabel('Max executors').waitFor()
 }
 
 // Where a person lands once signed in: the experiments of their home project.
@@ -645,15 +645,15 @@ async function scenarios(browser) {
     return route.continue()
   })
 
-  // Fills the form in the home dialog with a repository and the researchers, and creates it.
-  async function createAndRunFromHome(name, researchers) {
+  // Fills the form in the home dialog with a repository and the max executors, and creates it.
+  async function createAndRunFromHome(name, executors) {
     await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
     await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Repository').click()
     await page.getByRole('option', { name: 'acme/widgets' }).click()
     await fillNewExperiment(page, dialog, name)
-    await dialog.getByLabel('Max researchers').fill(String(researchers))
+    await dialog.getByLabel('Max executors').fill(String(executors))
     runWrites.length = 0
     await dialog.getByRole('button', { name: 'Create experiment' }).click()
     await page.waitForURL(u => /^\/experiments\/[^/]+$/.test(u.pathname))
@@ -664,11 +664,11 @@ async function scenarios(browser) {
   const ranID = await createAndRunFromHome(`ui-e2e-run-${run}`, 2)
   await page.getByText('Preparing the baseline.').waitFor()
   assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments'],
-    'one create and no start: the platform creates the researchers with it and starts it once its baseline is declared')
+    'one create and no start: the platform creates the team with it and starts it once its baseline is declared')
   assert.equal(runWrites[0].body.repository, 'acme/widgets')
   assert.equal(runWrites[0].body.coordinator_in_agentsandbox, true)
-  assert.equal(runWrites[0].body.max_agents, 2, 'the most researchers at once')
-  assert.deepEqual(runWrites[0].body.researchers, [{ agent_type: 'generalist', count: 2 }], 'max_agents generalists to start with')
+  assert.equal(runWrites[0].body.max_agents, 2, 'the most executors at once')
+  assert.deepEqual(runWrites[0].body.agents, [{ agent_type: 'generalist', count: 2 }, { agent_type: 'researcher', count: 1 }], 'the default team: generalists and one researcher')
   assert.deepEqual(runWrites[0].body.metrics, [{ key: 'val_accuracy', direction: 'maximize' }])
   assert.ok(!('starts_at' in runWrites[0].body), 'no start time is sent, so nothing starts it between two agents')
   const ranToken = await tokenOf(ada)
@@ -760,7 +760,7 @@ async function scenarios(browser) {
   await draftAccepted
   assert.deepEqual(draftWrites, [
     { path: `/platform-experiments/${draftID}/accept`, body: { name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [{ agent_type: 'hyperparameter-search' }, {}] } },
-  ], 'the proposal\'s name, the budget the person typed, the proposal\'s duration and researchers, and no start: the platform starts it once its baseline is declared')
+  ], 'the proposal\'s name, the budget the person typed, the proposal\'s duration and team, and no start: the platform starts it once its baseline is declared')
   await page.unroute(draftAPI)
 
   section('the idea form has no name field and the idea is filed under the signed-in name')
@@ -1173,7 +1173,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Next', exact: true }).click()
   await page.getByLabel('Duration (hours)').waitFor()
   await page.getByRole('button', { name: 'Next', exact: true }).click()
-  await page.getByLabel('Max researchers').waitFor()
+  await page.getByLabel('Max executors').waitFor()
   await page.getByRole('button', { name: 'Save changes' }).click()
   await page.getByText(`${experimentName}-edited`).first().waitFor()
 

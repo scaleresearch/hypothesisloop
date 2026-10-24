@@ -77,7 +77,7 @@ func (s *Composer) compose(platformExperimentID, agentID string, src *db.Instruc
 // agentID, empty for a coordinator, in platform experiment platformExperimentID, and resolves its
 // settings with defaults standing for a model neither the agent nor its type names.
 func composeInstructions(platformExperimentID, agentID string, src *db.InstructionsSource, defaults domain.ModelDefaults) (Instructions, error) {
-	settings := domain.EffectiveAgentSettings(src.Version.Settings, src.Model, src.Hyperparameters, defaults.For(src.Role))
+	settings := domain.EffectiveAgentSettings(src.Version.Settings, src.ModelChoice().Model(defaults), src.Hyperparameters)
 	prompt, err := domain.ComposePrompt(src.Version.Prompt, domain.Assignment{
 		Rules: src.Rules, AgentID: agentID, PlatformExperimentID: platformExperimentID,
 		AgentType: src.Version.TypeID, RepositoryURL: src.RepositoryURL, Hyperparameters: settings.Hyperparameters,

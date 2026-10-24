@@ -59,6 +59,8 @@ const tones: Record<string, Tone> = {
   confirmed: 'success',
   refuted: 'danger',
   inconclusive: 'neutral',
+  merged: 'neutral',
+  retired: 'neutral',
   human: 'neutral',
   agent: 'neutral',
 }

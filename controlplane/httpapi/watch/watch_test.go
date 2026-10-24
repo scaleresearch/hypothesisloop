@@ -146,17 +146,27 @@ func (f *fakeHypotheses) ConcernsAgent(_ context.Context, agentID string, events
 	return out, nil
 }
 
-// lookupStore places every job in exp's platform experiment.
+// lookupStore places every job in exp's platform experiment, and signs up every agent of roles
+// in its role, a competitor otherwise.
 type lookupStore struct {
-	exp *domain.Experiment
+	exp   *domain.Experiment
+	roles map[string]domain.SignupRole
 }
 
 func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment, error) {
 	return s.exp, nil
 }
 
+func (s *lookupStore) GetAgentSignup(_ context.Context, pe, agentID string) (*domain.AgentSignup, error) {
+	role, ok := s.roles[agentID]
+	if !ok {
+		role = domain.SignupRoleCompetitor
+	}
+	return &domain.AgentSignup{AgentID: agentID, PlatformExperimentID: pe, Role: role}, nil
+}
+
 func newTestHandler(changes *fakeChanges, hypotheses *fakeHypotheses, placement authtest.Placement) *Handler {
-	return NewHandler(changes, hypotheses, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, auth.NewAccess(placement), zap.NewNop())
+	return NewHandler(changes, hypotheses, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}, roles: map[string]domain.SignupRole{"researcher-r": domain.SignupRoleResearcher}}, auth.NewAccess(placement), zap.NewNop())
 }
 
 // serve starts handler's LISTEN and serves it behind tokens until the test ends.
@@ -534,6 +544,36 @@ func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromTh
 	}
 	if got := hypotheses.calls.Load(); got != 1 {
 		t.Errorf("graph reads for one page: got = %v, want = 1", got)
+	}
+}
+
+// A researcher keeps the whole graph, and the ideas it curates are mostly others', or no agent's:
+// its scope carries every hypothesis change others make, never its own echo, with no graph read.
+// Its own idea is one no agent owns and still names it, so the echo of its registration and of
+// its curation stay off it too.
+func TestAResearchersScopeCarriesEveryHypothesisChangeOthersMake(t *testing.T) {
+	changes := newFakeChanges(
+		hypEvent(platformapi.EventCommentNew, "hyp-b", "", "agent-c"),
+		hypEvent(platformapi.EventCommentNew, "hyp-a", "", "researcher-r"),
+		hypEvent(platformapi.EventFindingNew, "hyp-a", "", "agent-b"),
+		hypEvent(platformapi.EventHypothesisNew, "hyp-d", "", "agent-b"),
+		hypEvent(platformapi.EventHypothesisStatus, "hyp-b", "", "agent-b"),
+		hypEvent(platformapi.EventHypothesisNew, "hyp-e", "", "researcher-r"),
+		hypEvent(platformapi.EventHypothesisStatus, "hyp-d", "hyp-b", "researcher-r"),
+		hypEvent(platformapi.EventHypothesisUnlink, "hyp-b", "hyp-a", "researcher-r"),
+		hypEvent(platformapi.EventHypothesisLink, "hyp-e", "hyp-a", "agent-c"),
+	)
+	hypotheses := &fakeHypotheses{owner: map[string]string{"hyp-a": "", "hyp-b": "agent-b", "hyp-e": ""}}
+	client := dialWatch(t, watchServerWith(t, changes, hypotheses), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"researcher-r"}})
+	var got []domain.Event
+	for range 5 {
+		got = append(got, client.next(t))
+	}
+	if fmt.Sprint(ids(got)) != "[1 3 4 5 9]" {
+		t.Errorf("ids: got = %v, want = [1 3 4 5 9]", ids(got))
+	}
+	if got := hypotheses.calls.Load(); got != 0 {
+		t.Errorf("graph reads: got = %v, want = 0", got)
 	}
 }
 

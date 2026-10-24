@@ -79,16 +79,6 @@ const stoppedSQL = `EXISTS (SELECT 1 FROM agentsandbox_instances stopped
 const inAgentSandboxSQL = `(EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.in_agentsandbox)
    OR $2 = '' AND EXISTS (SELECT 1 FROM platform_experiments pe WHERE pe.id = $1 AND pe.coordinator_in_agentsandbox))`
 
-// Sandboxed reports whether the platform runs the agent agentID of a platform experiment, or with no
-// agentID its coordinator.
-func (s *Store) InAgentSandbox(ctx context.Context, platformExpID, agentID string) (bool, error) {
-	var sandboxed bool
-	if err := s.pool.pool.QueryRow(ctx, `SELECT `+inAgentSandboxSQL, platformExpID, agentID).Scan(&sandboxed); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.InAgentSandbox: %w", err)
-	}
-	return sandboxed, nil
-}
-
 // AskInstance records the name a sandboxed agent's machine, or with no agentID a sandboxed
 // coordinator's, is asked for under, and when. launch identifies what the machine is started
 // with: under the launch the restart budget was spent under it stands, and under another the

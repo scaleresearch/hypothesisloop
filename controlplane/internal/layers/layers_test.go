@@ -80,10 +80,10 @@ var layers = []layer{
 	{path: "controlplane/service", may: services},
 	{path: "controlplane/service/scheduler", may: services, own: true},
 	// The cloud compute runtime runs in process the loop every cluster runtime runs, driving an
-	// agentexec.Executor and handing workloads workloadenv's environment, so a rented machine runs
-	// a job as a cluster's node does. These are the only packages of runtime/ the control plane
-	// imports.
-	{path: "controlplane/service/compute", may: append([]string{"runtime/shared/agentloop", "runtime/shared/agentexec", "runtime/shared/workloadenv"}, services...)},
+	// agentexec.Executor, handing workloads workloadenv's environment and showing a gang's log
+	// tail as ranktail does, so a rented machine runs a job as a cluster's node does. These are the
+	// only packages of runtime/ the control plane imports.
+	{path: "controlplane/service/compute", may: append([]string{"runtime/shared/agentloop", "runtime/shared/agentexec", "runtime/shared/workloadenv", "runtime/shared/ranktail"}, services...)},
 	// Attach names the cluster-agent chart by the version its Chart.yaml gives.
 	{path: "controlplane/service/accounts", may: append([]string{"deploy/charts/hypothesisloop-cluster-agent"}, services...)},
 	{path: "controlplane/service/platformexperiments/platformexperimentstest", may: []string{"controlplane/domain", "controlplane/storage/db"}},

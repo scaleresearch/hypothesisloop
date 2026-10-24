@@ -9,7 +9,7 @@ import (
 
 // RunHealth returns how each agent and sandboxed coordinator of every open or running platform
 // experiment is getting on, one statement so every one is described at the same moment. An agent
-// is timed from when it could first submit: a researcher from the run's start or, joining later,
+// is timed from when it could first submit: an executor from the run's start or, joining later,
 // its own signup; any other agent from its signup. A job ended at its ended_at. Restarts are the
 // instance counters, which count every machine asked for again over the run, whatever launch it
 // was under.

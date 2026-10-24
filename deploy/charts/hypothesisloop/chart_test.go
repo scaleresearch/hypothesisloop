@@ -51,7 +51,8 @@ func loadRendered(t *testing.T, release *Release, values, deployment string) *co
 	return settings
 }
 
-// Each process is handed exactly the keys its program reads under the settings it is given.
+// Each process is handed exactly the keys its program reads under the settings it is given, those
+// it needs and those it reads when they are set.
 func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
 	for _, values := range []string{InCluster, External} {
 		release := Render(t, values)
@@ -59,7 +60,7 @@ func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
 			t.Run(values+"/"+deployment, func(t *testing.T) {
 				settings := loadRendered(t, release, values, deployment)
 				want := []string{config.SettingsPath.Name}
-				for _, key := range settings.Needs(program) {
+				for _, key := range append(settings.Needs(program), settings.Optional(program)...) {
 					want = append(want, key.Name)
 				}
 				env := release.Env(t, deployment, secretNames[values])
@@ -372,7 +373,7 @@ func TestEveryProviderSecretTheChartHandsOverIsNamedBySectionProviderAndField(t 
 			providers := map[string][]string{
 				config.SectionObjectStore: {settings.ObjectStore.Provider},
 				config.SectionGitHost:     {settings.GitHost.Provider},
-				"MODEL":                   {settings.Models.Provider},
+				"MODEL":                   {"anthropic", "openrouter", "openai"},
 			}
 			if r := settings.ContainerRegistry; r != nil {
 				providers[config.SectionContainerRegistry] = []string{r.Provider}

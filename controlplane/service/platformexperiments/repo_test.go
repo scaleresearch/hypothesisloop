@@ -94,8 +94,8 @@ type createdStore struct {
 	prior []string
 	// messages are the messages sent to its agents.
 	messages []domain.AgentMessage
-	// researchers are the agents of role competitor that joined.
-	researchers []string
+	// executors are the agents of role competitor that joined.
+	executors []string
 	// baselines are the agents of role baseline that joined, and left the COMPLETED jobs on the
 	// objective of those of them that finished.
 	baselines []domain.AgentSignup
@@ -104,7 +104,7 @@ type createdStore struct {
 	objective []*domain.Experiment
 	// completed is every COMPLETED job, oldest first.
 	completed []*domain.Experiment
-	// atWork is the researchers at work by agent type and model, as the store counts them.
+	// atWork is the executors at work by agent type and model, as the store counts them.
 	atWork map[domain.PoolKey]int
 	// started counts the starts that reached the store.
 	started int
@@ -173,10 +173,10 @@ func (s *createdStore) CompletedJobs(context.Context, string) ([]*domain.Experim
 	return s.completed, nil
 }
 
-// StartPlatformExperimentTx starts the open platform experiment id with a researcher at work.
+// StartPlatformExperimentTx starts the open platform experiment id with an executor at work.
 func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _ time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
-	participants := make([]db.StartParticipant, len(s.researchers))
-	for i, agentID := range s.researchers {
+	participants := make([]db.StartParticipant, len(s.executors))
+	for i, agentID := range s.executors {
 		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
 	}
 	quotas, _, err := quotasFor(participants)
@@ -197,14 +197,14 @@ func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domai
 	if role != domain.SignupRoleCompetitor {
 		return nil, nil
 	}
-	return s.researchers, nil
+	return s.executors, nil
 }
 
 func (s *createdStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ []*domain.Agent, signups []domain.AgentSignup) error {
 	s.created = append(s.created, pe)
 	for _, signup := range signups {
 		if signup.Role != domain.SignupRoleBaseline {
-			s.researchers = append(s.researchers, signup.AgentID)
+			s.executors = append(s.executors, signup.AgentID)
 			continue
 		}
 		signup.Name = "Baseline 1"
@@ -223,33 +223,33 @@ func (s *createdStore) GetPlatformExperiment(_ context.Context, id string) (*dom
 	return nil, nil
 }
 
-func (s *createdStore) ResearchersAtWork(context.Context, string) (map[domain.PoolKey]int, error) {
+func (s *createdStore) AgentsAtWork(context.Context, string) (map[domain.PoolKey]int, error) {
 	return s.atWork, nil
 }
 
 func (s *createdStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }
 
 func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
-	signups := make([]domain.AgentSignup, len(s.researchers))
-	for i, agentID := range s.researchers {
+	signups := make([]domain.AgentSignup, len(s.executors))
+	for i, agentID := range s.executors {
 		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}
 	}
 	return append(signups, s.baselines...), nil
 }
 
-// UpdatePlatformExperiment holds max_agents to the researchers that joined, every one at work.
-func (s *createdStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
-	return s.update(pe, status, researchers, len(s.researchers))
+// UpdatePlatformExperiment holds max_agents to the executors that joined, every one at work.
+func (s *createdStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, executors domain.AgentPool) error {
+	return s.update(pe, status, executors, len(s.executors))
 }
 
 // update refuses a max_agents below atWork before the run starts; once it runs the store cuts the
 // newest above it.
-func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool, atWork int) error {
+func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, executors domain.AgentPool, atWork int) error {
 	if pe.MaxAgents < atWork && status != domain.PlatformExpRunning {
 		return &db.PoolBelowAtWorkError{Count: pe.MaxAgents, AtWork: atWork}
 	}
-	if researchers != nil {
-		pe.Researchers = researchers
+	if executors != nil {
+		pe.Agents = executors
 	}
 	for i, stored := range s.created {
 		if stored.ID == pe.ID {

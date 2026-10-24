@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
@@ -92,6 +93,26 @@ func notAdmittedReasonFor(fitAtTickStart, scalarFits, freedInDesiredState bool, 
 	return fmt.Sprintf("%s: cluster %s is short of %s, %s", domain.NotAdmittedCapacityUnavailable, cluster, short, held)
 }
 
+// noNodeOfArchitectureReason is the not_admitted_reason of a job that no node of cluster runs, as
+// none names the architecture of its image, and "" when one does. neverFitsReason judges only a
+// cluster whose nodes name an architecture, so a job on one whose nodes name none waits with this.
+func noNodeOfArchitectureReason(exp *domain.Experiment, cluster string, labelsByNode map[string]map[string]string) string {
+	if exp.ImageArchitecture == "" || cluster == "" {
+		return ""
+	}
+	for _, labels := range labelsByNode {
+		if exp.OnImageArchitecture(labels) {
+			return ""
+		}
+	}
+	nodes := "its nodes name no " + domain.NodeArchitectureLabel
+	if has := domain.NodeArchitectures(labelsByNode); len(has) > 0 {
+		nodes = "its nodes are of " + strings.Join(has, ", ") + " only"
+	}
+	return fmt.Sprintf("%s: no node of cluster %s runs the job's image %s, which runs on %s: %s",
+		domain.NotAdmittedCapacityUnavailable, cluster, exp.Image, exp.ImageArchitecture, nodes)
+}
+
 func shortOfADevice(shortage domain.Footprint) bool {
 	for key, short := range shortage {
 		if short > 0 && key.Kind == domain.ResourceKindAccelerator && !domain.CPUType.Is(domain.AcceleratorType(key.Name)) {
@@ -154,8 +175,28 @@ func holdersOf(claimed []*domain.Experiment, cluster string, shortage domain.Foo
 }
 
 // describeOffer says what a cluster has installed of what exp asks for, and the most one node of
-// it has where it has several.
+// it has where it has several. For a job spread over hosts too few of which hold one of its
+// nodes, it says how many do.
 func describeOffer(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) string {
+	offer := describeInstalled(total, nodeTotals, exp)
+	if held, short := tooFewHosts(nodeTotals, exp); short {
+		offer += fmt.Sprintf(", and %d of its %d hosts hold one of the job's nodes", held, len(nodeTotals))
+	}
+	return offer
+}
+
+// tooFewHosts reports whether exp spreads over hosts (placement.RequiresDistinctHosts) and an
+// idle cluster whose nodes have nodeTotals has fewer hosts that hold one of its nodes than it has
+// nodes, and how many it has.
+func tooFewHosts(nodeTotals map[string]map[string]int64, exp *domain.Experiment) (int, bool) {
+	if len(nodeTotals) == 0 || !placement.RequiresDistinctHosts(exp) {
+		return 0, false
+	}
+	held := placement.SpreadHostsWhenIdle(nodeTotals, exp)
+	return held, held < exp.Job.Nodes()
+}
+
+func describeInstalled(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) string {
 	asked := domain.NewFootprint()
 	probe := *exp
 	types := placement.CandidateTypes(exp)

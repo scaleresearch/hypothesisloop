@@ -16,13 +16,22 @@ const (
 	NodeLabelReservedPrefix = "hypothesisloop.io/"
 	// NodeSlotLabel marks a node that holds one job at a time, and names it. A runtime that
 	// rents a machine per job reports each machine it may rent as such a node, and a job
-	// admitted to one carries the label in its resolved node selector.
+	// admitted to slots carries their names in its resolved job (JobSpec.Slots).
 	NodeSlotLabel = NodeLabelReservedPrefix + "slot"
 	// NodeSlotAcceleratorsLabel is how many accelerators a slot has, taken or free.
 	NodeSlotAcceleratorsLabel = NodeLabelReservedPrefix + "slot-accelerators"
 	// NodeSlotNoOfferLabel is on a slot no instance holds and no machine can be rented for right
 	// now. Its value is the runtime's reason, in words a person reads.
 	NodeSlotNoOfferLabel = NodeLabelReservedPrefix + "slot-no-offer"
+	// NodeSlotNetworkLabel is on a free slot of a shape a job that spans several nodes waits
+	// for: the most nodes of that shape one private network of the runtime's can hold right now.
+	NodeSlotNetworkLabel = NodeLabelReservedPrefix + "slot-network"
+	// NodeSlotNoNetworkLabel is beside a NodeSlotNetworkLabel of 0: the runtime's reason, in words
+	// a person reads.
+	NodeSlotNoNetworkLabel = NodeLabelReservedPrefix + "slot-no-network"
+	// NodeSlotStartupLabel is on every slot: how many seconds a machine rented for it may take to
+	// start a job's command, past which the runtime rents another.
+	NodeSlotStartupLabel = NodeLabelReservedPrefix + "slot-startup-seconds"
 	// NodeImageNeedsLabel is on a node whose runtime runs something of its own beside a job's
 	// command: the programs, comma-separated, a job's image must have on its PATH there.
 	NodeImageNeedsLabel = NodeLabelReservedPrefix + "image-needs"

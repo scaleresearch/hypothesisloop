@@ -96,6 +96,21 @@ func (s *Store) Around(ctx context.Context, platformExperimentID string, fn func
 	})
 }
 
+// AroundHypothesis is Around holding as well the lock a job is submitted on hypothesisID under
+// (holdHypothesisJobs): a job fn finds none of is not submitted until fn's write committed. The
+// lock is taken before the platform experiment's row, in the order a submit takes the two.
+func (s *Store) AroundHypothesis(ctx context.Context, platformExperimentID, hypothesisID string, fn func(domain.Announcer) error) error {
+	return s.write(ctx, func(w *Write) error {
+		if err := holdHypothesisJobs(ctx, w, hypothesisID); err != nil {
+			return err
+		}
+		if err := holdOpenPlatformExperiment(ctx, w, platformExperimentID); err != nil {
+			return err
+		}
+		return fn(w)
+	})
+}
+
 // After reads, in one snapshot, up to limit changes of platformExperimentID with an id above
 // after. next is where to read on from: the last id read when the page is full, else the newest
 // id of any platform experiment, and caughtUp says nothing more is held. An after above the

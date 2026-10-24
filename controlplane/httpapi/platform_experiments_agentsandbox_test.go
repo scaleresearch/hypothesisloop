@@ -38,7 +38,7 @@ func (s *agentSandboxStore) CreatePlatformExperiment(ctx context.Context, pe *do
 func agentSandboxAPI(t *testing.T, repos *fakeRepositories) (*agentSandboxStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &agentSandboxStore{}
-	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
+	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithServedModels(testModels), domain.CPUType)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := authtest.Router(ownerOfA)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
@@ -79,15 +79,15 @@ func TestCreateWithASandboxedCoordinatorGivesItToTheConfiguredLauncher(t *testin
 	// coordinator does too: nobody adds the agent that measures the baseline.
 	owner := auth.Principal(ownerOfA).Actor()
 	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline", Actor: &owner}
-	if len(store.baselines) != 1 || len(store.researchers) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
-		t.Errorf("created with %+v and researchers %v, want one sandboxed baseline agent added by the creator and no researcher", store.baselines, store.researchers)
+	if len(store.baselines) != 1 || len(store.agentIDs) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
+		t.Errorf("created with %+v and agents %v, want one sandboxed baseline agent added by the creator and no other agent", store.baselines, store.agentIDs)
 	}
 	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_measuring" || why["waits_for"] != "platform" {
 		t.Errorf("status_reason = %v, want baseline_measuring, which waits for the platform", out["status_reason"])
 	}
 
 	store, create = agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	if code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "model-2"})); code != http.StatusCreated || store.created[0].Coordinator.Model != "model-2" {
+	if code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "anthropic/model-2"})); code != http.StatusCreated || store.created[0].Coordinator.Model != "anthropic/model-2" {
 		t.Fatalf("with a model: got = %d %v, created %+v", code, out, store.created)
 	}
 	store, create = agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
@@ -133,8 +133,10 @@ func TestCreateRefusesAnAgentSandboxItCannotStart(t *testing.T) {
 		status int
 		reason string
 	}{
-		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "invalid_request"},
-		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "invalid_request"},
+		"a model without a coordinator": {map[string]any{"coordinator_model": "anthropic/model-2", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "invalid_request"},
+		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "model_not_served"},
+		"a model not served":            {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "openrouter/moonshotai/kimi-k2", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "model_not_served"},
+		"a bare model":                  {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "model-2", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "model_not_served"},
 	} {
 		store, create := agentSandboxAPI(t, tc.repos)
 		code, out := create(with(tc.more))
@@ -167,7 +169,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	put := func(caller auth.Principal, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
 		t.Helper()
 		store := &createdStore{created: []*domain.PlatformExperiment{live()}}
-		svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
+		svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithServedModels(testModels), domain.CPUType)
 		placement := authtest.Placement{
 			Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},
 			PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}},

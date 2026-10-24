@@ -29,7 +29,7 @@ func TestTheRefUpdatesOfAPushAreReadUpToTheirFlushAndNoFurther(t *testing.T) {
 	pack := "PACK-and-everything-after-it"
 	request := pkts(
 		"shallow "+oldID,
-		oldID+" "+newID+" refs/heads/hl/pe-1/researcher-2/x\x00report-status side-band-64k agent=git/2.54",
+		oldID+" "+newID+" refs/heads/hl/pe-1/executor-2/x\x00report-status side-band-64k agent=git/2.54",
 		zero+" "+newID+" refs/tags/v1\n",
 		newID+" "+zero+" refs/heads/old",
 		"",
@@ -40,7 +40,7 @@ func TestTheRefUpdatesOfAPushAreReadUpToTheirFlushAndNoFurther(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []command{
-		{Old: oldID, New: newID, Ref: "refs/heads/hl/pe-1/researcher-2/x"},
+		{Old: oldID, New: newID, Ref: "refs/heads/hl/pe-1/executor-2/x"},
 		{Old: zero, New: newID, Ref: "refs/tags/v1"},
 		{Old: newID, New: zero, Ref: "refs/heads/old"},
 	}
@@ -126,14 +126,14 @@ func readReport(t *testing.T, data []byte, sideband bool) (report, message strin
 }
 
 func TestARefusedPushIsReportedRefByRefAsGitReadsIt(t *testing.T) {
-	commands := []command{{Old: oldID, New: newID, Ref: "refs/heads/main"}, {Old: zero, New: newID, Ref: "refs/heads/hl/pe-1/researcher-2/x"}}
+	commands := []command{{Old: oldID, New: newID, Ref: "refs/heads/main"}, {Old: zero, New: newID, Ref: "refs/heads/hl/pe-1/executor-2/x"}}
 	why := func(c command) string {
 		if c.Ref == "refs/heads/main" {
 			return "the default branch main is no agent's\nsecond line"
 		}
 		return "pushed with a ref that is refused"
 	}
-	want := pkts("unpack ok\n", "ng refs/heads/main the default branch main is no agent's second line\n", "ng refs/heads/hl/pe-1/researcher-2/x pushed with a ref that is refused\n", "")
+	want := pkts("unpack ok\n", "ng refs/heads/main the default branch main is no agent's second line\n", "ng refs/heads/hl/pe-1/executor-2/x pushed with a ref that is refused\n", "")
 	if report, _ := readReport(t, refusalReport(commands, why, []string{"report-status"}, "refused\n"), false); report != want {
 		t.Errorf("without side-band: %q, want %q", report, want)
 	}
@@ -164,7 +164,7 @@ func (e *endless) Read(p []byte) (int, error) {
 func TestAPushOpensWithABoundedAmountBeforeItsPack(t *testing.T) {
 	for name, line := range map[string]string{
 		"shallow lines": "shallow " + oldID,
-		"ref updates":   oldID + " " + newID + " refs/heads/hl/pe-1/researcher-2/" + strings.Repeat("x", 60000),
+		"ref updates":   oldID + " " + newID + " refs/heads/hl/pe-1/executor-2/" + strings.Repeat("x", 60000),
 	} {
 		r := &endless{line: pktLine(line)}
 		if _, _, _, err := readCommands(r); err == nil || r.read > 2*maxCommandBytes {

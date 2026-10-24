@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ type slotFixture struct {
 	free         map[string]map[string]int64
 	sizes        map[string]map[string]int64
 	labels       map[string]map[string]string
+	multiNode    bool
 }
 
 func size(cpuMillis, memoryGi, storageGi int64) map[string]int64 {
@@ -61,7 +63,7 @@ func (c *slotFixture) addCores(node string, whole map[string]int64) *slotFixture
 
 // take is what the runtime reports once an instance is in the slot.
 func (c *slotFixture) take(node string) *slotFixture {
-	placement.HoldSlot(c.accelerators, c.free, c.labels, node)
+	placement.HoldSlots(c.accelerators, c.free, c.labels, []string{node})
 	return c
 }
 
@@ -71,8 +73,24 @@ const noOfferWhy = "shape h100: no vast offer of its size passes regions"
 // offerless is what the runtime reports for a slot no instance holds and its vendor has no
 // machine to rent for: nothing free, and the label that says why.
 func (c *slotFixture) offerless(node string) *slotFixture {
-	placement.HoldSlot(c.accelerators, c.free, c.labels, node)
+	placement.HoldSlots(c.accelerators, c.free, c.labels, []string{node})
 	c.labels[node][domain.NodeSlotNoOfferLabel] = noOfferWhy
+	return c
+}
+
+// network is what a runtime that rents private networks reports while a job that spans nodes waits
+// for one: on every free slot, how many nodes of its shape one network holds now, and why none.
+func (c *slotFixture) network(count int, why string) *slotFixture {
+	c.multiNode = true
+	for node, labels := range c.labels {
+		if !placement.NodeHasRoom(c.free[node], c.sizes[node]) {
+			continue
+		}
+		labels[domain.NodeSlotNetworkLabel] = fmt.Sprint(count)
+		if why != "" {
+			labels[domain.NodeSlotNoNetworkLabel] = why
+		}
+	}
 	return c
 }
 
@@ -118,7 +136,7 @@ func h100Job(id, cpu string) *domain.Experiment {
 // sized is exp as the tick resolves it on the cluster.
 func sized(t *testing.T, c *slotFixture, exp *domain.Experiment) *domain.Experiment {
 	t.Helper()
-	resolved, misfit := placement.ResolveOntoSlot(exp, rented, c.sizes, c.free, c.labels)
+	resolved, misfit := placement.ResolveOntoSlots(exp, rented, c.sizes, c.free, c.labels)
 	if misfit != "" {
 		t.Fatalf("%s: %s", exp.ID, misfit)
 	}
@@ -128,12 +146,17 @@ func sized(t *testing.T, c *slotFixture, exp *domain.Experiment) *domain.Experim
 
 func pinnedTo(exp *domain.Experiment, slot string) *domain.Experiment {
 	resolved := exp.EffectiveJob()
-	resolved.NodeSelector = map[string]string{domain.NodeSlotLabel: slot}
+	resolved.Slots = []string{slot}
 	exp.ResolvedJob = &resolved
 	return exp
 }
 
-func slotOf(job domain.JobSpec) string { return job.NodeSelector[domain.NodeSlotLabel] }
+func slotOf(job domain.JobSpec) string {
+	if len(job.Slots) != 1 {
+		return ""
+	}
+	return job.Slots[0]
+}
 
 // A job on a cluster of slots holds a whole slot, so that is what it is resolved to, whatever it
 // asked for. Everything that counts what a job holds then counts the slot.
@@ -178,13 +201,13 @@ func TestOnlyASlotOfTheJobsOwnShapeTakesIt(t *testing.T) {
 		h100Job("sixteen-cpu", "16"),
 		otherType, twoDevices, twoNodes, elsewhere,
 	} {
-		if resolved, misfit := placement.ResolveOntoSlot(exp, rented, c.sizes, c.free, c.labels); misfit == "" || !strings.HasPrefix(misfit, domain.NotAdmittedCapacityUnavailable) {
+		if resolved, misfit := placement.ResolveOntoSlots(exp, rented, c.sizes, c.free, c.labels); misfit == "" || !strings.HasPrefix(misfit, domain.NotAdmittedCapacityUnavailable) {
 			t.Errorf("%s: resolved to %+v, misfit %q", exp.ID, resolved, misfit)
 		}
 	}
 	lowercase := h100Job("lowercase", "2")
 	lowercase.AcceleratorType = domain.AcceleratorType(strings.ToLower(h100))
-	if _, misfit := placement.ResolveOntoSlot(lowercase, rented, c.sizes, c.free, c.labels); misfit == "" {
+	if _, misfit := placement.ResolveOntoSlots(lowercase, rented, c.sizes, c.free, c.labels); misfit == "" {
 		t.Error("a type in another casing than the slot's took the slot")
 	}
 }
@@ -283,7 +306,7 @@ func TestTheClaimPinsTheJobToTheSlotItWasPlacedOn(t *testing.T) {
 	}
 	resolved := candidate.ResolvedJob
 	if slot := slotOf(*resolved); slot != "h100-0" && slot != "h100-1" {
-		t.Fatalf("resolved selector = %v, want one of the H100 slots", resolved.NodeSelector)
+		t.Fatalf("resolved slots = %v, want one of the H100 slots", resolved.Slots)
 	}
 	if resolved.NodeSelector["zone"] != "a" || !reflect.DeepEqual(candidate.Job.NodeSelector, map[string]string{"zone": "a"}) {
 		t.Fatalf("resolved %v, submitted %v", resolved.NodeSelector, candidate.Job.NodeSelector)
@@ -299,8 +322,8 @@ func TestAJobOnAnOrdinaryNodeIsNotPinned(t *testing.T) {
 	delete(c.labels["node-a"], domain.NodeSlotLabel)
 	candidate := cpuJob("exp-1", "2")
 	resolved := candidate.Job
-	if !placement.DesiredFits(c.accelerators, c.free, c.labels, nil, candidate, &resolved) || resolved.NodeSelector != nil {
-		t.Fatalf("resolved selector = %v", resolved.NodeSelector)
+	if !placement.DesiredFits(c.accelerators, c.free, c.labels, nil, candidate, &resolved) || resolved.Slots != nil || resolved.NodeSelector != nil {
+		t.Fatalf("resolved slots %v, selector %v", resolved.Slots, resolved.NodeSelector)
 	}
 }
 
@@ -384,10 +407,10 @@ func TestSubmittingToASlotClusterWritesTheSlotIntoDesiredState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if slot := slotOf(store.written); slot != "h100-1" || store.written.CPU != "8" {
-		t.Fatalf("resolved job written with selector %v and %s cpu, want slot h100-1 and its 8", store.written.NodeSelector, store.written.CPU)
+		t.Fatalf("resolved job written with slots %v and %s cpu, want slot h100-1 and its 8", store.written.Slots, store.written.CPU)
 	}
 	if slotOf(exp.EffectiveJob()) != "h100-1" || exp.Job.NodeSelector != nil || exp.Job.CPU != "6" {
-		t.Fatalf("effective %v, submitted %+v", exp.EffectiveJob().NodeSelector, exp.Job)
+		t.Fatalf("effective %v, submitted %+v", exp.EffectiveJob().Slots, exp.Job)
 	}
 }
 
@@ -497,7 +520,7 @@ func (w *slotWorkload) GetNodeLabels(context.Context) (map[string]map[string]map
 	return map[string]map[string]map[string]string{rented: w.c.labels}, nil
 }
 func (w *slotWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
-	return map[string]bool{rented: false}, nil
+	return map[string]bool{rented: w.c.multiNode}, nil
 }
 
 func slotLoop(store *slotStore, c *slotFixture, observed ObservedState) *Loop {
@@ -900,7 +923,7 @@ func TestAJobOnCPUHoldsAWholeSlotWithoutAccelerators(t *testing.T) {
 // A cluster of slots with none that offers cores has no slot for a job on CPU.
 func TestAJobOnCPUFindsNoSlotWithADevice(t *testing.T) {
 	c := newSlots().add("h100-0", 1, size(8000, 32, 100))
-	if _, misfit := placement.ResolveOntoSlot(slotCoresJob("cores", 2), rented, c.sizes, c.free, c.labels); !strings.Contains(misfit, "none for a job on CPU") {
+	if _, misfit := placement.ResolveOntoSlots(slotCoresJob("cores", 2), rented, c.sizes, c.free, c.labels); !strings.Contains(misfit, "none for a job on CPU") {
 		t.Fatalf("misfit %q", misfit)
 	}
 }
@@ -927,4 +950,52 @@ func (s *pinningStore) ClaimSubmitted(ctx context.Context, id, cluster string, r
 
 func (s *slotStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
 	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
+}
+
+func h100Gang(id string, nodes int) *domain.Experiment {
+	exp := h100Job(id, "2")
+	exp.AcceleratorCount, exp.Job.NumNodes = nodes, nodes
+	return exp
+}
+
+// A job that spans nodes on a cluster of slots holds one slot per node: sized to their shape and
+// pinned to them in rank order, beside a job of one node that takes the slot left.
+func TestATickAdmitsAJobThatSpansNodesOntoOneSlotPerNode(t *testing.T) {
+	c := newSlots().add("h100-0", 1, size(8000, 32, 100)).add("h100-1", 1, size(8000, 32, 100)).add("h100-2", 1, size(8000, 32, 100)).network(3, "")
+	gang, single := h100Gang("gang", 2), h100Job("single", "2")
+	gang.CapacityTier = domain.CapacityGuaranteed
+	store := &slotStore{queued: []*domain.Experiment{gang, single}}
+	l := slotLoop(store, c, fakeObserved{})
+
+	if err := l.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	job, admitted := store.written["gang"]
+	if !admitted || len(job.Slots) != 2 || job.Slots[0] == job.Slots[1] || job.CPU != "8" || job.NumNodes != 2 {
+		t.Fatalf("gang written %+v (reasons %v), want two slots and each node at the slot's 8 cpu", job, store.reasons)
+	}
+	if slot := slotOf(store.written["single"]); slot == "" || slices.Contains(job.Slots, slot) {
+		t.Fatalf("single job on %q beside the gang on %v", slot, job.Slots)
+	}
+}
+
+// A job that spans nodes whose slots are free waits while no private network of the runtime's
+// holds them, and says so in the runtime's words.
+func TestAJobThatSpansNodesWaitsForAPrivateNetwork(t *testing.T) {
+	why := "shape h100: no vast cluster has 2 machines of it on offer"
+	c := newSlots().add("h100-0", 1, size(8000, 32, 100)).add("h100-1", 1, size(8000, 32, 100)).network(0, why)
+	for _, tier := range []domain.CapacityTier{domain.CapacityBurst, domain.CapacityGuaranteed} {
+		gang := h100Gang("gang", 2)
+		gang.CapacityTier = tier
+		store := &slotStore{queued: []*domain.Experiment{gang}}
+		l := slotLoop(store, c, fakeObserved{})
+
+		if err := l.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		want := domain.NotAdmittedCapacityUnavailable + `: cluster ` + rented + ` has no private network for 2 ranks of shape "1 of ` + h100 + `, 8 cpu, 32Gi memory, 100Gi storage" now (` + why + `)`
+		if len(store.written) != 0 || len(store.requeued) != 0 || store.reasons["gang"] != want {
+			t.Fatalf("%s: admitted %v, preempted %v, reason %q, want %q", tier, store.written, store.requeued, store.reasons["gang"], want)
+		}
+	}
 }

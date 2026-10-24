@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/agent-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the roles an agent plays
+         * @description Every role of an agent type, with what its agents do, the built-in type an agent of it runs as when it names none, the signup role it is added with, whether a platform experiment's agents list names it and whether an org makes types of it. A team is the agents list of a platform experiment: an entry's agent type gives its role, researcher for the built-in researcher and executor for any type of role executor.
+         */
+        get: operations["list-agent-roles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents": {
         parameters: {
             query?: never;
@@ -103,7 +123,7 @@ export interface paths {
         put?: never;
         /**
          * Submit one job
-         * @description Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit and the time left until baseline_due_at, and what the job does not spend is given back when it ends. metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. metadata.branch is the git branch that commit was pushed on, one agent's implementation of the hypothesis, under hl/<platform_experiment_id>/: 422 branch_not_of_experiment for any other. What ran is code_ref, and the branch says which line of work it belongs to. The job runs in the image its platform experiment records at the submit (PUT /platform-experiments/{id}/image), answered on the job as image, repository@digest, and only on nodes of that image's architecture: 422 no_experiment_image while none is recorded. job.command, or each group's, is required, 422 malformed: every node fetches the job's commit into /workspace/code and runs the command there. 422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. job.cpu, job.memory and job.storage, or each group's, are what one node of the job holds, each stated as a quantity (cpu: 2, memory: 8Gi, storage: 4Gi): 422 required, naming the field in problems, where one is left out or is max. A job holds what it states and nothing is sized from the node it lands on. 422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. 422 no_cluster_for_architecture where the job's image runs on an architecture no node of the clusters that run it has, naming the image's architecture and the ones those clusters have: a cluster that scales up may yet add a node of it. 422 exceeds_project_compute_limit where the job alone reserves more accelerator hours per hour of the platform's clusters than its project may hold (GET /resource-catalog/capacity, platform_compute_limit) and no cluster of the org's own can hold it. metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. same_hypothesis on the answer names the jobs of other agents that test the same hypothesis, queued, running or completed within the hour: the job is queued all the same, and whoever steers the run is told it as job.duplicate. run_best on the answer names the run's best job on the first ranking metric, its value, commit and branch, where it ran another commit than this job: whether this job's commit contains it is git's to say, which hl job submit asks the submitter's checkout. The job is queued all the same. Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. 503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.
+         * @description Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit and the time left until baseline_due_at, and what the job does not spend is given back when it ends. metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. metadata.branch is the git branch that commit was pushed on, one agent's implementation of the hypothesis, under hl/<platform_experiment_id>/: 422 branch_not_of_experiment for any other. What ran is code_ref, and the branch says which line of work it belongs to. The job runs in the image its platform experiment records at the submit (PUT /platform-experiments/{id}/image), answered on the job as image, repository@digest, and only on nodes of that image's architecture: 422 no_experiment_image while none is recorded. job.command, or each group's, is required, 422 malformed: every node fetches the job's commit into /workspace/code and runs the command there. 422 researcher_submits_no_job for an agent of role researcher, which runs no job. 422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. job.cpu, job.memory and job.storage, or each group's, are what one node of the job holds, each stated as a quantity (cpu: 2, memory: 8Gi, storage: 4Gi): 422 required, naming the field in problems, where one is left out or is max. A job holds what it states and nothing is sized from the node it lands on. 422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. 422 no_cluster_for_architecture where the job's image runs on an architecture no node of the clusters that run it has, naming the image's architecture and the ones those clusters have: a cluster that scales up may yet add a node of it. 422 exceeds_project_compute_limit where the job alone reserves more accelerator hours per hour of the platform's clusters than its project may hold (GET /resource-catalog/capacity, platform_compute_limit) and no cluster of the org's own can hold it. metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. same_hypothesis on the answer names the jobs of other agents that test the same hypothesis, queued, running or completed within the hour: the job is queued all the same, and whoever steers the run is told it as job.duplicate. run_best on the answer names the run's best job on the first ranking metric, its value, commit and branch, where it ran another commit than this job: whether this job's commit contains it is git's to say, which hl job submit asks the submitter's checkout. The job is queued all the same. Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. 503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.
          */
         post: operations["submit-experiment"];
         delete?: never;
@@ -325,7 +345,7 @@ export interface paths {
         };
         /**
          * List hypotheses, optionally scoped to one platform experiment
-         * @description Optional ?platform_experiment_id restricts to one platform experiment; omitted, every platform experiment's hypotheses are candidates (the operator-facing global view). Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive) for just that status, ?by=people for the ideas people registered, ?q for those whose text holds it, ignoring case, ?untaken=true for those no agent works on now (see working), ?limit (default 20, max 200, 422 invalid_page over it) and ?offset. The open ideas of people come first, those no agent has settled or built on yet, then the most recent. Total match count is returned in the X-Total-Count response header. Rows carry builds_on (what each builds on; the platform_experiment_id stands for the objective), child_count (how many build on it), finding_count/comment_count, finding and best_job as GET /hypotheses/graph gives them, and working, the agents on it now: a job of theirs queued or running, or a checkout within two hours, absent while none is. To walk or search the graph use POST /hypotheses/query.
+         * @description Optional ?platform_experiment_id restricts to one platform experiment; omitted, every platform experiment's hypotheses are candidates (the operator-facing global view). Optional ?agent_id for one agent's own, ?status (open|confirmed|refuted|inconclusive|merged|retired) for just that status, ?by=people for the ideas people registered, ?q for those whose text holds it, ignoring case, ?untaken=true for those no agent works on now (see working), ?limit (default 20, max 200, 422 invalid_page over it) and ?offset. The open ideas of people come first, those no agent has settled or built on yet, then the most recent. Total match count is returned in the X-Total-Count response header. Rows carry builds_on (what each builds on; the platform_experiment_id stands for the objective), child_count (how many build on it), finding_count/comment_count, finding and best_job as GET /hypotheses/graph gives them, and working, the agents on it now: a job of theirs queued or running, or a checkout within two hours, absent while none is. To walk or search the graph use POST /hypotheses/query.
          */
         get: operations["list-hypotheses"];
         put?: never;
@@ -483,9 +503,69 @@ export interface paths {
         put?: never;
         /**
          * Link a hypothesis to another
-         * @description Adds one outgoing link: builds_on (to a hypothesis, or the platform_experiment_id for the objective), contradicts or related (to a hypothesis in the same platform experiment). Only the agent whose hypothesis it is may link from it, and one with no owning agent can be linked by anyone; others get 403. agent_id says whose link it is, as on registering, and who made it is the caller, answered as actor: author is refused. 422 naming to on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links are append-only and re-adding one changes nothing. 409 experiment_closed once the platform experiment is closed, for every caller. Returns the hypothesis's outgoing links.
+         * @description Adds one outgoing link: builds_on (to a hypothesis, or the platform_experiment_id for the objective), contradicts or related (to a hypothesis in the same platform experiment). Only the agent whose hypothesis it is and a researcher of its platform experiment may link from it, and one with no owning agent can be linked by anyone; others get 403. 409 hypothesis_merged or hypothesis_retired from a merged or retired hypothesis, and 422 naming to for a link to one. agent_id says whose link it is, as on registering, and who made it is the caller, answered as actor: author is refused. 422 naming to on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links are append-only and re-adding one changes nothing. 409 experiment_closed once the platform experiment is closed, for every caller. Returns the hypothesis's outgoing links.
          */
         post: operations["add-hypothesis-link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hypotheses/{id}/links/{type}/{to}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a link of a hypothesis
+         * @description A researcher's curation: removes the outgoing link of type to to, of any hypothesis of its platform experiment. A link that is not there changes nothing. The last builds_on of a hypothesis is never removed (422): to move a hypothesis, add its new builds_on first (POST /hypotheses/{id}/links), then remove the old one. hypothesis.unlink announces a removal. 403 researcher_only for anyone but a researcher, 409 hypothesis_merged or hypothesis_retired for a merged or retired hypothesis, whose links are its history. agent_id names the researcher: an agent token's own, named or not. 409 experiment_closed once the platform experiment is closed, for every caller. Returns the hypothesis's outgoing links.
+         */
+        delete: operations["unlink-hypothesis"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hypotheses/{id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge a hypothesis into one that states its claim
+         * @description A researcher's curation of an open hypothesis that states the claim of another, into, of the same platform experiment and neither merged nor retired: every link to it moves to into, with the agent, actor and time it was made, except one from into itself and one into already has. Its own links stay as its history, and it becomes merged with merged_into and status_reason, the reason given. From then on it takes no job, checkout, link or verdict: it is tested under into, and registering its text again returns it. Its findings and comments stay. Merging again into the same hypothesis changes nothing. hypothesis.status announces it, with value merged and detail into. 403 researcher_only for anyone but a researcher, 409 hypothesis_not_open for one settled, merged or retired, 409 hypothesis_in_flight while a job is queued or running on it, 422 naming into when into is it, unknown, of another platform experiment, merged or retired, builds on it alone, or would close a builds_on cycle through a moved link. agent_id names the researcher: an agent token's own, named or not. 409 experiment_closed once the platform experiment is closed, for every caller. Returns the merged hypothesis.
+         */
+        post: operations["merge-hypothesis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hypotheses/{id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire an open idea no longer worth a job
+         * @description A researcher's curation of an open hypothesis: it becomes retired with status_reason, the reason given, which is required (422). No verdict: nothing showed it right or wrong. From then on it takes no job, checkout, link or verdict; its links, findings and comments stay. Retiring it again changes nothing. hypothesis.status announces it, with value retired and detail the reason. 403 researcher_only for anyone but a researcher, 409 hypothesis_not_open for one settled, merged or retired, 409 hypothesis_in_flight while a job is queued or running on it. agent_id names the researcher: an agent token's own, named or not. 409 experiment_closed once the platform experiment is closed, for every caller. Returns the retired hypothesis.
+         */
+        post: operations["retire-hypothesis"];
         delete?: never;
         options?: never;
         head?: never;
@@ -503,7 +583,7 @@ export interface paths {
         put?: never;
         /**
          * Set a hypothesis's status
-         * @description open (default) / confirmed (validated as a real improvement) / refuted (confidently established as not working) / inconclusive (noisy or not worth drilling into). Every verdict but open needs a job of the hypothesis that completed or failed, else 409; despite never replaces it. confirmed and refuted are given with the evidence: against names the control, a completed job of the same platform experiment, and the hypothesis has two completed jobs of its own besides it, or one where every ranking metric of the platform experiment is declared deterministic. Without that the answer is 409 with what is missing, unless despite carries a sentence of why the verdict holds anyway: a repeat is needed only where results vary between runs. Where every ranking metric is declared deterministic and the hypothesis has a completed job of its own, the control is named and despite stands in for nothing (409). A control that holds is the basis even with despite beside it. What a verdict rests on is kept as a comment on the hypothesis. Only the agent whose hypothesis it is may set it; anyone else gets 403. A hypothesis no agent owns may be settled by anyone who reaches it — an idea nobody owns would otherwise sit open forever however much evidence it collected. agent_id says as which agent the verdict is given: an agent token's is its own, named or not, and any other caller names the owning agent to rule for it. Who gave it is the caller, answered as status_actor. 409 experiment_closed once the platform experiment is closed, for every caller.
+         * @description open (default) / confirmed (validated as a real improvement) / refuted (confidently established as not working) / inconclusive (noisy or not worth drilling into). Every verdict but open needs a job of the hypothesis that completed or failed, else 409; despite never replaces it. confirmed and refuted are given with the evidence: against names the control, a completed job of the same platform experiment, and the hypothesis has two completed jobs of its own besides it, or one where every ranking metric of the platform experiment is declared deterministic. Without that the answer is 409 with what is missing, unless despite carries a sentence of why the verdict holds anyway: a repeat is needed only where results vary between runs. Where every ranking metric is declared deterministic and the hypothesis has a completed job of its own, the control is named and despite stands in for nothing (409). A control that holds is the basis even with despite beside it. What a verdict rests on is kept as a comment on the hypothesis. Only the agent whose hypothesis it is may set it; anyone else gets 403. A hypothesis no agent owns, a person's or a researcher's idea, is settled by an agent that ran a job of its own on it that completed or failed, else 403 verdict_needs_own_job; with no agent named it is only reopened (open), as the coordinator does. A researcher gives no verdict: 403 researcher_gives_no_verdict. agent_id says as which agent the verdict is given: an agent token's is its own, named or not, and any other caller names the owning agent, or the agent that tested one no agent owns, to rule for it. Who gave it is the caller, answered as status_actor. 409 hypothesis_merged or hypothesis_retired for a merged or retired one, which takes no verdict. 409 experiment_closed once the platform experiment is closed, for every caller.
          */
         post: operations["set-hypothesis-status"];
         delete?: never;
@@ -572,6 +652,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the models agents and coordinators may run on
+         * @description Every model the platform serves, each by its reference <provider>/<model id>, the one an agent type's settings.model, an added agent's model, an agents entry's model and a coordinator_model name: the anthropic models of the platform's catalog, then the openai models of its catalog for its ChatGPT subscription, then the models OpenRouter serves that take tools at a price it states in advance, as OpenRouter lists them now. A provider the platform holds no credential for lists none. Naming a model this does not list is refused with 422 model_not_served. An agent runs on its own model, else its agent type's, else, for a researcher, its platform experiment's coordinator_model, else default_model for an executor and coordinator_model for a researcher; a sandboxed coordinator runs on its platform experiment's coordinator_model, else its agent type's, else coordinator_model.
+         */
+        get: operations["list-models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/orgs": {
         parameters: {
             query?: never;
@@ -621,13 +721,13 @@ export interface paths {
         };
         /**
          * List the agent types an org's agents may run as
-         * @description The built-in agent types, read-only for everyone, and the org's own, archived ones included, each with its current version and how many agents and coordinators whose run goes on run it now. An agent type is a role (researcher, baseline, coordinator or planner), a system prompt and settings: researchers, pool entries and added agents name one by id as agent_type.
+         * @description The built-in agent types, read-only for everyone, and the org's own, archived ones included, each with its current version and how many agents and coordinators whose run goes on run it now. An agent type is a role (executor, researcher, baseline, coordinator or planner, which GET /agent-roles describes), a system prompt and settings: entries of a platform experiment's agents and added agents name one by id as agent_type, and its role is theirs.
          */
         get: operations["list-agent-types"];
         put?: never;
         /**
          * Make an agent type of an org
-         * @description At version 1, from a role, a prompt and settings, or as a copy of an agent type the org reads (from), which is how a built-in one is changed. An org makes types of role researcher or baseline: a coordinator or a planner runs only its built-in type, and asking for one, or copying one, is refused with 422 invalid_agent_type. Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with; 409 agent_type_limit once the org has 100 types that are not archived.
+         * @description At version 1, from a role, a prompt and settings, or as a copy of an agent type the org reads (from), which is how a built-in one is changed. An org makes types of role executor or baseline: a researcher, a coordinator or a planner runs only its built-in type, and asking for one, or copying one, is refused with 422 invalid_agent_type. Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with, model_not_served for a model GET /models does not list; 409 agent_type_limit once the org has 100 types that are not archived.
          */
         post: operations["create-agent-type"];
         delete?: never;
@@ -650,7 +750,7 @@ export interface paths {
         get: operations["get-agent-type"];
         /**
          * Make the next version of an org's agent type
-         * @description Inserts the next version and makes it current, which every agent and coordinator of the type runs, and in the same write tells each whose run goes on with agent.instructions; its harness applies it at its next turn boundary: a new prompt, model or the effort max in a new session, the rest in the session it has. An agent given no model or hyperparameters of its own, and a pool entry naming none, run the type's from then on. Only the org's administrators edit: a member is refused with 403, and so is anyone editing a built-in type (builtin_read_only), which only the platform's repository changes. 409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with; 429 rate_limited once 60 versions of the type were made in the last hour.
+         * @description Inserts the next version and makes it current, which every agent and coordinator of the type runs, and in the same write tells each whose run goes on with agent.instructions; its harness applies it at its next turn boundary: a new prompt, model or the effort max in a new session, the rest in the session it has. An agent given no model or hyperparameters of its own, and a pool entry naming none, run the type's from then on. Only the org's administrators edit: a member is refused with 403, and so is anyone editing a built-in type (builtin_read_only), which only the platform's repository changes. 409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with, model_not_served for a model GET /models does not list; 429 rate_limited once 60 versions of the type were made in the last hour.
          */
         put: operations["edit-agent-type"];
         post?: never;
@@ -671,7 +771,7 @@ export interface paths {
         put?: never;
         /**
          * Archive an org's agent type
-         * @description An archived type takes no new agent and is no longer edited; nothing is deleted. 409 agent_type_in_use while a platform experiment that is not closed names it, in its researchers, for its coordinator or for one of its agents. Only the org's administrators archive, and nobody a built-in type.
+         * @description An archived type takes no new agent and is no longer edited; nothing is deleted. 409 agent_type_in_use while a platform experiment that is not closed names it, in its agents, for its coordinator or for one of its agents. Only the org's administrators archive, and nobody a built-in type.
          */
         post: operations["archive-agent-type"];
         delete?: never;
@@ -1136,7 +1236,7 @@ export interface paths {
         put?: never;
         /**
          * Create a platform experiment
-         * @description Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours, max_agents and duration_hours are required. max_agents is how many researchers (agents of role competitor, whatever their agent type) may be at work at once, and counts nobody else: no agent of role baseline, which measures the baseline before the run, no reviewer, no coordinator and no planner. researchers, optional, is who the run starts with and is to keep at work: an entry each agent type and model with its count, [{agent_type, model, hyperparameters, count}], at most max_agents in all. duration_hours is how long the run lasts from the moment it starts, at most the platform's quota.max_platform_experiment_days (422 invalid_length without it, run_too_long over that). The answer carries no ends_at: the run ends duration_hours after it starts. Created, it is open until its baseline is declared and the platform starts the run, and baseline_due_at in the answer is until when: planning.baseline_limit_minutes after starts_at, which is this create or a later one the body states. One not running by then is closed with close_reason baseline_limit_reached. Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, as one stage of its whole length when max_agents is below 5, since a boundary cuts nobody from fewer researchers (more than one stage stated for such a field is refused invalid_stages), and default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. The platform starts the run, and nothing else does: once a baseline is declared (PATCH baseline_job_id), at starts_at or at once without one or with one past. Until then it is open and GET /platform-experiments/{id} says in status_reason what it waits for. What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. coordinator_in_agentsandbox: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes. It is fixed from then on. repository is the code the platform experiment works on, named as the git host names it (owner/name on GitHub): agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. branch, required with repository, is the branch the agents clone and start from and none of them pushes to: 422 invalid_branch for one git takes no name of or one under hl/, branch_not_found for one the repository does not have. A repository named that the org cannot reach is created from the experiment template (git_host.experiment_template_repository) before anything else, as POST /projects/{id}/repositories does: its default branch holds one commit of the template's files. Left out, the platform creates a private one on the account the org connected on the git host, named from the experiment and its id and generated from the experiment template, after the create answered: the answer has no repository yet and status_reason repository_creating, no machine of it starts before the repository is recorded, and a read then names it in repository, repository_url and branch, its default branch. branch is refused without repository (422 invalid_request). On GitHub, the installation covers a repository it created whichever repositories its owner selected. With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). 422 git_host_not_connected when the org has connected no account on the git host, and installation_not_connected when repository_account is none it connected: those are answered before anything is created. When the git host does not create it (the authorisation is gone, the host refuses the creation, the name is taken), the platform experiment is closed with close_reason repository_not_created, and its status_reason message carries what the git host answered. A repository the request names is never written to. Named on GitHub, an installation of the platform's GitHub App that the org connected must cover the account that owns it (GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when the org connected no installation on the account that owns it, repository_not_reachable when it exists and the installation does not cover it, and installation_gone when the App was removed on GitHub. 502 git_host_failed when the git host answers 5xx or not at all, the message naming what it was asked for and its answer. On a deployment whose git host is plain, repository is a name under the host's root, created there from the template when it does not exist, and is required: 422 repository_required without it. agent_image is the image the sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, it is the platform's own. 422 invalid_agent_image when it is no image reference. Both are fixed from then on. With coordinator_in_agentsandbox: true it also creates, in the same write, one sandboxed researcher for each place of researchers, of its entry's agent type, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for one, and a stage boundary lowers the counts by the researchers it cuts, so none of them is replaced. agent.replaced tells each researcher added. It also creates one sandboxed agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_agentsandboxes_reached where the platform's limit holds no machine for it beside the coordinator's. Without coordinator_in_agentsandbox this call creates the experiment and no agent, and the platform adds none: every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. max_agentsandboxes in the answer is how many machines the platform runs for this platform experiment at once, its sandboxed agents of every role and its coordinator together: one of them is kept for an agent of role baseline, and an agent that finished holds none. GET /platform-experiments/{id} shows the coordinator's model and what became of its machine.
+         * @description Operator/dashboard endpoint. project_id, name, description, metrics, budget_accelerator_hours, max_agents and duration_hours are required. max_agents is how many executors (agents of role competitor, whatever their agent type) may be at work at once, and counts nobody else: no researcher, no agent of role baseline, which measures the baseline before the run, no reviewer, no coordinator and no planner. agents, optional, is the team the run starts with and is to keep at work: an entry each agent type and model with its count, [{agent_type, model, hyperparameters, count}]. The agent type gives the role (GET /agent-roles): an entry of the built-in researcher is of researchers, which run no job, hold no quota, are never ranked or cut, count toward no max_agents and default to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one; every other entry is of executors, which implement and run the experiments, at most max_agents in all. duration_hours is how long the run lasts from the moment it starts, at most the platform's quota.max_platform_experiment_days (422 invalid_length without it, run_too_long over that). The answer carries no ends_at: the run ends duration_hours after it starts. Created, it is open until its baseline is declared and the platform starts the run, and baseline_due_at in the answer is until when: planning.baseline_limit_minutes after starts_at, which is this create or a later one the body states. One not running by then is closed with close_reason baseline_limit_reached. Three fields left out are the platform's settings: report_interval_seconds is scheduler.default_report_interval_seconds, stages is stages.default, as one stage of its whole length when max_agents is below 5, since a boundary cuts nobody from fewer executors (more than one stage stated for such a field is refused invalid_stages), and default_quota_tier, which controls signups that omit quota_tier, is quota.default_quota_tier. The platform starts the run, and nothing else does: once a baseline is declared (PATCH baseline_job_id), at starts_at or at once without one or with one past. Until then it is open and GET /platform-experiments/{id} says in status_reason what it waits for. What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. coordinator_in_agentsandbox: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes. It is fixed from then on. repository is the code the platform experiment works on, named as the git host names it (owner/name on GitHub): agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. branch, required with repository, is the branch the agents clone and start from and none of them pushes to: 422 invalid_branch for one git takes no name of or one under hl/, branch_not_found for one the repository does not have. A repository named that the org cannot reach is created from the experiment template (git_host.experiment_template_repository) before anything else, as POST /projects/{id}/repositories does: its default branch holds one commit of the template's files. Left out, the platform creates a private one on the account the org connected on the git host, named from the experiment and its id and generated from the experiment template, after the create answered: the answer has no repository yet and status_reason repository_creating, no machine of it starts before the repository is recorded, and a read then names it in repository, repository_url and branch, its default branch. branch is refused without repository (422 invalid_request). On GitHub, the installation covers a repository it created whichever repositories its owner selected. With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). 422 git_host_not_connected when the org has connected no account on the git host, and installation_not_connected when repository_account is none it connected: those are answered before anything is created. When the git host does not create it (the authorisation is gone, the host refuses the creation, the name is taken), the platform experiment is closed with close_reason repository_not_created, and its status_reason message carries what the git host answered. A repository the request names is never written to. Named on GitHub, an installation of the platform's GitHub App that the org connected must cover the account that owns it (GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when the org connected no installation on the account that owns it, repository_not_reachable when it exists and the installation does not cover it, and installation_gone when the App was removed on GitHub. 502 git_host_failed when the git host answers 5xx or not at all, the message naming what it was asked for and its answer. On a deployment whose git host is plain, repository is a name under the host's root, created there from the template when it does not exist, and is required: 422 repository_required without it. agent_image is the image the sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, it is the platform's own. 422 invalid_agent_image when it is no image reference. Both are fixed from then on. With coordinator_in_agentsandbox: true it also creates, in the same write, one sandboxed agent for each place of agents, of its entry's agent type, role, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new agent in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or, for an executor, the budget its executors left unspent holds no trial for one, and a stage boundary lowers the counts by the executors it cuts, so none of them is replaced. agent.replaced tells each agent added. It also creates one sandboxed agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_agentsandboxes_reached where the platform's limit holds no machine for it beside the coordinator's. Without coordinator_in_agentsandbox this call creates the experiment and no agent, and the platform adds none: every executor and researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. max_agentsandboxes in the answer is how many machines the platform runs for this platform experiment at once, its sandboxed agents of every role and its coordinator together: one of them is kept for an agent of role baseline, and an agent that finished holds none. GET /platform-experiments/{id} shows the coordinator's model and what became of its machine.
          */
         post: operations["create-platform-experiment"];
         delete?: never;
@@ -1156,7 +1256,7 @@ export interface paths {
         put?: never;
         /**
          * Start planning a platform experiment from one sentence
-         * @description Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) and nobody else joins: the planner works out how to measure the goal and proposes the metrics, the description, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most researchers a proposal may name: max_agentsandboxes less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the account the org connected on the git host. repository_account says which account when the org connected several. 422 git_host_not_connected, repository_account_required and installation_not_connected as on POST /platform-experiments. A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. When the git host does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what the git host answered. repository and branch are checked as on POST /platform-experiments, and a repository named that does not exist is created from the experiment template. On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it. 422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 agentsandbox_not_configured when the deployment has no sandbox provider to run the planner on.
+         * @description Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) and nobody else joins: the planner works out how to measure the goal and proposes the metrics, the description, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most agents a proposal's team may name: max_agentsandboxes less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the account the org connected on the git host. repository_account says which account when the org connected several. 422 git_host_not_connected, repository_account_required and installation_not_connected as on POST /platform-experiments. A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. When the git host does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what the git host answered. repository and branch are checked as on POST /platform-experiments, and a repository named that does not exist is created from the experiment template. On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it. 422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 agentsandbox_not_configured when the deployment has no sandbox provider to run the planner on.
          */
         post: operations["create-draft"];
         delete?: never;
@@ -1174,7 +1274,7 @@ export interface paths {
         };
         /**
          * Get a platform experiment
-         * @description Returns status, budget, the stage ladder, the list of signed-up agents and prior_runs, the closed runs of the same project and repository that its agents and coordinator read as their own. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. status_reason says why it is in its status, in every status. duration_hours count from the moment the run starts, which a running one holds in starts_at, and ends_at is that start plus duration_hours. A running one reads agents_starting while no researcher's machine is running yet: the first one that is sets started_at, and the platform closes it at agents_due_at (close_reason agents_not_started) when none comes up. From then it reads running, and researchers_done once every researcher has finished, was cut or lost its machine with no restart left: nobody is left to submit a job, the platform still closes it only at ends_at, and waits_for names who writes the summary and closes it before, its coordinator where the platform hosts one and its owner otherwise. A closed one reads its close_reason. An open one says why it is not running yet. Without a baseline that is where the measuring stands: baseline_measuring (an agent of role baseline is at work, and the platform declares its job when it finishes), baseline_required (none is at work and none left a job to declare: one is added), baseline_undeclared (they left several jobs and one is declared with PATCH), baseline_declaring (the platform is about to declare the one job), or what the platform's declaration of that one job is refused for, by the reasons of PATCH baseline_job_id: budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric. With a baseline: starts_at_ahead, no_researchers, budget_spent, or starting when nothing is missing: the request that declares the baseline or adds the researcher starts the run itself. The message says what the state waits for and who acts, with the hl command, and to an agent it begins with that agent's own next step: an agent of role baseline is told to measure, and any other that its jobs are refused until the start. Nothing else says what an open platform experiment waits for.repository is the code it works on, as the git host names it, and repository_url the address agents clone and jobs check out. Both are absent when it names none. One made from a sentence carries goal and goal_version, and while it is a draft what its planner proposed (proposal, proposed_at). Once accepted it keeps proposal as proposed, with accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers, the answers given to proposal.questions. For a draft, status_reason says where a draft stands: planning, revising (planned again from a changed goal), proposed (proposed_at is set and it waits to be accepted) or declined (declined_at and declined_reason are set, there is nothing to accept, and it waits for its goal to change or to be closed). editable lists the fields of PATCH /platform-experiments/{id} the reader may change now. Either answer waits until proposal_expires_at, when the platform closes the draft.
+         * @description Returns status, budget, the stage ladder, the list of signed-up agents and prior_runs, the closed runs of the same project and repository that its agents and coordinator read as their own. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. status_reason says why it is in its status, in every status. duration_hours count from the moment the run starts, which a running one holds in starts_at, and ends_at is that start plus duration_hours. A running one reads agents_starting while no executor's machine is running yet: the first one that is sets started_at, and the platform closes it at agents_due_at (close_reason agents_not_started) when none comes up. From then it reads running, and executors_done once every executor has finished, was cut or lost its machine with no restart left: nobody is left to submit a job, the platform still closes it only at ends_at, and waits_for names who writes the summary and closes it before, its coordinator where the platform hosts one and its owner otherwise. A closed one reads its close_reason. An open one says why it is not running yet. Without a baseline that is where the measuring stands: baseline_measuring (an agent of role baseline is at work, and the platform declares its job when it finishes), baseline_required (none is at work and none left a job to declare: one is added), baseline_undeclared (they left several jobs and one is declared with PATCH), baseline_declaring (the platform is about to declare the one job), or what the platform's declaration of that one job is refused for, by the reasons of PATCH baseline_job_id: budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric. With a baseline: starts_at_ahead, no_executors, budget_spent, or starting when nothing is missing: the request that declares the baseline or adds the executor starts the run itself. The message says what the state waits for and who acts, with the hl command, and to an agent it begins with that agent's own next step: an agent of role baseline is told to measure, and any other that its jobs are refused until the start. Nothing else says what an open platform experiment waits for.repository is the code it works on, as the git host names it, and repository_url the address agents clone and jobs check out. Both are absent when it names none. One made from a sentence carries goal and goal_version, and while it is a draft what its planner proposed (proposal, proposed_at). Once accepted it keeps proposal as proposed, with accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers, the answers given to proposal.questions. For a draft, status_reason says where a draft stands: planning, revising (planned again from a changed goal), proposed (proposed_at is set and it waits to be accepted) or declined (declined_at and declined_reason are set, there is nothing to accept, and it waits for its goal to change or to be closed). editable lists the fields of PATCH /platform-experiments/{id} the reader may change now. Either answer waits until proposal_expires_at, when the platform closes the draft.
          */
         get: operations["get-platform-experiment"];
         put?: never;
@@ -1188,7 +1288,7 @@ export interface paths {
         head?: never;
         /**
          * Change fields of a platform experiment
-         * @description Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. editable on GET /platform-experiments/{id} lists the fields the caller may change now, and a body that carries another answers 409 not_editable and names it. `goal`, what the owner asked, changes until the experiment closes, on one made from a sentence, and alone: a body that carries another field beside it is 422 goal_alone, one empty or over 2000 bytes 422 invalid_goal, and the goal it has 422 nothing_to_change. A draft is then planned again from it: the proposal or decline stays readable, proposed_at, declined_at and accepts_at are cleared so nothing is accepted by itself, status_reason reads revising, planning_ends_at is the planning limit from now, and the planner is told with platform_experiment.goal, started again where its machine was released. An open or running one tells its coordinator with platform_experiment.goal, which brings the description in line. Only a person's credential changes the goal. While the experiment is open every other field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. Once it runs only `name`, `description`, `duration_hours`, `max_agents`, `researchers` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest. A max_agents of a running one changes the places nobody took: a researcher added in one is given an even part, with the researchers at work, of what all researchers left unspent, and a max_agents raised so far that the hours its researchers left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. A draft's plan comes from its planner and is edited in the accept, and a closed one changes nothing: 409 not_editable. The experiment as patched is checked like a create and refused with the same 422: invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, A max_agents lowered below the researchers (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; researchers the body does not state are lowered to it from the last entry. Before the run starts 409 max_agents_below_researchers refuses one under the researchers signed up, which the message gives. 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. `baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `MEASURED BASELINE (written by the platform from the declared job)` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, baseline_missing_metric (a declared metric the job never reported, a reference apart: one left out is listed in the block as not measured), baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not hold one trial for each of max_agents: the job again at job_estimated_duration_hours). Stored, the experiment answers baseline_job_id and job_estimated_duration_hours, one and a half times the hours the job was observed running, which is the estimated_duration_hours of every later job that states none. An open experiment that has a baseline is held to it by every later patch, with the same refusals, so its metrics and budget cannot leave the baseline behind. While it runs, `baseline_job_id` with `baseline_reason` raises the baseline to a stronger COMPLETED job of the experiment that ran the baseline's commit unchanged (its code_ref equals the current baseline's, only its arguments or environment differ) and so measured the control in a better configuration it already has, with baseline_reason saying which configuration, whoever ran it on whichever branch. A job of any other commit is refused with 422 baseline_code_differs, naming the commit it ran and the baseline's. The job is held to the same checks as a declaration, but for the agent's role and the branch: baseline_not_completed, baseline_without_finding, baseline_missing_metric, and baseline_breaks_constraint, with no_baseline for a job that is not the experiment's, and 422 baseline_not_stronger when it is not strictly better than the baseline on the first ranking metric. 422 baseline_reason_required without a reason, baseline_job_required for a reason with no job, baseline_unchanged for the baseline itself, and 409 baseline_not_running for a baseline_reason on an experiment that is not running (while it is open the baseline agent's job is declared; a closed one changes nothing). A raise rewrites the measured baseline block of the description from the new job, keeps job_estimated_duration_hours, and is recorded in baseline_raises (from, to, reason, who, when), in the record of the close and as platform_experiment.baseline to every agent, whose detail says the values before and after. Standings in results are set against the new baseline from then on, and a verdict already given against the old one stays as recorded. 422 invalid_experiment for a report_interval_seconds of 0 or less. A change of budget_accelerator_hours writes the quota of every agent of role baseline again, as half the budget. A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds researchers in the places that gives; researchers, which the platform keeps where it runs them, are its owner's to change too. The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.
+         * @description Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. editable on GET /platform-experiments/{id} lists the fields the caller may change now, and a body that carries another answers 409 not_editable and names it. `goal`, what the owner asked, changes until the experiment closes, on one made from a sentence, and alone: a body that carries another field beside it is 422 goal_alone, one empty or over 2000 bytes 422 invalid_goal, and the goal it has 422 nothing_to_change. A draft is then planned again from it: the proposal or decline stays readable, proposed_at, declined_at and accepts_at are cleared so nothing is accepted by itself, status_reason reads revising, planning_ends_at is the planning limit from now, and the planner is told with platform_experiment.goal, started again where its machine was released. An open or running one tells its coordinator with platform_experiment.goal, which brings the description in line. Only a person's credential changes the goal. While the experiment is open every other field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. Once it runs only `name`, `description`, `duration_hours`, `max_agents`, `agents` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest. A max_agents of a running one changes the places nobody took: an executor added in one is given an even part, with the executors at work, of what all executors left unspent, and a max_agents raised so far that the hours its executors left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. A draft's plan comes from its planner and is edited in the accept, and a closed one changes nothing: 409 not_editable. The experiment as patched is checked like a create and refused with the same 422: invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, A max_agents lowered below the executors (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; executors of agents the body does not state are lowered to it from the last entry. Before the run starts 409 max_agents_below_executors refuses one under the executors signed up, which the message gives. 409 agents_below_at_work for agents that want fewer of an agent type and model than are at work. Executors of agents above max_agents in all is 422 invalid_agents. run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. `baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `MEASURED BASELINE (written by the platform from the declared job)` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With an executor joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the executor, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 executors (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each executor holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_executors until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, baseline_missing_metric (a declared metric the job never reported, a reference apart: one left out is listed in the block as not measured), baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not hold one trial for each of max_agents: the job again at job_estimated_duration_hours). Stored, the experiment answers baseline_job_id and job_estimated_duration_hours, one and a half times the hours the job was observed running, which is the estimated_duration_hours of every later job that states none. An open experiment that has a baseline is held to it by every later patch, with the same refusals, so its metrics and budget cannot leave the baseline behind. While it runs, `baseline_job_id` with `baseline_reason` raises the baseline to a stronger COMPLETED job of the experiment that ran the baseline's commit unchanged (its code_ref equals the current baseline's, only its arguments or environment differ) and so measured the control in a better configuration it already has, with baseline_reason saying which configuration, whoever ran it on whichever branch. A job of any other commit is refused with 422 baseline_code_differs, naming the commit it ran and the baseline's. The job is held to the same checks as a declaration, but for the agent's role and the branch: baseline_not_completed, baseline_without_finding, baseline_missing_metric, and baseline_breaks_constraint, with no_baseline for a job that is not the experiment's, and 422 baseline_not_stronger when it is not strictly better than the baseline on the first ranking metric. 422 baseline_reason_required without a reason, baseline_job_required for a reason with no job, baseline_unchanged for the baseline itself, and 409 baseline_not_running for a baseline_reason on an experiment that is not running (while it is open the baseline agent's job is declared; a closed one changes nothing). A raise rewrites the measured baseline block of the description from the new job, keeps job_estimated_duration_hours, and is recorded in baseline_raises (from, to, reason, who, when), in the record of the close and as platform_experiment.baseline to every agent, whose detail says the values before and after. Standings in results are set against the new baseline from then on, and a verdict already given against the old one stays as recorded. 422 invalid_experiment for a report_interval_seconds of 0 or less. A change of budget_accelerator_hours writes the quota of every agent of role baseline again, as half the budget. A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds executors in the places that gives; agents, the team the platform keeps where it runs them, is its owner's to change too. The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.
          */
         patch: operations["update-platform-experiment"];
         trace?: never;
@@ -1204,7 +1304,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a draft's proposal
-         * @description Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; its budget, its length, the minutes its baseline has and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the description, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes. starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. 409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; 503 agentsandbox_not_configured when nothing could run it. A draft's own planner cannot accept it.
+         * @description Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; its budget, its length, the minutes its baseline has and its team (agents) are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the description, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the executors, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. The platform hosts its coordinator, each agent of its team and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes. starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, and no machine of its team is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and agents, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. 409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; 503 agentsandbox_not_configured when nothing could run it. A draft's own planner cannot accept it.
          */
         post: operations["accept-draft"];
         delete?: never;
@@ -1228,7 +1328,7 @@ export interface paths {
         put?: never;
         /**
          * Add one agent to a platform experiment
-         * @description The only way an agent joins, while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. While it runs, its coordinator or a person adds a researcher (role competitor, and no other role) in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents: it is given an even part, with the researchers at work, of what all researchers left unspent, taken first from what the ones that ended left and then from the researchers at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the researcher a declared baseline still waited for starts the run in this request. Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 name_taken for a stated name, or a registered agent's, that another agent of it carries. The answer is agents, a list holding that one agent. in_agentsandbox=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. Until the start the agent answered carries status_reason, the reason the platform experiment is not running yet, and its instance reads waiting: no machine exists before the start. 409 max_agentsandboxes_reached beyond max_agentsandboxes machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, or its machine stopped with no restart left, the next is added in its place. agent_type and model are resolved here and stored: the answer shows what the agent runs. in_agentsandbox=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. A coordinator's token is returned none: a person or an API key of the org asks for it. role decides ranking: "competitor" (default) is a researcher, whatever its agent type: ranked, cut-eligible and counted against max_agents; "baseline" and "reviewer" are none of the three, though their jobs are billed and gated identically. 409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. An agent of role baseline measures the baseline before the start: its machine, when sandboxed, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open),and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.
+         * @description The only way an agent joins, while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. While it runs, its coordinator or a person adds an executor (role competitor) in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents, or a researcher: an executor is given an even part, with the executors at work, of what all executors left unspent, taken first from what the ones that ended left and then from the executors at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the executor a declared baseline still waited for starts the run in this request. Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 name_taken for a stated name, or a registered agent's, that another agent of it carries. The answer is agents, a list holding that one agent. in_agentsandbox=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. Until the start the agent answered carries status_reason, the reason the platform experiment is not running yet, and its instance reads waiting: no machine exists before the start. 409 max_agentsandboxes_reached beyond max_agentsandboxes machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, or its machine stopped with no restart left, the next is added in its place. agent_type and model are resolved here and stored: the answer shows what the agent runs. in_agentsandbox=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. A coordinator's token is returned none: a person or an API key of the org asks for it. role decides what the agent does (GET /agent-roles): "competitor" (default) is an executor, whatever its agent type: it runs jobs, is ranked, cut-eligible and counted against max_agents; "researcher" runs the built-in researcher type unless agent_type names it, runs no job (422 researcher_submits_no_job), pushes nothing, holds no quota (404 researcher_has_no_quota), is never ranked or cut, counts toward no max_agents and defaults to the coordinator's model (coordinator_model) when neither model nor its agent type names one; "baseline" and "reviewer" are not ranked or cut, though their jobs are billed and gated identically. 409 max_agents_reached for an executor past max_agents, which counts the executors at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but executor and researcher once the run started, and for every one once it closed. An agent of role baseline measures the baseline before the start: its machine, when sandboxed, starts at once, it holds a quota from the moment it joins (half the budget, which no executor can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open),and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.
          */
         post: operations["add-platform-experiment-agent"];
         delete?: never;
@@ -1268,7 +1368,7 @@ export interface paths {
         put?: never;
         /**
          * Say that an agent has nothing left to do
-         * @description Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished, and open_hypotheses, the id and text of each hypothesis of the agent that still has no verdict: the finish is taken whatever they are. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. A researcher's finished_reason, which agent.finished carries to the coordinator, ends with the time and quota it left, after the blocker it named. 409 time_and_quota_left, saying how much of each is left, for a researcher that has more than a tenth of the run's time and of its quota left and names no blocker. 409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing. The finish of an agent of role baseline in an open platform experiment hands over what it measured: with baseline_job_id the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. The job must be the agent's own and pass every check of that PATCH, or the finish is refused with its 422 (no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, budget_below_baseline and the others) and nothing is stored, so the agent fixes what it says and finishes again. 422 not_a_baseline_agent for baseline_job_id from an agent of another role, 409 baseline_declared when it names another job than the baseline already declared. Without baseline_job_id, when the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, the platform declares that job the same way. Such a finish is answered 200 whatever became of the declaration: one that is refused, or a finish that left no such job or several, declares nothing, and the platform experiment's status_reason says which it was and who acts (baseline_required, baseline_undeclared, or the refusal of the declaration such as budget_below_baseline).
+         * @description Called by the agent itself, with its own token, in a running platform experiment, and by an agent of role baseline also in an open one, where it measures the baseline. From then its machine, if the platform runs it, is taken down after its last turn, its signup reads finished_at and finished_reason, and agent.finished is sent. The answer is agents, a list holding that one agent as finished, and open_hypotheses, the id and text of each hypothesis of the agent that still has no verdict: the finish is taken whatever they are. Its quota, jobs and findings stay as they are, and its token stops working two minutes later. finished_reason, which agent.finished carries to the coordinator, is the reason headed by why the agent stopped when it gave because (Blocked, or Nothing left worth a job), and for an executor ends with the time and quota it left. 409 time_and_quota_left, saying how much of each is left, for an executor that has more than a tenth of the run's time and of its quota left and more time than its jobs typically take, and gives no because. 409 work_unfinished while it has a job queued or running or a completed job without its summary, 409 experiment_closed once the platform experiment closed, which ended the agent's run already and leaves nothing to finish, 409 not_running in one not started yet for any role but baseline. Calling it again changes nothing. The finish of an agent of role baseline in an open platform experiment hands over what it measured: with baseline_job_id the platform declares that job as the baseline in this request, as PATCH /platform-experiments/{id} with baseline_job_id does, and starts the run when nothing else is missing. The job must be the agent's own and pass every check of that PATCH, or the finish is refused with its 422 (no_baseline, baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, budget_below_baseline and the others) and nothing is stored, so the agent fixes what it says and finishes again. 422 not_a_baseline_agent for baseline_job_id from an agent of another role, 409 baseline_declared when it names another job than the baseline already declared. Without baseline_job_id, when the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, the platform declares that job the same way. Such a finish is answered 200 whatever became of the declaration: one that is refused, or a finish that left no such job or several, declares nothing, and the platform experiment's status_reason says which it was and who acts (baseline_required, baseline_undeclared, or the refusal of the declaration such as budget_below_baseline).
          */
         post: operations["finish-platform-experiment-agent"];
         delete?: never;
@@ -1520,7 +1620,7 @@ export interface paths {
         put?: never;
         /**
          * Send a message to an agent
-         * @description The coordinator, or a person or an API key of the org, tells one agent (agent_id), or every researcher at work (all), something directly: a steer, a direction to take, what to stop. Each agent is told it as agent.message, which wakes it at once, with the text as its detail and from coordinator or owner as its value, and is told it again after a restart until its cursor passed it. A comment stays the place for a fact about a hypothesis. A person or an API key tells the sandboxed coordinator (coordinator) the same way: agent.message with coordinator as its subject and owner as its value, on the stream of the whole platform experiment and no agent's, which wakes the coordinator. 409 no_coordinator where the platform hosts none, 422 invalid_recipient from the coordinator itself. The answer is messages, one for each agent sent to. An agent's token sends none (403): what a researcher has to tell goes in a comment, or the reason of its finish. 404 not_signed_up for an agent not in the platform experiment, 409 agent_ended for one that finished or was cut, 409 no_researcher_at_work for all with none, 409 experiment_closed once it closed. A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 rate_limited past that, saying when the next can be sent. With all, a researcher the sender may not message yet is left out and named in refused {agent_id, reason, retry_after}, the rest are sent and the answer is 201: 429 only when none could be sent. 422 too_long above 1500 bytes.
+         * @description The coordinator, or a person or an API key of the org, tells one agent (agent_id), or every executor and researcher at work (all), something directly: a steer, a direction to take, what to stop. Each agent is told it as agent.message, which wakes it at once, with the text as its detail and from coordinator or owner as its value, and is told it again after a restart until its cursor passed it. A comment stays the place for a fact about a hypothesis. A person or an API key tells the sandboxed coordinator (coordinator) the same way: agent.message with coordinator as its subject and owner as its value, on the stream of the whole platform experiment and no agent's, which wakes the coordinator. 409 no_coordinator where the platform hosts none, 422 invalid_recipient from the coordinator itself. The answer is messages, one for each agent sent to. An agent's token sends none (403): what an agent has to tell goes in a comment, or the reason of its finish. 404 not_signed_up for an agent not in the platform experiment, 409 agent_ended for one that finished or was cut, 409 no_agent_at_work for all with none, 409 experiment_closed once it closed. A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 rate_limited past that, saying when the next can be sent. With all, an agent the sender may not message yet is left out and named in refused {agent_id, reason, retry_after}, the rest are sent and the answer is 201: 429 only when none could be sent. 422 too_long above 1500 bytes.
          */
         post: operations["send-platform-experiment-message"];
         delete?: never;
@@ -1579,7 +1679,7 @@ export interface paths {
         get?: never;
         /**
          * Propose the platform experiment a draft becomes
-         * @description Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, its numbers are estimates, and the baseline is measured once it is accepted, before any researcher starts, by the baseline agent the proposal signs up, whose machine starts with it. The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is. Stored, it replaces the one before, marks the draft proposed (proposed_at), is told as platform_experiment.proposal proposed, and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, changes its goal or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never stored nor accepted by itself. A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.
+         * @description Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. agents is the team, one entry for each agent, [{agent_type, model, hyperparameters}]: an entry of agent_type researcher is a researcher, which runs no job, holds no quota and steers the work through the hypothesis graph, defaulting to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one, and any other an executor, which runs the jobs; at least one executor, and the executors are the run's max_agents. A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, its numbers are estimates, and the baseline is measured once it is accepted, before any executor starts, by the baseline agent the proposal signs up, whose machine starts with it. The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is. Stored, it replaces the one before, marks the draft proposed (proposed_at), is told as platform_experiment.proposal proposed, and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, changes its goal or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never stored nor accepted by itself. A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.
          */
         put: operations["put-proposal"];
         post?: never;
@@ -1618,7 +1718,7 @@ export interface paths {
         };
         /**
          * Get one agent's quota within a platform experiment
-         * @description One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one. 503 object_store_unavailable while the object store does not answer. 404 planner_has_no_quota for a draft's planner, which submits no job and needs none: the message says where the run's budget comes from instead. 404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.
+         * @description One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one, and max_submissions_per_hour and submissions_left: the most jobs it may submit in any hour and how many more it may submit now before a submit is refused with rate_limited, where the platform sets a cap. 503 object_store_unavailable while the object store does not answer. 404 planner_has_no_quota for a draft's planner, which submits no job and needs none: the message says where the run's budget comes from instead. 404 researcher_has_no_quota for a researcher, which submits no job and needs none. 404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.
          */
         get: operations["get-agent-quota"];
         put?: never;
@@ -1738,7 +1838,7 @@ export interface paths {
         };
         /**
          * Where the run stands now, in one read
-         * @description Computed on every read: the run's clock (ends_at, minutes_left, the stage and when the next starts; on a closed run minutes_left 0 with closed_at and close_reason, on one not started how long it will run once it starts), the objective on each ranking metric (the declared baseline's value, the best a researcher's completed job holding every constraint reached, by which job and agent, the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running or checked out within two hours and who is on it, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, the messages the reader may still send it this hour, its model account's allowance, and its share and the room left in it, and ideas_from_people: how many open ideas people registered, those no agent has settled or built on yet, and the command that lists them. An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the sandboxed coordinator: when its summary was last written, how many jobs completed since, and its model allowance.
+         * @description Computed on every read: the run's clock (ends_at, minutes_left, the stage and when the next starts; on a closed run minutes_left 0 with closed_at and close_reason, on one not started how long it will run once it starts), the objective on each ranking metric (the declared baseline's value, the best an executor's completed job holding every constraint reached, by which job and agent, the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running or checked out within two hours and who is on it, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, the messages the reader may still send it this hour, its model account's allowance, and its share and the room left in it, and ideas_from_people: how many open ideas people registered, those no agent has settled or built on yet, and the command that lists them. An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the sandboxed coordinator: when its summary was last written, how many jobs completed since, and its model allowance.
          */
         get: operations["get-platform-experiment-situation"];
         put?: never;
@@ -1758,7 +1858,7 @@ export interface paths {
         };
         /**
          * Get the stage ladder and current standing of a platform experiment
-         * @description The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Open, the ladder is the one declared. From the start it is the one the run has: a single stage where fewer than 5 researchers joined, which has no boundary and sends no stage.boundary. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Where the next cut falls is not shown; every agent's best value is, at GET /platform-experiments/{id}/results.
+         * @description The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Open, the ladder is the one declared. From the start it is the one the run has: a single stage where fewer than 5 executors joined, which has no boundary and sends no stage.boundary. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Where the next cut falls is not shown; every agent's best value is, at GET /platform-experiments/{id}/results.
          */
         get: operations["get-stages"];
         put?: never;
@@ -1950,7 +2050,7 @@ export interface paths {
         };
         /**
          * Get live per-cluster accelerator capacity
-         * @description Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own clusters and the ones the platform shares, without the ones the org turned off for its jobs. The org is the one your token is bound to: every API key, agent and coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, and is answered 422 naming org_id without it. An org you do not reach is not found. Staff read one org with org_id and every cluster that reports without it. accelerator_type is the exact driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed and free now, and per_node_available on a type the most of it free on one node now. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only currently-schedulable nodes count — powered-off hardware never appears. platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour (acch_per_hour of the type times accelerator_count), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, and one that alone passes the project's where no cluster of the org's own can hold it is refused 422 exceeds_project_compute_limit.
+         * @description Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own clusters and the ones the platform shares, without the ones the org turned off for its jobs. The org is the one your token is bound to: every API key, agent and coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, and is answered 422 naming org_id without it. An org you do not reach is not found. Staff read one org with org_id and every cluster that reports without it. accelerator_type is the exact driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed and free now, and per_node_available on a type the most of it free on one node now. hosts is how many nodes a cluster has and multi_node whether it runs one job over several: a job of more than one node, by num_nodes or groups, is placed only where multi_node is true, and with topology.spread_across_hosts, the default, only where hosts is at least its node count. startup_seconds on a cluster that rents on demand is how long a rented machine may take to start a job, the least a rendezvous timeout of a job of several nodes there should be. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only currently-schedulable nodes count — powered-off hardware never appears. platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour (acch_per_hour of the type times accelerator_count), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, and one that alone passes the project's where no cluster of the org's own can hold it is refused 422 exceeds_project_compute_limit.
          */
         get: operations["get-resource-capacity"];
         put?: never;
@@ -2030,7 +2130,7 @@ export interface components {
             token: string;
         };
         AcceptRequest: {
-            /** @description The researchers the platform runs, one entry each. */
+            /** @description The team the platform runs, one entry for each agent: one of agent_type researcher is a researcher, any other an executor. At least one executor. */
             agents: components["schemas"]["ProposedAgent"][];
             /** @description One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the description. Left out for a proposal without questions. */
             answers?: string[];
@@ -2064,7 +2164,7 @@ export interface components {
         AddAgentRequest: {
             /** @description Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing. */
             agent_id?: string;
-            /** @description Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search. */
+            /** @description The agent type it runs, which it reads from its signup, of the role role gives: for an executor generalist (default), hyperparameter-search, architecture-search, data-search or an executor type of the org, for a researcher researcher (default), for a baseline agent baseline (default). */
             agent_type?: string;
             /** @description A small JSON object the agent reads from its signup, at most 4096 bytes as JSON. */
             hyperparameters?: {
@@ -2072,14 +2172,14 @@ export interface components {
             };
             /** @description true: the platform runs the agent. false (default): its token is returned and you run it. */
             in_agentsandbox?: boolean;
-            /** @description The model the agent runs on, which it reads from its signup. Omitted, it runs on its agent type's model and the answer shows none. */
+            /** @description The model the agent runs on, one GET /models lists, which it reads from its signup. Omitted, it runs on its agent type's model, else, for a researcher, on the coordinator's model, the platform experiment's coordinator_model, else on the platform's default, and the answer shows none. */
             model?: string;
-            /** @description Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: "Researcher 2", "Baseline 1". */
+            /** @description Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: "Executor 2", "Researcher 1", "Baseline 1". */
             name?: string;
             /** @description "guaranteed" or "burst_only"; omitted, the platform experiment's default_quota_tier applies. */
             quota_tier?: string;
             /**
-             * @description "competitor", "baseline" or "reviewer".
+             * @description "competitor" (an executor), "researcher", "baseline" or "reviewer" (GET /agent-roles).
              * @default competitor
              */
             role: string;
@@ -2236,7 +2336,7 @@ export interface components {
         AgentMessages: {
             /** @description The messages sent, one for each agent sent to. */
             messages: components["schemas"]["AgentMessage"][];
-            /** @description With all, each researcher not sent to because the sender sent it the most an hour allows. Absent when none was refused. */
+            /** @description With all, each agent not sent to because the sender sent it the most an hour allows. Absent when none was refused. */
             refused?: components["schemas"]["RefusedMessage"][];
         };
         AgentMetricSeries: {
@@ -2254,12 +2354,32 @@ export interface components {
             cache_read_input_tokens: number;
             /** Format: int64 */
             calls: number;
+            /**
+             * Format: double
+             * @description What the calls cost, in US dollars.
+             */
+            cost_usd: number;
             /** Format: int64 */
             input_tokens: number;
             model: string;
             /** Format: int64 */
             output_tokens: number;
             provider: string;
+        };
+        AgentPoolEntry: {
+            /** @description The agent type these agents are started as, by id, which gives their role. The built-in researcher makes researchers, which run no job and steer the work through the hypothesis graph. Any other makes executors, which run the jobs: an executor type of the org (GET /orgs/{id}/agent-types), the built-in generalist by default, or hyperparameter-search, architecture-search, data-search. */
+            agent_type?: string;
+            /**
+             * Format: int64
+             * @description How many of them are to be at work. A stage boundary lowers it by each of them it cuts.
+             */
+            count: number;
+            /** @description A small JSON object each new agent of the entry reads from its signup, at most 4096 bytes as JSON. Omitted, their agent type's, read whenever each is served. An agent added in the place of one that ended reads the one it replaces. */
+            hyperparameters?: {
+                [key: string]: unknown;
+            };
+            /** @description The model they run on, <provider>/<model id> as GET /models lists it. Omitted, their agent type's, read whenever each is served, else, for researchers, the coordinator's model (coordinator_model), else the platform's default. */
+            model?: string;
         };
         AgentQuotaView: {
             agent_id: string;
@@ -2292,13 +2412,18 @@ export interface components {
              */
             max_data_bytes?: number;
             /**
+             * Format: int64
+             * @description The most jobs the agent may submit to this platform experiment in any hour: past it a submit is refused with rate_limited until the oldest of them is an hour old. On a read of one agent's quota, where the platform sets a cap.
+             */
+            max_submissions_per_hour?: number;
+            /**
              * Format: double
-             * @description What share_accelerator_hours becomes when the next stage starts, at the least: the incoming stage's part of the budget is split over the researchers still standing, and what the ones cut then left unspent is added. An agent cut at that boundary holds nothing. Present with next_stage_starts_at: a share that looks spent before it grows again.
+             * @description What share_accelerator_hours becomes when the next stage starts, at the least: the incoming stage's part of the budget is split over the executors still standing, and what the ones cut then left unspent is added. An agent cut at that boundary holds nothing. Present with next_stage_starts_at: a share that looks spent before it grows again.
              */
             next_stage_share_accelerator_hours?: number;
             /**
              * Format: date-time
-             * @description When the next stage of the platform experiment starts by the clock, which raises the share. It starts earlier once the same part of the budget is spent, and waits for a first ranking value while a job that can give one is in flight. Absent in the last stage, outside a running platform experiment and for an agent that is no researcher or was cut.
+             * @description When the next stage of the platform experiment starts by the clock, which raises the share. It starts earlier once the same part of the budget is spent, and waits for a first ranking value while a job that can give one is in flight. Absent in the last stage, outside a running platform experiment and for an agent that is no executor or was cut.
              */
             next_stage_starts_at?: string;
             platform_experiment_id: string;
@@ -2318,6 +2443,11 @@ export interface components {
              */
             share_accelerator_hours: number;
             /**
+             * Format: int64
+             * @description How many more jobs the agent may submit now: max_submissions_per_hour less the jobs it submitted in the last hour. Present with max_submissions_per_hour.
+             */
+            submissions_left?: number;
+            /**
              * Format: double
              * @description The same at burst priority.
              */
@@ -2334,7 +2464,22 @@ export interface components {
             final_metric: number;
         };
         /** @enum {string} */
-        AgentRole: "researcher" | "baseline" | "coordinator" | "planner";
+        AgentRole: "executor" | "researcher" | "baseline" | "coordinator" | "planner";
+        AgentRoleInfo: {
+            /** @description The built-in agent type an agent of the role runs as when it names none. */
+            agent_type: string;
+            /** @description What agents of the role do, in a sentence or two. */
+            description: string;
+            /** @description Whether the agents list of a platform experiment names agents of the role: an entry of agent_type researcher is of researchers, and an entry of any type of role executor is of executors. */
+            in_team: boolean;
+            /** @description The role's name as it is shown. */
+            name: string;
+            /** @description Whether an org makes agent types of the role (POST /orgs/{id}/agent-types). */
+            org_types: boolean;
+            role: components["schemas"]["AgentRole"];
+            /** @description The role an agent of it is added with (POST /platform-experiments/{id}/agents), absent for one the platform alone starts. */
+            signup_role?: components["schemas"]["SignupRole"];
+        };
         AgentSandbox: {
             available: boolean;
             /** @description Why it cannot, while available is false: reason agentsandbox_not_configured. */
@@ -2419,7 +2564,7 @@ export interface components {
              * @description How many subagents run at once, 1 to 10.
              */
             max_subagents: number;
-            /** @description The model an agent of the type runs on when the agent names none, read whenever the agent is served. Empty or left out: the platform's default. */
+            /** @description The model an agent of the type runs on when the agent names none, read whenever the agent is served: <provider>/<model id>, one GET /models lists. Empty or left out: the platform's default. */
             model?: string;
         };
         AgentTypeVersion: {
@@ -2439,6 +2584,20 @@ export interface components {
             settings: components["schemas"]["AgentTypeSettings"];
             /** Format: int64 */
             version: number;
+        };
+        AgentsAtWork: {
+            /**
+             * Format: int64
+             * @description The agents at work of an agent type and model no entry of agents names, as the coordinator adds beyond the pool.
+             */
+            outside_pool: number;
+            /** @description One entry for each entry of agents, in its order, with those of its agent type and model at work, researchers included. */
+            pool: components["schemas"]["PoolEntryAtWork"][];
+            /**
+             * Format: int64
+             * @description The executors at work, which max_agents holds to: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine. Researchers are not counted.
+             */
+            total: number;
         };
         AppendMetricRequest: {
             /** Format: double */
@@ -2493,7 +2652,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             /** @enum {string} */
-            kind: "experiment.status" | "experiment.blocked" | "quota.changed" | "stage.boundary" | "agent.cut" | "agent.finished" | "agent.replaced" | "agent.idle" | "agent.instructions" | "capacity.idle" | "agent.message" | "agent.activity" | "hypothesis.new" | "hypothesis.status" | "hypothesis.link" | "finding.new" | "comment.new" | "platform_experiment.status" | "platform_experiment.description" | "platform_experiment.goal" | "platform_experiment.proposal" | "platform_experiment.plan" | "platform_experiment.baseline" | "platform_experiment.removed" | "job.held" | "job.duplicate" | "job.underperforming";
+            kind: "experiment.status" | "experiment.blocked" | "quota.changed" | "stage.boundary" | "agent.cut" | "agent.finished" | "agent.replaced" | "agent.idle" | "agent.instructions" | "capacity.idle" | "agent.message" | "agent.activity" | "hypothesis.new" | "hypothesis.status" | "hypothesis.link" | "hypothesis.unlink" | "finding.new" | "comment.new" | "platform_experiment.status" | "platform_experiment.description" | "platform_experiment.goal" | "platform_experiment.proposal" | "platform_experiment.plan" | "platform_experiment.baseline" | "platform_experiment.removed" | "job.held" | "job.duplicate" | "job.underperforming";
             /** Format: date-time */
             occurred_at: string;
             platform_experiment_id: string;
@@ -2530,13 +2689,25 @@ export interface components {
             /** @description The architectures of the cluster's nodes (amd64, arm64). A job runs only on nodes of its platform experiment's image's architecture. */
             architectures?: string[];
             cluster_name: string;
+            /**
+             * Format: int64
+             * @description How many nodes the cluster has; on a cluster that rents on demand, how many machines it may rent at once, which one private network may not hold. A job with topology.spread_across_hosts (the default) puts each rank on a node of its own, so it needs at least as many nodes as ranks.
+             */
+            hosts: number;
             /** @description Programs a job's image must have on its PATH to run on the cluster, beside what the job itself runs, such as what the runtime of a rented machine uses to stop it when the job ends. */
             image_needs?: string[];
+            /** @description Whether the cluster runs a job over more than one node. A job of more than one node, by num_nodes or groups, is placed only on such a cluster. */
+            multi_node: boolean;
             /** @description On a cluster that rents on demand: why it has no machine to rent now for some of its slots, as its runtime words it, such as which of the provider filters leave out every offer of a shape. A job that needs such a slot waits until one comes on offer. */
             no_offer?: string[];
             on_demand?: boolean;
             per_node?: components["schemas"]["NodeCapacity"];
             resources?: components["schemas"]["ResourceCapacity"];
+            /**
+             * Format: int64
+             * @description On a cluster that rents on demand: how many seconds a rented machine may take to start a job's command before another is rented. The ranks of a job of several nodes start as their machines boot, so its rendezvous timeout should be at least this.
+             */
+            startup_seconds?: number;
         };
         ClusterSettings: {
             /**
@@ -2628,6 +2799,8 @@ export interface components {
         CreatePlatformExperimentRequest: {
             /** @description The image sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own. */
             agent_image?: string;
+            /** @description Optional: the team it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}]. An entry of agent_type researcher is of researchers, which run no job and default to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one; every other is of executors, at most max_agents in all. A model left out is the agent type's, else the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model that is no <provider>/<model id> reference, two entries of one agent type and model, or executors more than max_agents in all, and 422 model_not_served for a model GET /models does not list. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add agents beyond them, executors up to max_agents. */
+            agents?: components["schemas"]["AgentPoolEntry"][];
             /** @description The branch of repository its agents clone and start from, which none of them pushes to. Required with repository, and refused without it: a repository the platform creates is worked on at its default branch. */
             branch?: string;
             /**
@@ -2648,7 +2821,7 @@ export interface components {
             duration_hours?: number;
             /**
              * Format: int64
-             * @description Required and positive: 422 invalid_agents otherwise. How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers.
+             * @description Required and positive: 422 invalid_agents otherwise. How many executors may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the executors of agents in all.
              */
             max_agents?: number;
             /** Format: int64 */
@@ -2671,8 +2844,6 @@ export interface components {
             repository?: string;
             /** @description The account on the git host, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several. */
             repository_account?: string;
-            /** @description Optional: the researchers it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}], at most max_agents in all. A model left out is the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model no agent can be started on, two entries of one agent type and model, or more than max_agents in all. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add researchers beyond them, up to max_agents. */
-            researchers?: components["schemas"]["ResearcherPoolEntry"][];
             stages?: components["schemas"]["Stage"][];
             /**
              * Format: date-time
@@ -2904,6 +3075,8 @@ export interface components {
         ExperimentFile: {
             /** @description The image sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own. */
             agent_image?: string;
+            /** @description Optional: the team it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}]. An entry of agent_type researcher is of researchers, which run no job and default to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one; every other is of executors, at most max_agents in all. A model left out is the agent type's, else the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model that is no <provider>/<model id> reference, two entries of one agent type and model, or executors more than max_agents in all, and 422 model_not_served for a model GET /models does not list. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add agents beyond them, executors up to max_agents. */
+            agents?: components["schemas"]["AgentPoolEntry"][];
             /** @description The branch of repository its agents clone and start from, which none of them pushes to. Required with repository, and refused without it: a repository the platform creates is worked on at its default branch. */
             branch?: string;
             /**
@@ -2922,7 +3095,7 @@ export interface components {
             duration_hours?: number;
             /**
              * Format: int64
-             * @description Required and positive: 422 invalid_agents otherwise. How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers.
+             * @description Required and positive: 422 invalid_agents otherwise. How many executors may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the executors of agents in all.
              */
             max_agents?: number;
             /** Format: int64 */
@@ -2938,8 +3111,6 @@ export interface components {
             report_interval_seconds?: number;
             /** @description The repository its code is in, as the git host names it: owner/name on GitHub. The platform creates it from the experiment template when it does not exist. Left out, the platform creates a private repository on the GitHub account the org connected, and the answer names it. */
             repository?: string;
-            /** @description Optional: the researchers it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}], at most max_agents in all. A model left out is the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model no agent can be started on, two entries of one agent type and model, or more than max_agents in all. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add researchers beyond them, up to max_agents. */
-            researchers?: components["schemas"]["ResearcherPoolEntry"][];
             stages?: components["schemas"]["Stage"][];
         };
         ExperimentImage: {
@@ -2984,9 +3155,12 @@ export interface components {
         FinishAgentRequest: {
             /** @description For an agent of role baseline: its COMPLETED job the platform declares as the baseline in this request, the control the run is ranked against. Needed when it left several jobs that report the ranking metric. */
             baseline_job_id?: string;
-            /** @description What stops the agent that the time and quota it has left cannot fix. Required of a researcher with more than a tenth of the run's time and of its quota left. */
-            blocker?: string;
-            /** @description Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job. */
+            /**
+             * @description Why the agent stops while it has time and quota: blocked, by what reason names, or nothing_left, no idea left worth a job after what reason says was tried. Required of an executor with more than a tenth of the run's time and of its quota left.
+             * @enum {string}
+             */
+            because?: "blocked" | "nothing_left";
+            /** @description Why nothing is left to do: quota spent, what stops the agent that the time and quota it has left cannot fix, or what was tried and why no further idea is worth a job. */
             reason: string;
         };
         FinishInstallRequest: {
@@ -3038,11 +3212,15 @@ export interface components {
             /** Format: int64 */
             finding_count: number;
             id: string;
+            /** @description Set on a merged hypothesis: the one that states its claim and holds its links. */
+            merged_into?: string;
             platform_experiment_id: string;
             status: components["schemas"]["HypothesisStatus"];
             status_actor?: components["schemas"]["Actor"];
             /** Format: date-time */
             status_changed_at: string | null;
+            /** @description Why a researcher merged or retired it. */
+            status_reason?: string;
             text: string;
             /** @description The agents working on it now: a job of theirs queued or running, or a checkout within two hours. Absent when none is. */
             working?: components["schemas"]["HypothesisWorker"][];
@@ -3062,15 +3240,19 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: string;
+            /** @description Set on a merged hypothesis: the one that states its claim and holds its links. */
+            merged_into?: string;
             platform_experiment_id: string;
             status: components["schemas"]["HypothesisStatus"];
             status_actor?: components["schemas"]["Actor"];
             /** Format: date-time */
             status_changed_at: string | null;
+            /** @description Why a researcher merged or retired it. */
+            status_reason?: string;
             text: string;
         };
         /** @enum {string} */
-        HypothesisAction: "edit" | "remove" | "link" | "comment";
+        HypothesisAction: "edit" | "remove" | "link" | "comment" | "merge" | "retire" | "unlink";
         HypothesisComment: {
             actor: components["schemas"]["Actor"];
             agent_id: string;
@@ -3089,11 +3271,15 @@ export interface components {
             created_at: string;
             finding?: components["schemas"]["HypothesisFinding"];
             id: string;
+            /** @description Set on a merged hypothesis: the one that states its claim and holds its links. */
+            merged_into?: string;
             platform_experiment_id: string;
             status: components["schemas"]["HypothesisStatus"];
             status_actor?: components["schemas"]["Actor"];
             /** Format: date-time */
             status_changed_at: string | null;
+            /** @description Why a researcher merged or retired it. */
+            status_reason?: string;
             text: string;
         };
         HypothesisFinding: {
@@ -3125,9 +3311,9 @@ export interface components {
             total: number;
         };
         /** @enum {string} */
-        HypothesisStatus: "open" | "confirmed" | "refuted" | "inconclusive";
+        HypothesisStatus: "open" | "confirmed" | "refuted" | "inconclusive" | "merged" | "retired";
         HypothesisWithJobs: {
-            /** @description What the reader may do to it now, each a write the API accepts from them: edit (PATCH /hypotheses/{id}) and remove (DELETE /hypotheses/{id}) of an idea a person wrote that no agent acted on, link (POST /hypotheses/{id}/links, from an agent's hypothesis only by that agent) and comment (POST /hypotheses/{id}/comments). Empty for a reader who writes nothing of its platform experiment, and once it closed. */
+            /** @description What the reader may do to it now, each a write the API accepts from them: edit (PATCH /hypotheses/{id}) and remove (DELETE /hypotheses/{id}) of an idea a person wrote that no agent acted on, link (POST /hypotheses/{id}/links, from an agent's hypothesis only by that agent or a researcher), comment (POST /hypotheses/{id}/comments), and for a researcher merge and retire of an open one and unlink (POST /hypotheses/{id}/merge, /retire, DELETE /hypotheses/{id}/links/{type}/{to}). A merged or retired one takes comments only. Empty for a reader who writes nothing of its platform experiment, and once it closed. */
             actions: components["schemas"]["HypothesisAction"][];
             actor: components["schemas"]["Actor"];
             agent_id: string;
@@ -3148,11 +3334,15 @@ export interface components {
             job_count: number;
             jobs: components["schemas"]["Experiment"][];
             links: components["schemas"]["HypothesisLinks"];
+            /** @description Set on a merged hypothesis: the one that states its claim and holds its links. */
+            merged_into?: string;
             platform_experiment_id: string;
             status: components["schemas"]["HypothesisStatus"];
             status_actor?: components["schemas"]["Actor"];
             /** Format: date-time */
             status_changed_at: string | null;
+            /** @description Why a researcher merged or retired it. */
+            status_reason?: string;
             text: string;
             /** @description The agents working on it now: a job of theirs queued or running, or a checkout within two hours. */
             working: components["schemas"]["HypothesisWorker"][];
@@ -3313,6 +3503,7 @@ export interface components {
                 [key: string]: string;
             };
             shm_size?: string;
+            readonly slots?: string[];
             storage?: string;
             /** Format: int64 */
             termination_grace_period_seconds?: number;
@@ -3329,9 +3520,9 @@ export interface components {
             agent_id: string;
             /** @description The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes. */
             agent_type: string;
-            /** @description Whether it is a researcher at work: of role competitor, not finished, not cut, not replaced and, run by the platform, with a machine. The one count max_agents and the researchers pool hold to. */
+            /** @description Whether it is of the team at work: an executor (role competitor) or a researcher, not finished, not cut, not replaced and, run by the platform, with a machine. The pool of agents holds to it, and max_agents to its executors. */
             at_work: boolean;
-            /** @description Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut. */
+            /** @description Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest executors above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut. */
             cut_reason?: string;
             /**
              * @description Why the agent's run here is over, the empty string while it goes on, as GET /platform-experiments/{id}/signups/{agent_id} answers it.
@@ -3339,7 +3530,7 @@ export interface components {
              */
             ended: "" | "closed" | "cut" | "finished" | "planned";
             /**
-             * @description Why it no longer holds a place among the researchers: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added a researcher in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close.
+             * @description Why it no longer holds a place in the team: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added an agent in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close.
              * @enum {string}
              */
             ended_reason?: "finished" | "cut" | "replaced" | "stopped";
@@ -3367,9 +3558,9 @@ export interface components {
             name: string;
             platform_experiment_id: string;
             quota_tier?: components["schemas"]["QuotaTier"];
-            /** @description The researcher the platform added in this one's place. A replaced researcher takes no place and is never started again. */
+            /** @description The agent the platform added in this one's place. A replaced agent takes no place and is never started again. */
             replaced_by?: string;
-            /** @description The researcher that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters. */
+            /** @description The agent that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters. */
             replaces?: string;
             role: components["schemas"]["SignupRole"];
             /** @description Whether the instructions its harness last reported running are the ones the version of its agent type it is pinned to serves it now: false while an edit waits for its next turn boundary or a fresh session. Absent with no such report. */
@@ -3531,6 +3722,13 @@ export interface components {
             role: components["schemas"]["OrgRole"];
             user_id: string;
         };
+        Listing: {
+            /** @description The model a sandboxed coordinator runs on when neither its platform experiment nor its agent type names one, and a researcher when neither it, its agent type nor its platform experiment's coordinator_model does. */
+            coordinator_model: string;
+            /** @description The model an executor runs on when neither it nor its agent type names one. */
+            default_model: string;
+            models: components["schemas"]["Model"][];
+        };
         LiveCapacity: {
             clusters: components["schemas"]["ClusterCapacity"][];
             /** @description The org's limits on the platform's shared clusters, in accelerator hours per hour, and what its placed jobs reserve of them. Absent from staff's read of every cluster. */
@@ -3548,6 +3746,14 @@ export interface components {
             project_id?: string;
             projects: components["schemas"]["Project"][];
             user_id?: string;
+        };
+        MergeHypothesisRequest: {
+            /** @description The researcher that merges. Absent, the agent token's own. */
+            agent_id?: string;
+            /** @description The hypothesis that states the same claim and keeps it. */
+            into: string;
+            /** @description Why the two are one claim. */
+            reason?: string;
         };
         MessageAllowance: {
             /**
@@ -3635,6 +3841,29 @@ export interface components {
             metric: string;
             non_raw_basis_agents?: string[];
             standings: components["schemas"]["AgentStanding"][];
+        };
+        Model: {
+            /**
+             * Format: int64
+             * @description The most tokens a call to it holds, 0 when unknown.
+             */
+            context_length: number;
+            /**
+             * Format: double
+             * @description What its provider charges for input, in US dollars per million tokens.
+             */
+            input_usd_per_mtok: number;
+            /** @description Its reference, <provider>/<model id>: what an agent type, an agent and a coordinator name as their model. */
+            model: string;
+            /** @description What its provider calls it: the model id for an anthropic or openai model. */
+            name: string;
+            /**
+             * Format: double
+             * @description What its provider charges for output, in US dollars per million tokens.
+             */
+            output_usd_per_mtok: number;
+            /** @enum {string} */
+            provider: "anthropic" | "openrouter" | "openai";
         };
         ModelAllowance: {
             /**
@@ -3795,17 +4024,23 @@ export interface components {
              * @description On a proposed draft: when the platform accepts the proposal as proposed, unless a person accepts it sooner, holds it to edit it (POST /platform-experiments/{id}/hold), changes its goal or closes it. Its baseline agent's machine starts with the proposal and runs while this is set. Absent on a draft that waits for a person.
              */
             accepts_at?: string;
-            /** @description What the reader may do to it now, each a write the API accepts from them: close (POST /platform-experiments/{id}/close of one that is open or running), abandon (the same close of a draft), remove (DELETE /platform-experiments/{id}), accept (POST /platform-experiments/{id}/accept of a draft whose proposal stands, and its hold), add_agent (POST /platform-experiments/{id}/agents of a researcher) and add_idea (POST /hypotheses in it). Empty for a reader who writes nothing of it. */
+            /** @description What the reader may do to it now, each a write the API accepts from them: close (POST /platform-experiments/{id}/close of one that is open or running), abandon (the same close of a draft), remove (DELETE /platform-experiments/{id}), accept (POST /platform-experiments/{id}/accept of a draft whose proposal stands, and its hold), add_agent (POST /platform-experiments/{id}/agents of an agent) and add_idea (POST /hypotheses in it). Empty for a reader who writes nothing of it. */
             actions: components["schemas"]["PlatformExperimentAction"][];
             /** @description On a draft whose planner's machine is up: what the planner is doing now and since when, as on each agent of GET /platform-experiments/{id}/agents. Absent on anything but a draft, where each agent's is in the roster and the coordinator's on coordinator. */
             activity?: components["schemas"]["AgentActivity"];
             actor?: components["schemas"]["Actor"];
             agent_image?: string;
+            /** @description The team it is to have at work, an entry per agent type and model with its count. The agent type gives the role: an entry of the built-in researcher is of researchers, which run no job, hold no quota, are never ranked or cut and default to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one; every other entry is of executors, which run the jobs, at most max_agents in all. Optional. Where the platform hosts the coordinator they are agents the platform runs: it creates them with the platform experiment, or with the accepted proposal, and while the run goes on it adds a new agent of the same agent type, model and hyperparameters in the place of one that finished or whose machine stopped with no restart left, which agent.replaced tells, until less of the run is left than one trial of its baseline job (job_estimated_duration_hours, at least 15 minutes) or, for an executor, the budget its executors left unspent holds no trial for a newcomer. A stage boundary lowers the count of the entry of each executor it cuts, so nobody takes a cut executor's place. The coordinator may add agents beyond them, executors up to max_agents. Elsewhere they say who is wanted and nothing is added by the platform. */
+            agents: components["schemas"]["AgentPoolEntry"][];
+            /** @description The agents at work: total, the executors max_agents holds to, then for each entry of agents, and outside_pool for those of an agent type and model it names no entry of. Absent on a list. */
+            agents_at_work?: components["schemas"]["AgentsAtWork"];
             /**
              * Format: date-time
-             * @description On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no researcher's machine is running by then. Never later than ends_at.
+             * @description On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no executor's machine is running by then. Never later than ends_at.
              */
             agents_due_at?: string;
+            /** @description On a running platform experiment whose platform hosts the coordinator, the places of agents it keeps empty and why, absent when none: an agent that ended within 10 minutes of joining, or an executor that ended before submitting a job, is never replaced, and one whose pool entry had 3 replacements in the last hour waits. platform_experiment.status tells each change. On a read of one. */
+            agents_held?: string;
             /**
              * Format: date-time
              * @description On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. starts_at plus the minutes its baseline was given: the ones accepted for a draft, at most planning.baseline_limit_minutes, and that limit for one created whole. It moves out by the time a job of the baseline waits for its cluster to start it, at most 90 minutes, so that time is not the baseline agent's.
@@ -3881,7 +4116,7 @@ export interface components {
             job_estimated_duration_hours?: number;
             /**
              * Format: int64
-             * @description How many researchers may be at work at once, the one count of them: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the researchers at work nor below the total of researchers. On a draft: the most researchers its planner may propose, which accepting replaces with the number accepted.
+             * @description How many executors may be at work at once, the one count of them: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the executors at work nor below the executors of agents. On a draft: the most executors its planner may propose, which accepting replaces with the number accepted.
              */
             max_agents: number;
             /** Format: int64 */
@@ -3905,7 +4140,7 @@ export interface components {
              * @description On a draft being planned, from its goal or from a changed one: when the platform closes it if its planner has answered nothing by then.
              */
             planning_ends_at?: string;
-            /** @description Every other closed platform experiment of the same project that works on the same repository and ran (its researchers started or it declared a baseline), latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and the data its jobs wrote by the url of each object GET /experiments/{id}/data lists. They write nothing to it. Absent when there is none, and on a list. */
+            /** @description Every other closed platform experiment of the same project that works on the same repository and ran (its executors started or it declared a baseline), latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and the data its jobs wrote by the url of each object GET /experiments/{id}/data lists. They write nothing to it. Absent when there is none, and on a list. */
             prior_runs?: components["schemas"]["PriorRun"][];
             project_id: string;
             /** @description The proposal as PUT /platform-experiments/{id}/proposal took it. Kept as proposed once it is accepted. */
@@ -3925,12 +4160,6 @@ export interface components {
             repository?: string;
             /** @description The HTTPS address of the repository on the git host. A job's code_ref names it. */
             repository_url?: string;
-            /** @description The researchers it is to have at work, an entry per agent type and model with its count, at most max_agents in all. Optional. Where the platform hosts the coordinator they are agents the platform runs: it creates them with the platform experiment, or with the accepted proposal, and while the run goes on it adds a new researcher of the same agent type, model and hyperparameters in the place of one that finished or whose machine stopped with no restart left, which agent.replaced tells, until less of the run is left than one trial of its baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for a newcomer. A stage boundary lowers the count of the entry of each researcher it cuts, so nobody takes a cut researcher's place. The coordinator may add researchers beyond them, up to max_agents. Elsewhere they say who is wanted and nothing is added by the platform. */
-            researchers: components["schemas"]["ResearcherPoolEntry"][];
-            /** @description The researchers at work, counted by the rule max_agents holds to: in all, for each entry of researchers, and outside_pool for those of an agent type and model it names no entry of. Absent on a list. */
-            researchers_at_work?: components["schemas"]["ResearchersAtWork"];
-            /** @description On a running platform experiment whose platform hosts the coordinator, the places of researchers it keeps empty and why, absent when none: a researcher that ended before submitting a job or within 10 minutes of joining is never replaced, and one whose pool entry had 3 replacements in the last hour waits. platform_experiment.status tells each change. On a read of one. */
-            researchers_held?: string;
             shared: boolean;
             signed_up_agents?: string[];
             /** Format: int64 */
@@ -3938,7 +4167,7 @@ export interface components {
             stages: components["schemas"]["Stage"][];
             /**
              * Format: date-time
-             * @description The moment a researcher was first at work in the running platform experiment. That is the moment it became running when a researcher is run by its owner, and otherwise the moment the first researcher's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting).
+             * @description The moment an executor was first at work in the running platform experiment. That is the moment it became running when an executor is run by its owner, and otherwise the moment the first executor's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting).
              */
             started_at?: string;
             /**
@@ -3947,7 +4176,7 @@ export interface components {
              */
             starts_at: string;
             status: components["schemas"]["PlatformExperimentStatus"];
-            /** @description Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to change its goal or close it). revising is a draft whose goal changed, planned again until its planner answers. An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step. */
+            /** @description Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to change its goal or close it). revising is a draft whose goal changed, planned again until its planner answers. An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_executors, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no executor's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step. */
             status_reason?: components["schemas"]["StatusReason"];
             summary?: string;
             /** Format: date-time */
@@ -3956,6 +4185,8 @@ export interface components {
         /** @enum {string} */
         PlatformExperimentAction: "close" | "abandon" | "remove" | "accept" | "add_agent" | "add_idea";
         PlatformExperimentPatch: {
+            /** @description The team it is to have at work, the whole list as on create: researchers in entries of agent_type researcher, executors in the others, at most max_agents in all. Each entry at least the agents of its agent type and model at work: 409 agents_below_at_work otherwise. Where the platform runs the agents it adds the ones a raised count wants. */
+            agents?: components["schemas"]["AgentPoolEntry"][];
             /** @description While the platform experiment is open, declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. While it runs, raises the baseline to a stronger completed job of the experiment that ran the baseline's code_ref unchanged in a better configuration, with baseline_reason. */
             baseline_job_id?: string;
             /** @description Why the baseline of a running platform experiment is raised to baseline_job_id: the configuration of the control that job measured. Required with baseline_job_id while it runs, and taken then only. */
@@ -3973,7 +4204,7 @@ export interface components {
             goal?: string;
             /**
              * Format: int64
-             * @description How many researchers may be at work at once, counted as a join counts them: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, agents of role baseline and reviewers never count. Lowered below the researchers at work of a running one, it cuts the newest of them: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_researchers says how many are signed up. Researchers the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its researchers left unspent: one trial of the baseline for each.
+             * @description How many executors may be at work at once, counted as a join counts them: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, researchers, agents of role baseline and reviewers never count. Lowered below the executors at work of a running one, it cuts the newest of them: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_executors says how many are signed up. Executors of agents the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its executors left unspent: one trial of the baseline for each.
              */
             max_agents?: number;
             /** Format: int64 */
@@ -3988,8 +4219,6 @@ export interface components {
             name?: string;
             /** Format: int64 */
             report_interval_seconds?: number;
-            /** @description The researchers it is to have at work, the whole list as on create, at most max_agents in all. Each entry at least the researchers of its agent type and model at work: 409 researchers_below_at_work otherwise. Where the platform runs the researchers it adds the ones a raised count wants. */
-            researchers?: components["schemas"]["ResearcherPoolEntry"][];
             /**
              * Format: date-time
              * @description When its baseline begins to be measured, now when past. Stated, baseline_due_at moves with it.
@@ -4017,7 +4246,7 @@ export interface components {
         PriorRun: {
             /**
              * Format: double
-             * @description The leading researcher's best on metric, from the metrics store as GET /platform-experiments/{id}/results ranks it. Absent when nobody ranked.
+             * @description The leading executor's best on metric, from the metrics store as GET /platform-experiments/{id}/results ranks it. Absent when nobody ranked.
              */
             best?: number;
             /** @description The job that set best. */
@@ -4068,7 +4297,7 @@ export interface components {
             readonly accelerator_kind: components["schemas"]["TypeKind"];
             /** @description The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now. */
             accelerator_type?: string;
-            /** @description The researchers proposed, one entry each. */
+            /** @description The team proposed, one entry for each agent: one of agent_type researcher is a researcher, which runs no job and steers the work through the hypothesis graph, and any other an executor, which runs the jobs. At least one executor. */
             agents: components["schemas"]["ProposedAgent"][];
             /**
              * Format: int64
@@ -4106,7 +4335,7 @@ export interface components {
             /** @description What the planner learned of the repository, for the baseline agent, which is given it when it starts: the files and directories that matter to the goal, the entry points and how the code builds and runs, the toolchain and dependency pins, a line each. Optional, at most 4000 bytes. */
             repo_map?: string;
             risks?: string[];
-            /** @description Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted. */
+            /** @description Why this budget, this long and this team are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted. */
             sizing_reason: string;
             /** @description What the run's jobs state as job.storage: a quantity such as 100Gi. Checked as a submit checks it. */
             storage: string;
@@ -4226,6 +4455,8 @@ export interface components {
             created_at: string;
             id: string;
             links: components["schemas"]["Link"][];
+            /** @description Set on a merged hypothesis: the one that states its claim and holds its links. */
+            merged_into?: string;
             platform_experiment_id: string;
             /** @description The hypotheses a signed-in person's new one reads close to, each with reason close_text or refuted_parent, as on a 409 similar_hypotheses. Empty for every other caller, who is refused instead. */
             similar: components["schemas"]["SimilarHypothesis"][];
@@ -4233,6 +4464,8 @@ export interface components {
             status_actor?: components["schemas"]["Actor"];
             /** Format: date-time */
             status_changed_at: string | null;
+            /** @description Why a researcher merged or retired it. */
+            status_reason?: string;
             text: string;
         };
         RegistryCredential: {
@@ -4245,7 +4478,7 @@ export interface components {
             username: string;
         };
         ReopenRequest: {
-            /** @description The model the sandboxed coordinator runs on from now. Left out, it keeps the one it has. */
+            /** @description The model the sandboxed coordinator runs on from now, one GET /models lists. Left out, it keeps the one it has. */
             coordinator_model?: string;
             /**
              * Format: date-time
@@ -4271,35 +4504,6 @@ export interface components {
             /** @description Where it is cloned from. */
             repository_url?: string;
         };
-        ResearcherPoolEntry: {
-            /** @description The agent type these researchers are started as, by id: a researcher type of the org (GET /orgs/{id}/agent-types), the built-in generalist by default, or hyperparameter-search, architecture-search, data-search. */
-            agent_type?: string;
-            /**
-             * Format: int64
-             * @description How many of them are to be at work. A stage boundary lowers it by each of them it cuts.
-             */
-            count: number;
-            /** @description A small JSON object each new researcher of the entry reads from its signup, at most 4096 bytes as JSON. Omitted, their agent type's, read whenever each is served. A researcher added in the place of one that ended reads the one it replaces. */
-            hyperparameters?: {
-                [key: string]: unknown;
-            };
-            /** @description The model they run on. Omitted, their agent type's, read whenever each is served, or the platform's default when the type names none. */
-            model?: string;
-        };
-        ResearchersAtWork: {
-            /**
-             * Format: int64
-             * @description The researchers at work of an agent type and model no entry of researchers names, as the coordinator adds beyond the pool.
-             */
-            outside_pool: number;
-            /** @description One entry for each entry of researchers, in its order, with those of its agent type and model at work. */
-            pool: components["schemas"]["PoolEntryAtWork"][];
-            /**
-             * Format: int64
-             * @description The researchers at work: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine.
-             */
-            total: number;
-        };
         ResourceCapacity: {
             /** Format: double */
             cpu_cores_available: number;
@@ -4316,6 +4520,12 @@ export interface components {
              * @description The version whose prompt and settings the new version holds.
              */
             version: number;
+        };
+        RetireHypothesisRequest: {
+            /** @description The researcher that retires it. Absent, the agent token's own. */
+            agent_id?: string;
+            /** @description Why the idea is no longer worth a job. */
+            reason: string;
         };
         RoleRequest: {
             /** @description owner or member. Any other is refused with reason invalid_role. */
@@ -4340,7 +4550,7 @@ export interface components {
         SendMessageRequest: {
             /** @description The agent to send it to. Exactly one of agent_id, all and coordinator. */
             agent_id?: string;
-            /** @description Send it to every researcher (role competitor) at work: none that finished or was cut. */
+            /** @description Send it to every agent of the team at work, executors (role competitor) and researchers: none that finished or was cut. */
             all?: boolean;
             /** @description Send it to the sandboxed coordinator, from a person or a key. */
             coordinator?: boolean;
@@ -4361,7 +4571,7 @@ export interface components {
             agent_id: string;
             /** @description The agent type it runs, by id. */
             agent_type: string;
-            /** @description Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut. */
+            /** @description Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest executors above a max_agents lowered below those at work. Absent for a stage cut. */
             cut_reason?: string;
             /**
              * @description Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else.
@@ -4384,7 +4594,7 @@ export interface components {
             role: string;
         };
         /** @enum {string} */
-        SignupRole: "competitor" | "baseline" | "reviewer" | "planner";
+        SignupRole: "competitor" | "baseline" | "reviewer" | "researcher" | "planner";
         SimilarHypothesis: {
             actor: components["schemas"]["Actor"];
             agent_id?: string;
@@ -4435,7 +4645,7 @@ export interface components {
             model_budget_usd: number;
             /**
              * Format: double
-             * @description What their model calls cost so far, at the platform's prices. Once it reaches model_budget_usd every further model call is refused with 429 model_budget_spent until the budget is raised.
+             * @description What their model calls cost so far, the sum of the cost recorded with each call. Once it reaches model_budget_usd every further model call is refused with 429 model_budget_spent until the budget is raised.
              */
             model_used_usd: number;
             /** Format: double */
@@ -4516,7 +4726,7 @@ export interface components {
             best_job?: string;
             /**
              * Format: double
-             * @description The best value of a researcher's completed job that holds every constraint, as the standings rank it.
+             * @description The best value of an executor's completed job that holds every constraint, as the standings rank it.
              */
             best_value?: number;
             /** @description The metric is declared deterministic: its values compare across machines and need no repeat. */
@@ -4621,7 +4831,7 @@ export interface components {
             since?: string;
             /** @description One short plain sentence for a person: what is wrong or happening, what it affects, and who acts. What a UI shows. */
             summary: string;
-            /** @description Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state. */
+            /** @description Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no executor, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state. */
             waits_for?: components["schemas"]["Waiter"];
         };
         StoredSession: {
@@ -4682,7 +4892,7 @@ export interface components {
         VerdictRequest: {
             /** @description The control job a confirmed or refuted verdict compares with. */
             against?: string;
-            /** @description The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which settles only a hypothesis no agent owns. */
+            /** @description The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which only reopens a hypothesis no agent owns. */
             agent_id?: string;
             /** @description Why a confirmed or refuted verdict holds without a repeated run and a control. */
             despite?: string;
@@ -4757,9 +4967,11 @@ export type AgentMessage = components['schemas']['AgentMessage'];
 export type AgentMessages = components['schemas']['AgentMessages'];
 export type AgentMetricSeries = components['schemas']['AgentMetricSeries'];
 export type AgentModelUsage = components['schemas']['AgentModelUsage'];
+export type AgentPoolEntry = components['schemas']['AgentPoolEntry'];
 export type AgentQuotaView = components['schemas']['AgentQuotaView'];
 export type AgentResult = components['schemas']['AgentResult'];
 export type AgentRole = components['schemas']['AgentRole'];
+export type AgentRoleInfo = components['schemas']['AgentRoleInfo'];
 export type AgentSandbox = components['schemas']['AgentSandbox'];
 export type AgentSandboxCoordinator = components['schemas']['AgentSandboxCoordinator'];
 export type AgentStanding = components['schemas']['AgentStanding'];
@@ -4770,6 +4982,7 @@ export type AgentTypeChange = components['schemas']['AgentTypeChange'];
 export type AgentTypeEvent = components['schemas']['AgentTypeEvent'];
 export type AgentTypeSettings = components['schemas']['AgentTypeSettings'];
 export type AgentTypeVersion = components['schemas']['AgentTypeVersion'];
+export type AgentsAtWork = components['schemas']['AgentsAtWork'];
 export type AppendMetricRequest = components['schemas']['AppendMetricRequest'];
 export type AttachCommands = components['schemas']['AttachCommands'];
 export type BaselineRaise = components['schemas']['BaselineRaise'];
@@ -4852,8 +5065,10 @@ export type ListedAgentType = components['schemas']['ListedAgentType'];
 export type ListedCluster = components['schemas']['ListedCluster'];
 export type ListedClusters = components['schemas']['ListedClusters'];
 export type ListedMember = components['schemas']['ListedMember'];
+export type Listing = components['schemas']['Listing'];
 export type LiveCapacity = components['schemas']['LiveCapacity'];
 export type Me = components['schemas']['Me'];
+export type MergeHypothesisRequest = components['schemas']['MergeHypothesisRequest'];
 export type MessageAllowance = components['schemas']['MessageAllowance'];
 export type MetricBests = components['schemas']['MetricBests'];
 export type MetricDataPoint = components['schemas']['MetricDataPoint'];
@@ -4862,6 +5077,7 @@ export type MetricHistory = components['schemas']['MetricHistory'];
 export type MetricReference = components['schemas']['MetricReference'];
 export type MetricSeriesPoint = components['schemas']['MetricSeriesPoint'];
 export type MetricStandings = components['schemas']['MetricStandings'];
+export type Model = components['schemas']['Model'];
 export type ModelAllowance = components['schemas']['ModelAllowance'];
 export type ModelUsage = components['schemas']['ModelUsage'];
 export type NameRequest = components['schemas']['NameRequest'];
@@ -4908,10 +5124,9 @@ export type RegistryCredential = components['schemas']['RegistryCredential'];
 export type ReopenRequest = components['schemas']['ReopenRequest'];
 export type Repository = components['schemas']['Repository'];
 export type RepositoryCheck = components['schemas']['RepositoryCheck'];
-export type ResearcherPoolEntry = components['schemas']['ResearcherPoolEntry'];
-export type ResearchersAtWork = components['schemas']['ResearchersAtWork'];
 export type ResourceCapacity = components['schemas']['ResourceCapacity'];
 export type RestoreAgentTypeRequest = components['schemas']['RestoreAgentTypeRequest'];
+export type RetireHypothesisRequest = components['schemas']['RetireHypothesisRequest'];
 export type RoleRequest = components['schemas']['RoleRequest'];
 export type RunBest = components['schemas']['RunBest'];
 export type RunHealth = components['schemas']['RunHealth'];
@@ -4952,6 +5167,35 @@ export type WatchSubprotocol = components['schemas']['WatchSubprotocol'];
 export type WithdrawnCluster = components['schemas']['WithdrawnCluster'];
 export type $defs = Record<string, never>;
 export interface operations {
+    "list-agent-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRoleInfo"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-agents": {
         parameters: {
             query?: {
@@ -5580,7 +5824,7 @@ export interface operations {
                 project_id?: string;
                 /** @description Only hypotheses registered by this agent. */
                 agent_id?: string;
-                /** @description open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress. */
+                /** @description open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress -- or merged or retired, a researcher's curation. */
                 status?: components["schemas"]["HypothesisStatus"];
                 /** @description people: only the hypotheses a person registered, an API key or staff included. */
                 by?: "people";
@@ -5996,6 +6240,114 @@ export interface operations {
             };
         };
     };
+    "unlink-hypothesis": {
+        parameters: {
+            query?: {
+                /** @description The researcher that removes it. Absent, the agent token's own. */
+                agent_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+                /** @description builds_on, contradicts or related. */
+                type: components["schemas"]["LinkType"];
+                /** @description The link's target: a hypothesis id, or the platform_experiment_id for the objective. */
+                to: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Link"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "merge-hypothesis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeHypothesisRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Hypothesis"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "retire-hypothesis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetireHypothesisRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Hypothesis"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "set-hypothesis-status": {
         parameters: {
             query?: never;
@@ -6109,6 +6461,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Listing"];
                 };
             };
             /** @description Error */
@@ -8975,20 +9356,21 @@ export const actorKindValues: ReadonlyArray<FlattenedDeepRequired<components>["s
 export const agentInstanceEnd_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentInstance"]["end_reason"]> = ["exited", "gone", "never_seen", "still_starting", "silent", "progress_unreadable", "expired", "released"];
 export const agentInstanceStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentInstance"]["state"]> = ["waiting", "requested", "starting", "running", "stopped"];
 export const agentMessageFromValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentMessage"]["from"]> = ["coordinator", "owner"];
-export const agentRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentRole"]> = ["researcher", "baseline", "coordinator", "planner"];
+export const agentRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentRole"]> = ["executor", "researcher", "baseline", "coordinator", "planner"];
 export const agentTurnStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTurn"]["state"]> = ["working", "waiting"];
 export const agentTypeActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeAction"]> = ["edit", "archive", "duplicate", "restore"];
 export const agentTypeChangeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeChange"]> = ["create", "edit", "rename", "describe", "archive", "restore"];
 export const agentTypeSettingsEffortValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeSettings"]["effort"]> = ["low", "medium", "high", "xhigh", "max"];
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
-export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming"];
+export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "hypothesis.unlink", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
 export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove"];
 export const endedStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["EndedStatus"]> = ["COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
 export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];
 export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentStatus"]> = ["SUBMITTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
-export const hypothesisActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisAction"]> = ["edit", "remove", "link", "comment"];
-export const hypothesisStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisStatus"]> = ["open", "confirmed", "refuted", "inconclusive"];
+export const finishAgentRequestBecauseValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FinishAgentRequest"]["because"]> = ["blocked", "nothing_left"];
+export const hypothesisActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisAction"]> = ["edit", "remove", "link", "comment", "merge", "retire", "unlink"];
+export const hypothesisStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisStatus"]> = ["open", "confirmed", "refuted", "inconclusive", "merged", "retired"];
 export const joinedAgentEndedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended"]> = ["", "closed", "cut", "finished", "planned"];
 export const joinedAgentEnded_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended_reason"]> = ["finished", "cut", "replaced", "stopped"];
 export const linkTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LinkType"]> = ["builds_on", "contradicts", "related"];
@@ -8997,6 +9379,7 @@ export const metricDefinitionDirectionValues: ReadonlyArray<FlattenedDeepRequire
 export const metricDefinitionRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricDefinition"]["role"]> = ["ranking", "constraint", "attribute", "reference"];
 export const metricReferenceDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricReference"]["direction"]> = ["maximize", "minimize"];
 export const metricStandingsDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricStandings"]["direction"]> = ["maximize", "minimize"];
+export const modelProviderValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Model"]["provider"]> = ["anthropic", "openrouter", "openai"];
 export const orgActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgAction"]> = ["edit", "create_api_key"];
 export const orgGitHubInstallationAccount_typeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgGitHubInstallation"]["account_type"]> = ["User", "Organization"];
 export const orgMemberActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgMemberAction"]> = ["set_role", "remove"];
@@ -9007,7 +9390,7 @@ export const quotaTierValues: ReadonlyArray<FlattenedDeepRequired<components>["s
 export const referenceValueConstraints_metValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReferenceValue"]["constraints_met"]> = ["true", "false", "unknown"];
 export const signupActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupAction"]> = ["message", "remove", "show_token"];
 export const signupReplyEndedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupReply"]["ended"]> = ["", "closed", "cut", "finished", "planned"];
-export const signupRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupRole"]> = ["competitor", "baseline", "reviewer", "planner"];
+export const signupRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupRole"]> = ["competitor", "baseline", "reviewer", "researcher", "planner"];
 export const similarHypothesisReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SimilarHypothesis"]["reason"]> = ["close_text", "refuted_parent"];
 export const situationMetricDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SituationMetric"]["direction"]> = ["maximize", "minimize"];
 export const typeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["TypeKind"]> = ["accelerator", "cpu"];

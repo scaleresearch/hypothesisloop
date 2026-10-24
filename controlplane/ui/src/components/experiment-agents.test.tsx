@@ -3,11 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { fetchModels } from '@/lib/api/models'
 import { addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, fetchPlatformExperimentMessages, removePlatformExperimentAgent, sendPlatformExperimentMessage } from '@/lib/api/agents'
 import { createPlatformExperiment } from '@/lib/api/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { choose } from '@/test-select'
 import { CATALOG } from '@/test-agent-types'
+import { MODELS, pickModel } from '@/test-models'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import type { AgentMessage, JoinedAgent, Me, PlatformExperiment, PlatformExperimentAction, SignupAction } from '@/types/api'
 
@@ -15,7 +17,8 @@ class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
 }
 
-vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn() }))
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn(), fetchAgentRoles: vi.fn(async () => (await import('@/test-agent-types')).ROLES) }))
+vi.mock('@/lib/api/models', () => ({ fetchModels: vi.fn() }))
 vi.mock('@/lib/api/agents', () => ({
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), fetchPlatformExperimentMessages: vi.fn(), sendPlatformExperimentMessage: vi.fn(),
 }))
@@ -63,6 +66,7 @@ function show(status = 'open', more: Partial<PlatformExperiment> = {}) {
 }
 
 beforeEach(() => {
+  vi.mocked(fetchModels).mockResolvedValue(MODELS)
   roster = [signup('ag-old', true)]
   vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => roster.map(asListed))
   vi.mocked(addPlatformExperimentAgents).mockImplementation(async (_pe, req) => {
@@ -113,6 +117,7 @@ describe('messaging an agent', () => {
 describe('adding agents', () => {
   it('asks the platform to run them by default and shows no token', async () => {
     show()
+    await screen.findByRole('button', { name: 'Executor' })
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'generalist', role: 'competitor', model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
@@ -122,16 +127,26 @@ describe('adding agents', () => {
   it('adds one agent a click, with agent type and model, and shows the self-run agent\'s token', async () => {
     show()
     await choose(await screen.findByLabelText('Type'), 'Data search')
-    await userEvent.type(screen.getByLabelText('Model'), 'claude-opus-4-5')
+    await pickModel(screen.getByLabelText('Model'), 'kimi', 'openrouter/moonshotai/kimi-k2')
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      in_agentsandbox: false, agent_type: 'data-search', role: 'competitor', model: 'claude-opus-4-5',
+      in_agentsandbox: false, agent_type: 'data-search', role: 'competitor', model: 'openrouter/moonshotai/kimi-k2',
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([
       'API_URL=http://api.test\nHL_TOKEN=hls_token-of-ag-new1',
     ])
+  })
+
+  it('adds a researcher as its role, which runs the researcher type on the coordinator\'s model unless one is picked', async () => {
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Researcher' }))
+    expect(screen.queryByLabelText('Type')).toBeNull()
+    expect(screen.getByText(/Keeps the hypothesis graph correct/)).toBeTruthy()
+    expect((screen.getByLabelText('Model') as HTMLInputElement).placeholder).toBe("Coordinator's model: anthropic/claude-opus-5-5")
+    await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'researcher', role: 'researcher', model: undefined })
   })
 
   it('hides a token on request, lists none in the roster, and shows the same one again when asked', async () => {
@@ -251,6 +266,13 @@ describe('agent types in the roster', () => {
     return within((await screen.findByRole('cell', { name: id })).closest('tr')!)
   }
 
+  it('names each agent\'s role as the API names roles', async () => {
+    roster = [signup('ag-1', true, 'generalist'), { ...signup('ag-2', true, 'researcher'), role: 'researcher' }]
+    show('running')
+    expect((await row('ag-1')).getAllByRole('cell')[2].textContent).toBe('Executor')
+    expect((await row('ag-2')).getAllByRole('cell')[2].textContent).toBe('Researcher')
+  })
+
   it('names each agent\'s type, an unknown type by its id', async () => {
     roster = [signup('ag-1', true, 'at-lr'), signup('ag-2', true, 'data-search'), signup('ag-3', true, 'at-gone')]
     show('running')
@@ -279,9 +301,9 @@ describe('agent types in the roster', () => {
     expect((await row('ag-working')).getByText('Running')).toBeTruthy()
   })
 
-  it('says a researcher was cut when max researchers was lowered', async () => {
+  it('says an executor was cut when max executors was lowered', async () => {
     roster = [{ ...signup('ag-1', true, 'generalist'), ended: 'cut', cut_reason: 'max_agents_lowered' }]
     show('running')
-    expect(await screen.findByText('Cut, max researchers lowered')).toBeTruthy()
+    expect(await screen.findByText('Cut, max executors lowered')).toBeTruthy()
   })
 })

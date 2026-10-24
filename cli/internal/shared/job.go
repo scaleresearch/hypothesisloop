@@ -433,7 +433,15 @@ cause and last lines of output are its eviction_reason. Exits 0 once all ended, 
 }
 
 func JobLogs(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := command.NewFlags("job logs", "usage: hl job logs ID [--lines N]\n\nThe last log lines the job's cluster reported, oldest first.", stderr)
+	fs := command.NewFlags("job logs", `usage: hl job logs ID [--lines N]
+
+The last log lines the job's cluster reported. A job of one node prints them oldest first. A job
+of several nodes prints a section per rank whose pod or instance still exists, each oldest first
+under a header that names its rank, group and pod, "--- rank 2 failed, exit 137 (group actor,
+pod P) ---" for a rank that failed: the other ranks by rank, then rank 0, then the failed ranks,
+the first to fail at the very end. Once a rank fails the others' pods are removed, so the tail
+may hold the failed rank alone. The ranks share --lines, and when not all fit the failed ranks and rank 0 are kept,
+under a first line "--- N more ranks not shown ---".`, stderr)
 	n := fs.Int("lines", 50, "how many of the last reported lines")
 	id, err := command.ParseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {

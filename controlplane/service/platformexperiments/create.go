@@ -35,7 +35,7 @@ func (s *Service) checkLength(durationHours float64) error {
 
 // withSettings returns spec with the platform's settings in the fields a request may leave to
 // them: scheduler.default_report_interval_seconds, stages.default as a run of max_agents
-// researchers has it (domain.RunStages) and quota.default_quota_tier.
+// executors has it (domain.RunStages) and quota.default_quota_tier.
 func (s *Service) withSettings(spec experimentspec.Spec) experimentspec.Spec {
 	if spec.ReportIntervalSeconds == 0 {
 		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
@@ -56,7 +56,7 @@ var specReasons = map[string]string{
 	"stages":                   "invalid_stages",
 	"budget_accelerator_hours": "invalid_cost",
 	"max_agents":               "invalid_agents",
-	"researchers":              "invalid_agents",
+	"agents":                   "invalid_agents",
 	"duration_hours":           "invalid_length",
 	"agent_image":              "invalid_agent_image",
 }
@@ -100,8 +100,8 @@ func CheckCreate(req CreatePlatformExperimentRequest) error {
 func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
 	problems := specProblems(req.Spec)
 	req.Spec = s.withSettings(req.Spec.Trimmed())
-	if err := domain.ResearcherPool(req.Researchers).Check(catalog); err != nil {
-		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]").On("researchers"))
+	if err := domain.AgentPool(req.Agents).Check(catalog); err != nil {
+		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": agents is the team it is to have at work, [{agent_type, model, hyperparameters, count}]").On("agents"))
 	}
 	if err := problems.Add(s.checkLength(req.DurationHours)); err != nil {
 		return req, err
@@ -191,7 +191,7 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 		Description:               req.Description,
 		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,
 		MaxAgents:                 req.MaxAgents,
-		Researchers:               req.Researchers,
+		Agents:                    req.Agents,
 		Metrics:                   req.Metrics,
 		ReportIntervalSeconds:     req.ReportIntervalSeconds,
 		StartsAt:                  domain.ClockStart(req.StartsAt, now),
@@ -312,16 +312,19 @@ func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperi
 	if err != nil {
 		return nil, auth.Internal(s.logger, "create platform experiment", err)
 	}
-	if req.Researchers, err = s.resolvedPool(catalog, req.Researchers); err != nil {
+	if req.Agents, err = s.resolvedPool(ctx, catalog, req.Agents); err != nil {
 		return nil, err
 	}
 	create, err := withAgentSandbox(req, s.launch)
 	if err != nil {
 		return nil, s.refusal("create platform experiment", err)
 	}
+	if err := s.checkModel(ctx, "coordinator_model", create.CoordinatorModel); err != nil {
+		return nil, s.refusal("create platform experiment", err)
+	}
 	create.createdBy = &by
 	if create.CoordinatorInAgentSandbox {
-		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Researchers), by, time.Now().UTC()); err != nil {
+		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Agents), by, time.Now().UTC()); err != nil {
 			return nil, s.refusal("create platform experiment", err)
 		}
 	}
