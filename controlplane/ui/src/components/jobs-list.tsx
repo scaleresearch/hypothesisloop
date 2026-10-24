@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { clsx } from 'clsx'
@@ -14,7 +15,7 @@ import { AgentSelect } from '@/components/agent-select'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Section } from '@/components/ui/section'
-import { StatTile } from '@/components/ui/stat-tile'
+import { Link } from '@/components/ui/link'
 import { Fetched } from '@/components/ui/fetched'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,13 +24,14 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Dot } from '@/components/ui/dot'
 import { Inline, Stack } from '@/components/ui/stack'
-import { Code } from '@/components/ui/text'
+import { Code, Eyebrow } from '@/components/ui/text'
 import { FormField } from '@/components/ui/form-field'
 import { LinkTr, RowAnchor, SortableTh, Table, num, quiet } from '@/components/ui/table'
 import { Pagination } from '@/components/ui/pagination'
 import { acceleratorLabel, formatAccH, formatDate, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { statusTone } from '@/lib/colors'
+import { toneText } from '@/components/ui/tone'
 import { evictionCode, evictionCodeLabel, evictionDetailLines, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
 import { experimentPath, jobPath, projectPath, withQuery } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
@@ -40,6 +42,7 @@ import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import { endedStatusValues } from '@/types/api'
 import type { Experiment, ExperimentStatus } from '@/types/api'
+import type { Tone } from '@/lib/colors'
 
 // The statuses a job ends in. Burst compute may still preempt a job in any other.
 const ENDED: ReadonlySet<string> = new Set(endedStatusValues)
@@ -145,17 +148,18 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
 
   const evictionReasons = Object.entries(stats?.evictions_by_reason ?? {}).sort((a, b) => b[1] - a[1])
   const faultSummary = faultBreakdown(stats?.evictions_by_class ?? {})
+  const costUnit = Array.from(new Set(visible.map(job => budgetUnit(job.accelerator_kind)))).join(' / ') || budgetUnit(undefined)
   const shownLabel = STATUSES.find(s => s.status === statusFilter)?.label
 
   return (
     <Page
       title="Jobs"
     >
-      {/* One tile per status: its count, and the filter that lists those jobs. */}
-      <div className="grid grid-cols-tiles-sm gap-3">
-        <StatTile label="All" value={<Fetched data={stats} error={statsError}>{s => s.total}</Fetched>} href={statusHref('')} active={statusFilter === ''} />
-        {STATUSES.map(({ status, label }) => (
-          <StatTile
+      {/* All, and a tile for each status that has jobs, or is chosen: its count, and the filter that lists those jobs. */}
+      <div className="flex flex-wrap gap-3">
+        <FilterTile label="All" value={<Fetched data={stats} error={statsError}>{s => s.total}</Fetched>} href={statusHref('')} active={statusFilter === ''} />
+        {STATUSES.filter(({ status }) => status === statusFilter || (stats?.by_status[status] ?? 0) > 0).map(({ status, label }) => (
+          <FilterTile
             key={status}
             label={label}
             value={<Fetched data={stats} error={statsError}>{s => s.by_status[status] ?? 0}</Fetched>}
@@ -206,29 +210,28 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
       {!data && !error && <Loading />}
       {data && (
         <Section title={shownLabel ? `${shownLabel} jobs` : 'Jobs'} note={total} scrollX>
-          {/* One line a row. The short columns are fixed; experiment and hypothesis share what is
-              left and truncate, their whole text on hover. Agent, accelerator, cost and submitted
-              step aside on a narrow window, and stay in the job's own tooltip. An experiment
-              filter makes the experiment the same on every row, so its column goes. */}
+          {/* One line a row. The short columns are fixed; the hypothesis takes what is left and
+              clamps, its whole text on hover. Agent, cost and submitted step aside on a narrow
+              window, and stay in the job's own tooltip. An experiment filter makes the experiment
+              the same on every row, so its column goes. */}
           <Table className="min-w-[41rem] table-fixed">
             <thead>
               <tr>
-                <th className="w-[5.5rem]">Job</th>
+                <th className="w-28">Job</th>
                 {!peFilter && <th className="w-[16%]">Experiment</th>}
                 <th title="What the job tests. Hover a row for its branch and the settings that differ between this page's jobs of it">Hypothesis</th>
-                <th className="hidden w-32 2xl:table-cell">Agent</th>
+                <th className="hidden w-32 xl:table-cell">Agent</th>
                 <SortableTh className="w-36" sorted={sortKey === 'status' && sortDir} onSort={() => toggleSort('status')}>Status</SortableTh>
-                <th className="hidden w-32 2xl:table-cell">Accelerator</th>
                 <th className="w-24 text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
-                <th className="hidden w-32 text-right xl:table-cell">Est. cost</th>
-                <SortableTh className="hidden w-28 xl:table-cell" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
+                <th className="hidden w-32 text-right lg:table-cell" title="The estimated cost of the job">Cost, {costUnit}</th>
+                <SortableTh className="hidden w-28 lg:table-cell" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
                 {cancels && <th className="w-[5.5rem]"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={9}>
                     <EmptyState>
                       No {shownLabel ? `${shownLabel.toLowerCase()} jobs` : 'jobs'}{agentFilter && ' of this agent'}
                       {peFilter && <> in <PlatformExperimentName id={peFilter} /></>}.
@@ -278,7 +281,8 @@ interface JobRowProps {
 function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProps) {
   const status = job.status ?? 'UNKNOWN'
   const accelerator = `${job.accelerator_count}× ${acceleratorLabel(job.accelerator_type)}`
-  const cost = job.estimated_cost_acch != null ? `${formatAccH(job.estimated_cost_acch)} ${budgetUnit(job.accelerator_kind)}` : '—'
+  const cost = job.estimated_cost_acch != null ? formatAccH(job.estimated_cost_acch) : '—'
+  const costWithUnit = job.estimated_cost_acch != null ? `${cost} ${budgetUnit(job.accelerator_kind)}` : cost
   const about = [
     status === 'QUEUED' && job.not_admitted_reason && notAdmittedLabel(job.not_admitted_reason, job.not_admitted_message),
     job.eviction_reason && [evictionCodeLabel(evictionCode(job.eviction_reason)), evictionDetailLines(job.eviction_reason)[0]].filter(Boolean).join(': '),
@@ -289,15 +293,15 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
 
   return (
     <LinkTr href={jobPath(job.platform_experiment_id, job.id)}>
-      <td className={quiet} title={`${job.id}\n${job.agent_name} · ${accelerator} · est. ${cost} · submitted ${formatDate(job.created_at)}`}>
+      <td className={quiet} title={`${job.id}\n${job.agent_name} · ${accelerator} · est. ${costWithUnit} · submitted ${formatDate(job.created_at)}`}>
         <RowAnchor>{shortId(job.id)}</RowAnchor>
       </td>
       {showExperiment && <td className="truncate text-xs"><ExperimentLink id={job.platform_experiment_id} /></td>}
-      <td className="truncate text-xs" title={tested}>
+      <td className="text-xs" title={tested}>
         <JobHypothesis job={job} />
-        {varied && <span className="ml-2 font-mono text-2xs text-subtle">{varied}</span>}
+        {varied && <span className="block truncate font-mono text-2xs text-muted">{varied}</span>}
       </td>
-      <td className="hidden truncate text-xs 2xl:table-cell" title={job.agent_id}>{job.agent_name}</td>
+      <td className="hidden truncate text-xs xl:table-cell" title={job.agent_id}>{job.agent_name}</td>
       <td className="truncate" title={about || undefined}>
         <Inline gap="xs" nowrap>
           <Badge status={status} />
@@ -310,10 +314,9 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
           {about && <Info aria-label={about} role="img" size={12} className="flex-none text-subtle" />}
         </Inline>
       </td>
-      <td className="hidden truncate font-mono text-2xs 2xl:table-cell" title={job.accelerator_type}>{accelerator}</td>
-      <td className={clsx(num, 'truncate')} title={job.metric?.name}>{job.metric ? formatMetric(job.metric.value) : '—'}</td>
-      <td className={clsx(num, 'hidden truncate xl:table-cell')} title={cost}>{cost}</td>
-      <td className={clsx(quiet, 'hidden xl:table-cell')} title={formatDate(job.created_at)}>{relTime(job.created_at)}</td>
+      <td className={clsx(num, 'whitespace-nowrap')} title={job.metric?.name}>{job.metric ? formatMetric(job.metric.value) : '—'}</td>
+      <td className={clsx(num, 'hidden whitespace-nowrap lg:table-cell')} title={costWithUnit}>{cost}</td>
+      <td className={clsx(quiet, 'hidden lg:table-cell')} title={formatDate(job.created_at)}>{relTime(job.created_at)}</td>
       {onCancel && (
         <td className="text-right">
           {job.actions.includes('cancel') && <Button variant="danger" size="sm" onClick={onCancel}>Cancel</Button>}
@@ -328,4 +331,21 @@ function ExperimentLink({ id }: { id: string }) {
   const { data, error } = useSWR(keys.experiment(id), () => fetchPlatformExperiment(id))
   if (!data) return <span className="font-mono text-2xs text-subtle" title={error ? `Could not load its name: ${error.message}` : id}>{error ? id : '…'}</span>
   return <TextLink href={experimentPath(id)} title={data.name}>{data.name}</TextLink>
+}
+
+/** A status filter: the status, the number of jobs it lists, and the filter in force when `active`. */
+function FilterTile({ label, value, tone, href, active }: { label: string; value: ReactNode; tone?: Tone; href: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? 'true' : undefined}
+      className={clsx(
+        'flex items-baseline gap-2 rounded-lg border bg-surface px-3 py-2 transition hover:border-border-strong',
+        active && 'border-accent bg-selected ring-1 ring-inset ring-accent',
+      )}
+    >
+      <Eyebrow>{label}</Eyebrow>
+      <span className={clsx('text-lg tabular-nums', tone ? toneText[tone] : 'text-foreground')}>{value}</span>
+    </Link>
+  )
 }

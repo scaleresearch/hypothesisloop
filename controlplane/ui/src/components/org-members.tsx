@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/components/ui/dialog'
 import { Select } from '@/components/ui/select'
 import { Secret } from '@/components/ui/secret'
 import { Table } from '@/components/ui/table'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { Inline, Stack } from '@/components/ui/stack'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -78,9 +79,8 @@ function Invites({ onError }: { onError: (message: string) => void }) {
           label={`Invite link, joins as ${created.role}`}
           value={inviteLink(created.token)}
           note={<>
-            Send it to the person yourself: the platform sends no email. Whoever opens it and signs in
-            joins {org.name} as {created.role === 'owner' ? 'an owner' : 'a member'}. It works once, until {formatDate(created.expires_at)}.
-            This is the only time it is shown: if you lose it, revoke the invite and create another.
+            Send it yourself, the platform sends no email. It is shown once and works once, until {formatDate(created.expires_at)}.
+            <InfoTip>{`Whoever opens it and signs in joins ${org.name} as ${created.role === 'owner' ? 'an owner' : 'a member'}. If you lose it, revoke the invite and create another.`}</InfoTip>
           </>}
           dismiss="I have sent it"
           onDismiss={() => setCreated(null)}
@@ -159,10 +159,8 @@ export function OrgMembers() {
   const members = data?.items
   return (
     <Stack>
-      <Text tone="muted">
-        An owner changes everything in {org.name}. A member reads everything in it and runs experiments.
-        {!editsOrg && ' Only an owner can invite people, change a role or remove someone.'}
-      </Text>
+      <Text tone="muted">An owner changes everything in {org.name}. A member reads everything in it and runs experiments.</Text>
+      {!editsOrg && <Text variant="hint">Only an owner can invite people, change a role or remove someone.</Text>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
       {listError && <ErrorMessage>Could not load members: {listError.message}</ErrorMessage>}
       {!members && !listError && <Loading />}
@@ -248,8 +246,8 @@ function Question({ change, onConfirm, onClose }: { change: Change; onConfirm: (
       onClose={onClose}
     >
       {self
-        ? 'You lose access to it at once: your API keys in it stop working and the invites you made are revoked. Coming back takes a new invite.'
-        : 'They lose access at once: their API keys in it stop working and the invites they made are revoked.'}
+        ? 'You lose access at once. Your API keys in it stop working and your invites are revoked. Coming back takes a new invite.'
+        : 'They lose access at once. Their API keys in it stop working and their invites are revoked.'}
     </ConfirmDialog>
   )
 }

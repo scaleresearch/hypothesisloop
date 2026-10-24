@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { headline } from './format'
+import { formatMetric, headline, shortId } from './format'
 
 describe('headline', () => {
   it('keeps the first sentence without its full stop', () => {
@@ -13,5 +13,33 @@ describe('headline', () => {
 
   it('leaves a short text whole', () => {
     expect(headline('Try xor-delta on 1.5x data')).toBe('Try xor-delta on 1.5x data')
+  })
+})
+
+describe('shortId', () => {
+  it('keeps the kind and the end that tells ids apart', () => {
+    expect(shortId('job-01a16f7c143470bfa90b638abf04f2da')).toBe('job-…04f2da')
+    expect(shortId('01a16f7b-9d52-7271-9be5-4fd09c30d082')).toBe('…30d082')
+  })
+
+  it('leaves a short id whole', () => {
+    expect(shortId('ag-1234')).toBe('ag-1234')
+  })
+})
+
+describe('formatMetric', () => {
+  it('shows four significant digits', () => {
+    expect(formatMetric(0.37109421208296317)).toBe('0.3711')
+    expect(formatMetric(0.875)).toBe('0.8750')
+    expect(formatMetric(12.3456)).toBe('12.35')
+    expect(formatMetric(123456.7)).toBe('123,457')
+    expect(formatMetric(0.0000123)).toBe('1.23e-5')
+    expect(formatMetric(0)).toBe('0')
+  })
+})
+
+describe('headline of a labelled claim', () => {
+  it('drops the label', () => {
+    expect(headline('Mechanism: tanh is bounded. Idea: try it.')).toBe('tanh is bounded')
   })
 })

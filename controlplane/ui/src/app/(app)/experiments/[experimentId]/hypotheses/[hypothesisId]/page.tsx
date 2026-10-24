@@ -18,12 +18,14 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { LinkTr, RowAnchor, Table, num, quiet } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Badge } from '@/components/ui/badge'
+import { Claim } from '@/components/ui/claim'
+import { Prose } from '@/components/ui/prose'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
 import { Curation } from '@/components/hypotheses/curation'
-import { Actor, Verdict } from '@/components/actor'
+import { Verdict, Actor } from '@/components/actor'
 import { AgentLabel, AgentNames } from '@/components/agent-label'
 import { Branch, Commit } from '@/components/code-ref'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
@@ -47,7 +49,7 @@ function LinkRow({ link, platformExperimentID, pe }: {
   return (
     <RowLink href={hypothesisPath(platformExperimentID, link.hypothesis_id)} title={link.text}>
       <Badge status={link.status}>{link.status}</Badge>
-      <span className="min-w-0 flex-1 truncate">{link.text}</span>
+      <Claim text={link.text} className="min-w-0 flex-1" />
       <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
         linked by <Actor actor={link.actor} agentID={link.agent_id} />
       </Text>
@@ -56,7 +58,7 @@ function LinkRow({ link, platformExperimentID, pe }: {
 }
 
 // Text longer than this is cut to three lines until asked for in full.
-const LONG_TEXT = 240
+const LONG_TEXT = 200
 
 /** The hypothesis as the page's title: all of it, the long ones on request. */
 function HypothesisText({ text }: { text: string }) {
@@ -64,7 +66,7 @@ function HypothesisText({ text }: { text: string }) {
   const long = text.length > LONG_TEXT
   return (
     <span className="min-w-0">
-      <span className={clsx('block whitespace-pre-wrap text-lg leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
+      <span className={clsx('block text-lg leading-snug', long && !open && 'line-clamp-3')}>{text}</span>
       {long && <Button variant="link" size="sm" onClick={() => setOpen(!open)}>{open ? 'Show less' : 'Show all of it'}</Button>}
     </span>
   )
@@ -98,6 +100,9 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
   // With nothing varied, every setting is shown.
   const variedEnv = variedEnvKeys(jobs)
   const shownEnv = variedEnv.length > 0 ? variedEnv : Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
+  const linkJob = (ref: string) => (ref.startsWith('job-') ? jobPath(experimentId, ref) : undefined)
+  const kinds = new Set(jobs.map(j => j.accelerator_kind))
+  const costUnit = kinds.size === 1 ? budgetUnit(jobs[0].accelerator_kind) : ''
   const metricName = jobs.find(j => j.metric)?.metric?.name
 
   return (
@@ -115,7 +120,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
         }
         description={
           <Stack gap="xs">
-          <Curation hypothesis={data} into={id => <TextLink href={hypothesisPath(experimentId, id)} className="font-mono">{id}</TextLink>} />
+          <Curation hypothesis={data} into={id => <TextLink href={hypothesisPath(experimentId, id)} title={id} className="font-mono">{shortId(id)}</TextLink>} />
           <Inline className="text-2xs">
             <span>
               Registered by <Actor actor={data.actor} agentID={data.agent_id} /> · {relTime(data.created_at)}
@@ -189,18 +194,18 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                 return (
                   <InsetCard key={f.id}>
                     <div className="flex items-center justify-between text-2xs">
-                      <span className="flex items-center gap-2 font-mono">
-                        <span className="font-medium"><Actor actor={f.actor} agentID={f.agent_id} /></span>
-                        <TextLink href={jobPath(experimentId, f.experiment_id)}>{shortId(f.experiment_id)}</TextLink>
+                      <span className="flex items-center gap-2">
+                        <Actor actor={f.actor} agentID={f.agent_id} />
+                        <TextLink href={jobPath(experimentId, f.experiment_id)} title={f.experiment_id} className="font-mono">{shortId(f.experiment_id)}</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
-                        {job?.metric && <span title={`The last ${job.metric.name} this job reported`}>{formatMetric(job.metric.value)}</span>}
+                        {job?.metric && <span className="font-mono" title={`The last ${job.metric.name} this job reported`}>{formatMetric(job.metric.value)}</span>}
                       </span>
                       <Code className="text-subtle">
                         {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
                         {relTime(f.created_at)}
                       </Code>
                     </div>
-                    <Text pre>{f.summary}</Text>
+                    <Prose text={f.summary} collapsedLines={12} linkId={linkJob} />
                   </InsetCard>
                 )
               })}
@@ -219,7 +224,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                     <Actor actor={c.actor} agentID={c.agent_id} />
                     <Code className="text-subtle">{relTime(c.created_at)}</Code>
                   </div>
-                  <Text pre>{c.text}</Text>
+                  <Prose text={c.text} collapsedLines={6} linkId={linkJob} />
                 </InsetCard>
               ))}
             </Stack>
@@ -236,7 +241,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                 <th>Status</th>
                 <th>{variedEnv.length > 0 ? 'Varied settings' : 'Settings'}</th>
                 <th>Accelerator</th>
-                <th className="text-right">Est. cost</th>
+                <th className="text-right">{costUnit ? `Est. cost, ${costUnit}` : 'Est. cost'}</th>
                 <th className="text-right">Last {metricName ?? 'metric'}</th>
                 <th>Submitted</th>
               </tr>
@@ -254,17 +259,17 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                 const cost = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
                 return (
                   <LinkTr key={job.id} href={jobPath(experimentId, job.id)}>
-                    <td className={quiet}><RowAnchor>{shortId(job.id)}</RowAnchor></td>
-                    <td className="text-xs" title={job.agent_id}>{job.agent_name}</td>
+                    <td className={quiet}><RowAnchor title={job.id}>{shortId(job.id)}</RowAnchor></td>
+                    <td className="whitespace-nowrap text-xs" title={job.agent_id}>{job.agent_name}</td>
                     <td className="whitespace-nowrap">
                       <Badge status={status}>{status}</Badge>
                     </td>
-                    <td className="font-mono text-2xs">
+                    <td className="whitespace-nowrap font-mono text-2xs">
                       {envSettings(j, shownEnv) || '—'}
                     </td>
-                    <td className="font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
+                    <td className="whitespace-nowrap font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className={num}>
-                      {cost != null ? `${cost} ${budgetUnit(j.accelerator_kind)}` : '—'}
+                      {cost != null ? (costUnit ? cost : `${cost} ${budgetUnit(j.accelerator_kind)}`) : '—'}
                     </td>
                     <td className={num}>
                       {j.metric ? formatMetric(j.metric.value) : <span className="text-muted">—</span>}

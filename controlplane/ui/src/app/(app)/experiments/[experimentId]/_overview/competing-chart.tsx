@@ -97,7 +97,7 @@ export function CompetingAgentsChart({
         <Pill
           tone="danger"
           className="mb-2"
-          title="These agents also reported this metric on a non-&quot;raw&quot; basis (a rescaled/transformed value); that data is excluded from this chart and never compared to raw-basis agents."
+          title="These agents also reported this metric on a non-raw basis (a rescaled value). That data is left out of this chart."
         >
           Non-raw basis data excluded for: {Array.from(nonRawAgentIds).sort().map((agentID, i) => <Fragment key={agentID}>{i > 0 && ', '}<AgentLabel id={agentID} /></Fragment>)}
         </Pill>

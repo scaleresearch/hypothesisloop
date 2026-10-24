@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Panel, useReactFlow, useStore } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Button } from '@/components/ui/button'
 import { Dot } from '@/components/ui/dot'
-import { ExpandButton, useExpanded } from '@/components/ui/expandable'
+import { ExpandButton } from '@/components/ui/expandable'
 import { Inline } from '@/components/ui/stack'
 import { chart, hypothesisLinkStyles, semantic, statusColor, tint } from '@/lib/colors'
 import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
@@ -24,6 +24,8 @@ const LINK_WIDTH: Record<LinkType, number> = { builds_on: 1.5, related: 1, contr
 
 // A small graph is seen whole on the canvas; the map only takes room from it.
 const MINIMAP_FROM = 15
+const FIT_PADDING = 40
+const READABLE_ZOOM = 0.6
 
 function Legend({ onTidy }: { onTidy?: () => void }) {
   return (
@@ -93,7 +95,6 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
   const height = useStore(s => s.height)
   const [ready, setReady] = useState(false)
   const centered = useRef('')
-  const expanded = useExpanded()
   const flow = useRef<HTMLDivElement>(null)
   const setZoom = (zoom: number) => flow.current?.style.setProperty('--zoom', String(zoom))
 
@@ -177,29 +178,43 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
     }
   })}, [graph, positions, dimmed, far])
 
-  // Opening in or leaving the whole window resizes the canvas: the view is placed again once it has.
-  useEffect(() => {
-    centered.current = ''
-  }, [expanded])
+  const latest = useRef(positions)
+  latest.current = positions
 
-  // Without a focus the view opens on the whole graph under the objective, or on its top when
-  // the whole would be too small to read.
-  useEffect(() => {
-    if (!ready || width === 0) return
-    const target = positions.has(focus) ? focus : graph.root
-    const p = positions.get(target)!
-    if (centered.current === target) return
-    centered.current = target
-    if (target === focus) {
-      setCenter(p.x + NODE_WIDTH / 2, p.y + NODE_HEIGHT / 2, { zoom: Math.max(getZoom(), 0.8), duration: 300 })
-    } else {
-      const all = Array.from(positions.values())
-      const halfWidth = Math.max(...all.map(q => Math.abs(q.x - p.x))) + NODE_WIDTH / 2
-      const depth = Math.max(...all.map(q => q.y)) + NODE_HEIGHT
-      const zoom = Math.min(0.8, Math.max(0.65, Math.min((width / 2 - 20) / halfWidth, (height - 60) / depth)))
-      setViewport({ x: width / 2 - (p.x + NODE_WIDTH / 2) * zoom, y: 40 - p.y * zoom, zoom })
+  // The whole graph, centred; unless that is below READABLE_ZOOM, where `readable` keeps the zoom at
+  // READABLE_ZOOM, centres on the objective and starts at the top.
+  const fitAll = useCallback((readable = false) => {
+    if (width === 0 || height === 0) return
+    const all = Array.from(latest.current.values())
+    const minX = Math.min(...all.map(q => q.x))
+    const minY = Math.min(...all.map(q => q.y))
+    const boundsWidth = Math.max(...all.map(q => q.x)) + NODE_WIDTH - minX
+    const boundsHeight = Math.max(...all.map(q => q.y)) + NODE_HEIGHT - minY
+    const whole = Math.min(1, (width - 2 * FIT_PADDING) / boundsWidth, (height - 2 * FIT_PADDING) / boundsHeight)
+    if (readable && whole < READABLE_ZOOM) {
+      const root = latest.current.get(graph.root)!
+      setViewport({ x: width / 2 - (root.x + NODE_WIDTH / 2) * READABLE_ZOOM, y: FIT_PADDING - minY * READABLE_ZOOM, zoom: READABLE_ZOOM })
+      setZoom(READABLE_ZOOM)
+      return
     }
-  }, [ready, focus, graph.root, positions, width, height, setCenter, setViewport, getZoom])
+    const zoom = Math.max(0.05, whole)
+    setViewport({ x: (width - boundsWidth * zoom) / 2 - minX * zoom, y: (height - boundsHeight * zoom) / 2 - minY * zoom, zoom })
+    setZoom(zoom)
+  }, [width, height, graph.root, setViewport])
+
+  // Without a focus the view shows the whole graph, fitted on the first layout and when the frame
+  // is resized (opening or leaving the whole window). A later layout change leaves the view alone.
+  useEffect(() => {
+    if (!ready || width === 0 || latest.current.has(focus)) return
+    fitAll(true)
+  }, [ready, focus, fitAll, width])
+
+  useEffect(() => {
+    if (!ready || width === 0 || !positions.has(focus) || centered.current === focus) return
+    centered.current = focus
+    const p = positions.get(focus)!
+    setCenter(p.x + NODE_WIDTH / 2, p.y + NODE_HEIGHT / 2, { zoom: Math.max(getZoom(), 0.8), duration: 300 })
+  }, [ready, focus, positions, width, setCenter, getZoom])
 
   return (
     <Highlight.Provider value={highlight}>
@@ -226,7 +241,7 @@ function Canvas({ graph, positions, rootLabel, focus, selected, hits, filters, m
         style={{ background: semantic.surface, flex: 1, height: 'auto', minHeight: 0 }}
       >
         <Background gap={24} color={tint(semantic.text, 'track')} />
-        <Controls showInteractive={false} position="top-left" />
+        <Controls showInteractive={false} position="top-left" onFitView={() => fitAll()} />
         {graph.nodes.length === 0 && (
           <Panel position="bottom-center" className="text-xs text-muted">
             No hypotheses yet.

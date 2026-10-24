@@ -31,9 +31,9 @@ function machineSentence(instance: AgentInstance | undefined): string {
 export function Activity({ activity, prominent = false, className }: { activity: AgentActivity; prominent?: boolean; className?: string }) {
   useTick(1_000)
   return (
-    <p className={clsx(prominent ? 'text-base font-medium' : 'text-xs', className)}>
-      <span aria-live="polite">{activity.text}</span>{' '}
-      <time dateTime={activity.at} title={formatDate(activity.at)} className="whitespace-nowrap text-xs font-normal text-subtle">{relTime(activity.at)}</time>
+    <p className={clsx('flex items-baseline gap-2', prominent ? 'text-base font-medium' : 'text-xs', className)}>
+      <span aria-live="polite" title={activity.text} className="min-w-0 truncate">{activity.text}</span>
+      <time dateTime={activity.at} title={formatDate(activity.at)} className="flex-none whitespace-nowrap text-xs font-normal text-subtle">{relTime(activity.at)}</time>
     </p>
   )
 }

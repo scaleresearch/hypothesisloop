@@ -28,10 +28,10 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
       {!isEdit && (
         <FieldGroup
           label="Team"
-          hint="The platform starts these with the experiment and replaces one that finishes or loses its machine while time and budget allow. A cut lowers the count."
+          hint={<>The platform starts these with the experiment and keeps them up.<InfoTip>It replaces an agent that finishes or loses its machine while time and budget allow. A cut lowers the count.</InfoTip></>}
         >
           <Stack gap="md">
-            <FormField label="Coordinator model" hint="The coordinator assembles and steers the team. Researchers run on its model unless their entry names one.">
+            <FormField label="Coordinator model" hint={<>The coordinator assembles and steers the team.<InfoTip>Researchers run on its model unless their entry names one.</InfoTip></>}>
               <ModelPicker coordinator aria-label="Coordinator model" value={form.coordinator_model} onChange={m => set('coordinator_model', m)} />
             </FormField>
             <TeamEditor

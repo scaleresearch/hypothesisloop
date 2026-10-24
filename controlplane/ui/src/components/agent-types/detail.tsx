@@ -31,7 +31,7 @@ import type { EditedAgentType, ListedAgentType } from '@/types/api'
 function readOnlyReason(t: ListedAgentType, orgName: string): string | null {
   if (t.actions.includes('edit')) return null
   if (t.builtin) return 'Built-in types are read-only for everyone. Duplicate it to get a copy you can edit.'
-  if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and can no longer be edited. Duplicate it to start a new type from it.`
+  if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and cannot be edited. Duplicate it to start a new type from it.`
   return `Only an owner of ${orgName} can edit agent types.`
 }
 
@@ -86,7 +86,7 @@ function ArchiveDialog({ type, onClose, onArchived }: { type: ListedAgentType; o
         {refusal && (
           <ErrorMessage>
             {refusal.inUse
-              ? <>Not archived: an experiment that is not closed still uses it. Close those experiments or move them to another type, then try again. <span className="text-xs">({refusal.message})</span></>
+              ? <>Not archived: an experiment that is not closed still uses it.<span className="block">Close those experiments or move them to another type, then try again.</span><span className="block text-xs">{refusal.message}</span></>
               : refusal.message}
           </ErrorMessage>
         )}

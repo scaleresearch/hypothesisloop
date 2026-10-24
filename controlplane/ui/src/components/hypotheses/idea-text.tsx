@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
-import { Text } from '@/components/ui/text'
+import { Prose } from '@/components/ui/prose'
 import { useEditor } from '@/components/hypotheses/editor'
 import type { GraphNode } from '@/types/api'
 
@@ -46,7 +46,7 @@ export function IdeaText({ node }: { node: GraphNode }) {
       {mode === 'edit' ? (
         <Textarea className="min-h-24 w-full" value={text} onChange={e => setText(e.target.value)} aria-label="Text of the idea" autoFocus />
       ) : (
-        <Text pre className="max-h-60 overflow-y-auto leading-relaxed">{node.text}</Text>
+        <Prose text={node.text} collapsedLines={8} />
       )}
       {mode === 'edit' && (
         <Inline gap="xs">

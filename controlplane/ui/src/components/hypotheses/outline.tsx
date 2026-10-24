@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { clsx } from 'clsx'
+import { Claim } from '@/components/ui/claim'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
@@ -74,13 +75,13 @@ const IdeaRow = memo(function IdeaRow({ node, depth, alsoBuildsOn, selected, hit
   return (
     <Row id={node.id} depth={depth} selected={selected} hit={hit} className={clsx(dimmed && 'opacity-dimmed')} selectedRef={selectedRef} onSelect={onSelect}>
       <span title={verdictBy(node) && `${node.status} ${verdictBy(node)}`}><Badge status={node.status}>{node.status}</Badge></span>
-      <span className="min-w-0 flex-1 truncate" title={node.text}>{node.text}</span>
+      <Claim text={node.text} className="min-w-0 flex-1" />
       {alsoBuildsOn > 0 && (
         <Text as="span" variant="meta" tone="subtle" className="whitespace-nowrap">
           also refines {alsoBuildsOn}
         </Text>
       )}
-      <NodeMeta item={node} />
+      <NodeMeta item={node} columns />
     </Row>
   )
 })

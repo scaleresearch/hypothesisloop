@@ -211,7 +211,7 @@ describe('archiving', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Archive' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }))
     expect(archiveAgentType).toHaveBeenCalledExactlyOnceWith('org_a', 'at-lr')
-    await waitFor(() => expect(screen.getByText(/It takes no new agents and can no longer be edited/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/It takes no new agents and (can no longer|cannot) be edited/)).toBeTruthy())
   })
 })
 

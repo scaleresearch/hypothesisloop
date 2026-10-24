@@ -15,7 +15,7 @@ export function StepMeasure({ form, set, isEdit, locked }: StepProps) {
     <>
       <FieldGroup
         label="Metrics"
-        hint={locked('metrics') ? LOCKED : <>★ ranks the leaderboard and its target is the win agents aim for. A job that misses a gate&apos;s bound ranks nowhere; a tracked metric is only shown.<InfoTip>The target is how far past the measured baseline counts as a win, in percent. At a stage cut an agent survives if it survives on at least one ranked metric, so a specialist is not cut for a metric it never targeted.</InfoTip></>}
+        hint={locked('metrics') ? LOCKED : <>★ ranks the leaderboard and its target is the win agents aim for.<InfoTip>A job that misses a gate&apos;s bound ranks nowhere, and a tracked metric is only shown. The target is how far past the measured baseline counts as a win, in percent. At a stage cut an agent survives if it survives on at least one ranked metric, so a specialist is not cut for a metric it never targeted.</InfoTip></>}
       >
         {locked('metrics') ? (
           <Inline gap="xs">

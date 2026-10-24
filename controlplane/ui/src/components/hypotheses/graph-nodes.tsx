@@ -9,6 +9,7 @@ import { verdictBy } from '@/components/actor'
 import { StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Eyebrow } from '@/components/ui/text'
+import { headline } from '@/lib/format'
 import { semantic, statusColor, statusTone, tint } from '@/lib/colors'
 import { NODE_HEIGHT, NODE_WIDTH } from '@/lib/hypothesis-graph'
 import { addHereLabel } from '@/components/hypotheses/editor-controls'
@@ -130,7 +131,7 @@ const HypothesisNode = memo(function HypothesisNode({ data }: NodeProps<Node<Hyp
       title={item.text}
     >
       <NodeAdd id={item.id} objective={false} />
-      <div className={NODE_TEXT}>{item.text}</div>
+      <div className={NODE_TEXT}>{headline(item.text, 200)}</div>
       <div className="flex min-w-0 items-center gap-2">
         <StatusLabel tone={statusTone(item.status)} title={verdictBy(item) && `${item.status} ${verdictBy(item)}`} className="flex-none">
           <span className="inline-block lowercase first-letter:uppercase">{item.status}</span>

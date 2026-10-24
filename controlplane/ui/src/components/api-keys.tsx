@@ -15,6 +15,7 @@ import { Secret } from '@/components/ui/secret'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Code, Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 import { formatDate } from '@/lib/format'
@@ -90,9 +91,8 @@ export function APIKeys() {
           label={`Token of "${created.name}"`}
           value={created.token}
           note={<>
-            Set it as <Code>HL_TOKEN</Code> for the <Code>hl</Code> command
-            line or an outside agent. This is the only time it is shown: the platform keeps its
-            hash. If you lose it, revoke the key and create another.
+            Set it as <Code>HL_TOKEN</Code> for the <Code>hl</Code> command line or an outside agent. It is shown once.
+            <InfoTip>The platform keeps only its hash. If you lose it, revoke the key and create another.</InfoTip>
           </>}
           dismiss="I have saved it"
           onDismiss={() => setCreated(null)}

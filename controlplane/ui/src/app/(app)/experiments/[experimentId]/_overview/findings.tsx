@@ -1,15 +1,21 @@
-import { verdictBy } from '@/components/actor'
+'use client'
+
+import { actorLabel } from '@/components/actor'
+import { useAgentName } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'
+import { Claim } from '@/components/ui/claim'
 import { TextLink } from '@/components/ui/link'
 import { Section } from '@/components/ui/section'
 import { LinkTr, Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
-import { formatMetric, shortId } from '@/lib/format'
+import { formatMetric, headline, relTime, shortId } from '@/lib/format'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
-import { hypothesisPath, jobPath } from '@/lib/routes'
+import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 import type { HypothesisEvidence, MetricDefinition } from '@/types/api'
 
-/** The hypotheses with a verdict or a result, best result first. */
+const SHOWN = 6
+
+/** The hypotheses with a verdict or a result, best result first, the best few with a link to all. */
 export function Findings({ experimentId, findings, direction }: {
   experimentId: string
   findings: HypothesisEvidence[]
@@ -19,10 +25,18 @@ export function Findings({ experimentId, findings, direction }: {
   const bestFirst = direction === 'minimize' ? 1 : -1
   const found = [...findings].sort((a, b) =>
     (a.best_job ? bestFirst * a.best_job.metric.value : Infinity) - (b.best_job ? bestFirst * b.best_job.metric.value : Infinity))
+  const agentName = useAgentName()
   if (found.length === 0) return null
+  const verdictBy = (h: HypothesisEvidence) => h.status_changed_at == null ? ''
+    : `${h.status_actor ? `by ${actorLabel(h.status_actor, h.agent_id, agentName(h.agent_id))} · ` : ''}${relTime(h.status_changed_at)}`
 
   return (
-    <Section title="Findings" note={`${found.length} hypotheses with a verdict or a result`} scrollX>
+    <Section
+      title="Findings"
+      note={`${found.length} hypotheses with a verdict or a result`}
+      actions={found.length > SHOWN && <TextLink href={experimentPath(experimentId, 'hypotheses')} className="text-sm">All {found.length} hypotheses →</TextLink>}
+      scrollX
+    >
       <Table className="min-w-3xl table-fixed">
         <thead>
           <tr>
@@ -33,7 +47,7 @@ export function Findings({ experimentId, findings, direction }: {
           </tr>
         </thead>
         <tbody>
-          {found.map(h => (
+          {found.slice(0, SHOWN).map(h => (
             <LinkTr key={h.id} href={hypothesisPath(experimentId, h.id)} className="*:align-top">
               <td>
                 <Badge status={h.status}>{h.status}</Badge>
@@ -45,7 +59,7 @@ export function Findings({ experimentId, findings, direction }: {
                 )}
               </td>
               <td className="text-xs">
-                <TextLink onClick={e => e.stopPropagation()} href={hypothesisPath(experimentId, h.id)} className="line-clamp-2" title={h.text}>{h.text}</TextLink>
+                <TextLink onClick={e => e.stopPropagation()} href={hypothesisPath(experimentId, h.id)} className="block"><Claim text={h.text} lines={2} /></TextLink>
               </td>
               <td className={num}>
                 {h.best_job ? (
@@ -56,11 +70,11 @@ export function Findings({ experimentId, findings, direction }: {
               </td>
               <td className="text-xs">
                 {h.best_job?.summary ? (
-                  <span className="line-clamp-2" title={h.best_job.summary}>{h.best_job.summary}</span>
+                  <span className="line-clamp-2" title={h.best_job.summary}>{headline(h.best_job.summary)}</span>
                 ) : h.finding ? (
                   <span className="line-clamp-2" title={h.finding.summary}>
                     <TextLink onClick={e => e.stopPropagation()} href={jobPath(experimentId, h.finding.experiment_id)} title={h.finding.experiment_id}>{shortId(h.finding.experiment_id)}</TextLink>
-                    {': '}{h.finding.summary}
+                    {': '}{headline(h.finding.summary)}
                   </span>
                 ) : <span className="text-xs text-muted">no finding filed</span>}
               </td>

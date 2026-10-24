@@ -48,23 +48,25 @@ export function ModelPicker({ value, onChange, inherited, inheritedFrom = "Type'
     ? `${inheritedFrom}: ${inherited}`
     : `Platform default${platformDefault ? `: ${platformDefault}` : ''}`
   return (
-    <SearchableSelect
-      aria-label={ariaLabel}
-      mono
-      fieldSize={fieldSize}
-      className={className ?? 'w-full min-w-0'}
-      value={value}
-      onChange={onChange}
-      allLabel={empty}
-      limit={SHOWN}
-      options={byProvider(data?.models ?? []).map(m => ({
-        value: m.model,
-        label: m.model,
-        keywords: m.name,
-        group: PROVIDERS.find(p => p.provider === m.provider)?.label,
-        content: <ModelRow m={m} />,
-      }))}
-      hint={error ? `Could not load the models: ${error.message}` : !data ? 'Loading models' : undefined}
-    />
+    <span className="block min-w-0" title={value || empty}>
+      <SearchableSelect
+        aria-label={ariaLabel}
+        mono
+        fieldSize={fieldSize}
+        className={className ?? 'w-full min-w-0'}
+        value={value}
+        onChange={onChange}
+        allLabel={empty}
+        limit={SHOWN}
+        options={byProvider(data?.models ?? []).map(m => ({
+          value: m.model,
+          label: m.model,
+          keywords: m.name,
+          group: PROVIDERS.find(p => p.provider === m.provider)?.label,
+          content: <ModelRow m={m} />,
+        }))}
+        hint={error ? `Could not load the models: ${error.message}` : !data ? 'Loading models' : undefined}
+      />
+    </span>
   )
 }

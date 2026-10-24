@@ -56,11 +56,11 @@ describe('the implementations of a hypothesis', () => {
     const row = within((await screen.findByRole('link', { name: 'warmup-ag-2' })).closest('tr')!)
     expect(row.getByText('Researcher 2').getAttribute('title')).toBe('ag-2')
     expect(row.getByRole('link', { name: 'warmup-ag-2' }).getAttribute('href')).toBe('https://github.com/acme/widgets/tree/hl/pe-x/warmup-ag-2')
-    expect(row.getByRole('link', { name: '33333333' }).getAttribute('href')).toBe('https://github.com/acme/widgets/commit/3333333344444444')
+    expect(row.getByRole('link', { name: '3333333' }).getAttribute('href')).toBe('https://github.com/acme/widgets/commit/3333333344444444')
     expect(screen.getByRole('link', { name: 'warmup-ag-1' })).toBeTruthy()
-    const base = screen.getByRole('link', { name: 'aaaaaaaa' })
+    const base = screen.getByRole('link', { name: 'aaaaaaa' })
     expect(base.getAttribute('href')).toBe('https://github.com/acme/widgets/commit/aaaaaaaabbbbbbbb')
-    expect(base.closest('h2')!.textContent).toBe('Implementationsa new one starts from aaaaaaaa')
+    expect(base.closest('h2')!.textContent).toBe('Implementationsa new one starts from aaaaaaa')
   })
 
   it('are none before a job of it ran, and no commit to start from before a baseline is declared', async () => {

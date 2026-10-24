@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react'
 import { clsx } from 'clsx'
 import { AgentLabel } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'
+import { Claim } from '@/components/ui/claim'
 import { EmptyState } from '@/components/ui/empty-state'
 import { TextLink } from '@/components/ui/link'
 import { MetricBar } from '@/components/ui/metric-bar'
@@ -109,6 +110,21 @@ export function Leaderboard({ pe, agentIds, results, quotas, stages, jobsByAgent
   )
 }
 
+const CHIPS = 4
+
+function SettingChips({ env, keys }: { env: Record<string, string> | undefined; keys: string[] }) {
+  const chips = keys.map(k => settings(env, [k]))
+  if (chips.length === 0) return null
+  return (
+    <div className="mt-1 flex flex-wrap gap-1" title={settings(env, Object.keys(env ?? {}).sort())}>
+      {chips.slice(0, CHIPS).map(chip => (
+        <span key={chip} className="rounded-sm bg-surface-inset px-1 font-mono text-2xs text-muted">{chip}</span>
+      ))}
+      {chips.length > CHIPS && <span className="text-2xs text-muted" title={chips.slice(CHIPS).join(' ')}>+{chips.length - CHIPS}</span>}
+    </div>
+  )
+}
+
 function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, stages, jobs, hypothesisText, unit, expanded, onToggle }: {
   pe: PlatformExperiment
   agentId: string
@@ -139,8 +155,7 @@ function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, s
       className={clsx('cursor-pointer', isCut ? 'bg-danger-faint' : isWinner && 'bg-success-faint')}
     >
       <td className="font-mono text-xs font-medium">{rank != null ? `#${rank}` : '—'}</td>
-      <td className="whitespace-nowrap font-mono text-xs font-medium">
-        <span className="inline-block w-3 text-muted">{expanded ? '▾' : '▸'}</span>
+      <td className="whitespace-nowrap text-xs font-medium">
         <AgentLabel id={agentId} />
         {isCut && <Badge tone="danger" className="ml-2">Cut</Badge>}
         {isActive && <Badge tone="success" className="ml-2">Active</Badge>}
@@ -169,15 +184,12 @@ function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, s
           <>
             <TextLink
               href={hypothesisPath(pe.id, standing.hypothesis_id)}
-              className="line-clamp-2"
-              title={hypothesisText.get(standing.hypothesis_id)}
+              className="block"
               onClick={e => e.stopPropagation()}
             >
-              {hypothesisText.get(standing.hypothesis_id) ?? standing.hypothesis_id}
+              <Claim text={hypothesisText.get(standing.hypothesis_id) ?? standing.hypothesis_id} lines={1} />
             </TextLink>
-            <Text as="div" variant="meta" mono title={settings(standing.env, Object.keys(standing.env ?? {}).sort())}>
-              {settings(standing.env, standingKeys)}
-            </Text>
+            <SettingChips env={standing.env} keys={standingKeys} />
           </>
         ) : standing?.objective ? (
           <span className="text-xs text-muted">The baseline: it measures the objective and tests no hypothesis</span>
@@ -185,15 +197,12 @@ function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, s
       </td>
       <td className={num}>{jobs?.total ?? 0}</td>
       <td className={num}>{jobs?.by_status.COMPLETED ?? 0}</td>
-      <td className="w-56">
+      <td
+        className="w-40"
+        title={quota && `Reserved of what is guaranteed to the agent and of what it may take beyond that, in ${unit}: guaranteed ${formatAccH(quota.used_guaranteed_acch)}/${formatAccH(quota.guaranteed_accelerator_hours)}, burst ${formatAccH(quota.used_burst_acch)}/${formatAccH(quota.burst_accelerator_hours)}. A job not started counts at its estimate, a running one at what it has spent so far.`}
+      >
         {quota && totalAccH > 0 ? (
-          <>
-            <MetricBar value={usedAccH} max={totalAccH} />
-            <Text as="div" variant="meta" mono className="break-words" title={`Reserved of what is guaranteed to the agent and of what it may take beyond that, in ${unit}: a job not started at its estimate, a running one at what it has spent so far`}>
-              guaranteed {formatAccH(quota.used_guaranteed_acch)}/{formatAccH(quota.guaranteed_accelerator_hours)}
-              {' · '}burst {formatAccH(quota.used_burst_acch)}/{formatAccH(quota.burst_accelerator_hours)}
-            </Text>
-          </>
+          <MetricBar value={usedAccH} max={totalAccH} />
         ) : <span className="text-xs text-muted">no quota</span>}
       </td>
     </tr>

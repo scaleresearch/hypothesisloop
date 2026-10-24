@@ -71,7 +71,9 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesi
     })
   }
   if (!plannedOnly) figures.push({ label: 'Hypotheses', value: hypothesisCount, title: hypothesisSub, href: graphHref(pe.id) })
-  if (!plannedOnly && executors !== undefined) {
+  if (phase === 'closed') {
+    if (!plannedOnly && executors) figures.push({ label: 'Executors', value: executors, title: 'The executors that took part. Researchers, baseline agents and the coordinator are not counted.' })
+  } else if (!plannedOnly && executors !== undefined) {
     figures.push({
       label: 'Executors',
       value: `${executors} of ${pe.max_agents}`,

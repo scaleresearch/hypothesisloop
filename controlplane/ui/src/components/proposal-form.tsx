@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Code, Pill, Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
 import type { AgentRoleInfo, ListedAgentType, MetricDefinition, PlatformExperiment, ProposedAgent } from '@/types/api'
@@ -241,7 +242,8 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
           <Captioned caption="Before you start, answer the planner's questions">
             <Stack gap="sm">
               <Text tone="muted">
-                The goal left these open. Each answer is the one the planner planned on: keep it or change it. Your answers are added to the description every agent reads, so this proposal waits for you.
+                The goal left these open. Each answer is the one the planner planned on: keep it or change it.
+                <InfoTip>Your answers are added to the description every agent reads, so this proposal waits for you.</InfoTip>
               </Text>
               {questions.map((q, i) => (
                 <FormField key={i} label={q.question}>

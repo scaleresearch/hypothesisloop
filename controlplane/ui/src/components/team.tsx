@@ -7,6 +7,7 @@ import type { PlatformExperimentPatch } from '@/types/api'
 import { DEFAULT_AGENT_TYPE, RESEARCHER_AGENT_TYPE, typeName, useAgentRoles, useAgentTypes } from '@/lib/agent-types'
 import { inheritedModel, useModels } from '@/lib/models'
 import { relTime } from '@/lib/format'
+import { phaseOf } from '@/lib/phase'
 import { atWorkByKey, cutByMax, executorsAtWork, poolKey, toTeam, toTeamRows } from '@/lib/team'
 import type { TeamRow } from '@/lib/team'
 import { useRoster } from '@/lib/roster'
@@ -21,11 +22,14 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Pill, Text } from '@/components/ui/text'
 import { refusalMessage } from '@/lib/errors'
 import { keys } from '@/lib/keys'
 import type { JoinedAgent, PlatformExperiment } from '@/types/api'
 import { canEdit } from '@/lib/editable'
+
+const KEEPS_AT_WORK = 'The platform keeps these at work and replaces one that finishes or loses its machine while time and budget allow, except one that ended within 10 minutes or an executor that ended before submitting a job, and at most 3 an hour per entry.'
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
@@ -146,6 +150,7 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
   const { data: models } = useModels()
   const [editing, setEditing] = useState(false)
   const editable = canEdit(pe, 'agents')
+  const closed = phaseOf(pe) === 'closed'
 
   const atWork = roster?.filter(a => a.at_work)
   const counts = pe.agents_at_work
@@ -165,7 +170,7 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
   return (
     <Section
       title="Team"
-      note={counts && `${counts.total} ${counts.total === 1 ? 'executor' : 'executors'} at work of ${pe.max_agents} max`}
+      note={counts && (closed ? plural(pe.agents?.length ?? 0, 'entry', 'entries') : `${counts.total} ${counts.total === 1 ? 'executor' : 'executors'} at work of ${pe.max_agents} max`)}
       actions={editable && !editing && atWork && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
     >
       {error && <ErrorMessage>Could not load the team: {error.message}</ErrorMessage>}
@@ -178,7 +183,15 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
           ) : (
             <Table aria-label="Team">
               <thead>
-                <tr><th>Type</th><th>Model</th><th className="text-right">Wanted</th><th className="text-right">At work</th></tr>
+                <tr>
+                  <th>Type</th>
+                  <th>Model</th>
+                  <th className="w-24 text-right">
+                    Wanted
+                    {!closed && pe.coordinator && team.length > 0 && <InfoTip>{KEEPS_AT_WORK}</InfoTip>}
+                  </th>
+                  {!closed && <th className="w-24 text-right">At work</th>}
+                </tr>
               </thead>
               <tbody>
                 {team.map((e, i) => {
@@ -192,15 +205,15 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
                       </td>
                       <td className="text-xs">
                         {e.model ? <ModelName model={e.model} /> : resolved ? (
-                          <Inline gap="xs" nowrap><ModelName model={resolved.model} /><span className="text-muted">({resolved.from})</span></Inline>
+                          <div className="flex items-baseline gap-2"><ModelName model={resolved.model} className="flex-none" /><span className="min-w-0 truncate text-2xs text-muted">({resolved.from})</span></div>
                         ) : <span className="text-muted">inherited</span>}
                       </td>
                       <td className={num}>{e.count}</td>
-                      <td className={num}>{counts.pool[i]?.at_work ?? 0}</td>
+                      {!closed && <td className={num}>{counts.pool[i]?.at_work ?? 0}</td>}
                     </tr>
                   )
                 })}
-                {beyond > 0 && (
+                {beyond > 0 && !closed && (
                   <tr>
                     <td colSpan={3} className="text-xs text-muted">Added by the coordinator beyond the team</td>
                     <td className={num}>{beyond}</td>
@@ -210,9 +223,6 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
             </Table>
           )}
           {pe.agents_held && <Callout tone="warning">{pe.agents_held}</Callout>}
-          {pe.coordinator && team.length > 0 && (
-            <Text variant="hint">The platform keeps these at work and replaces one that finishes or loses its machine while time and budget allow, except one that ended within 10 minutes or an executor that ended before submitting a job, and at most 3 an hour per entry.</Text>
-          )}
         </Stack>
       )}
     </Section>

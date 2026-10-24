@@ -8,7 +8,6 @@ import { AgentNames } from '@/components/agent-label'
 import { Baseline } from '@/components/baseline'
 import { CloseExperiment } from '@/components/close-experiment'
 import { DraftView } from '@/components/draft'
-import { ExperimentAgents } from '@/components/experiment-agents'
 import { ExperimentCode } from '@/components/experiment-code'
 import { GoalEditor } from '@/components/goal-editor'
 import { AgentSandboxMachines } from '@/components/agentsandbox-machines'
@@ -16,7 +15,6 @@ import { PhaseStrip } from '@/components/phase-strip'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { ReferenceValues } from '@/components/reference-values'
 import { RemoveExperiment } from '@/components/remove-experiment'
-import { Team } from '@/components/team'
 import { SharedBadge } from '@/components/shared-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,7 +26,7 @@ import { Inline } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { runClock } from '@/lib/format'
-import { phaseOf } from '@/lib/phase'
+import { closedWhilePlanned, phaseOf } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
 import { executorsAtWork } from '@/lib/team'
 import { budgetUnit } from '@/lib/units'
@@ -42,9 +40,6 @@ import { Outcome } from './_overview/outcome'
 import { ExecutorsOverTime } from './_overview/executors-over-time'
 import { useOverview } from './_overview/use-overview'
 import type { PlatformExperiment } from '@/types/api'
-
-// The reasons a draft closes for, before anything was accepted.
-const PLANNED_ONLY: NonNullable<PlatformExperiment['close_reason']>[] = ['planning_limit_reached', 'proposal_expired', 'planner_stopped', 'repository_not_created']
 
 export default function PlatformExperimentDetailPage({ params }: { params: { experimentId: string } }) {
   return <AgentNames platformExperimentID={params.experimentId}><PlatformExperimentDetail id={params.experimentId} /></AgentNames>
@@ -85,12 +80,12 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   const phase = phaseOf(pe)
   const started = phase === 'running' || phase === 'closed'
   // A draft that closed never had a team: its max_agents is still the most its planner could propose.
-  const plannedOnly = pe.close_reason != null && PLANNED_ONLY.includes(pe.close_reason)
+  const plannedOnly = closedWhilePlanned(pe)
   const figures = overviewFigures({
     pe, phase, plannedOnly, unit, stats,
     hypothesisStats: reads.hypothesisStats,
     verdicts: reads.verdicts,
-    executors: roster && executorsAtWork(roster).length,
+    executors: roster && (phase === 'closed' ? roster.filter(a => a.role === 'executor').length : executorsAtWork(roster).length),
   })
   const findingsSection = <Findings experimentId={id} findings={findings ?? []} direction={primary?.direction} />
 
@@ -123,7 +118,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       <Figures label="This experiment in figures" figures={figures} />
 
       {phase === 'closed' && <Outcome pe={pe} results={results} hypothesisText={hypothesisText} />}
-      {phase === 'closed' && findingsSection}
 
       {started && (
         <Leaderboard
@@ -140,16 +134,11 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
       {results?.references && <ReferenceValues experimentId={id} references={results.references} />}
 
-      {phase === 'running' && findingsSection}
       {started && metrics.length > 0 && (
         <ExecutorsOverTime metrics={metrics} agentIds={executorIds} series={reads.metricSeries} boundaries={stages?.advances} />
       )}
 
-      {!plannedOnly && <Team pe={pe} />}
-      <ExperimentAgents pe={pe} />
-
-      {pe.goal && <GoalEditor pe={pe} onSaved={() => void mutatePE()} />}
-      <About pe={pe} />
+      {started && findingsSection}
 
       {jobRows.length > 0 && (
         <Section title="Job metrics" note="over training progress, refreshed every 30 s">
@@ -160,6 +149,9 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       )}
 
       <JobsTable experimentId={id} jobs={jobRows} total={stats?.total ?? 0} rankingMetric={primary?.metric} />
+
+      {pe.goal && <GoalEditor pe={pe} onSaved={() => void mutatePE()} />}
+      <About pe={pe} />
     </Page>
   )
 }

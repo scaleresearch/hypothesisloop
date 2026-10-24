@@ -57,7 +57,7 @@ describe('the cluster of a job', () => {
         <TenantContext.Provider value={resolved.tenant}><JobsList /></TenantContext.Provider>
       </SWRConfig>,
     )
-    await screen.findByText('own-0001…')
+    await screen.findByText('own-0001')
     expect(vi.mocked(fetchExperimentsPage).mock.calls[0][0]).toMatchObject({ project_id: 'prj_1' })
     expect(vi.mocked(fetchExperimentStats).mock.calls[0][0]).toMatchObject({ project_id: 'prj_1' })
   })
@@ -76,7 +76,7 @@ describe('the job of a baseline agent', () => {
         <TenantContext.Provider value={resolved.tenant}><JobsList /></TenantContext.Provider>
       </SWRConfig>,
     )
-    const row = within((await screen.findByText('base-000…')).closest('tr')!)
+    const row = within((await screen.findByText('base-0001')).closest('tr')!)
     expect(row.getByRole('link', { name: 'Baseline of the objective' }).getAttribute('href')).toBe('/experiments/pe-1/hypotheses')
     expect(row.getByRole('link', { name: 'Baseline of the objective' }).closest('td')!.getAttribute('title')).toBe('Baseline of the objective\nbranch hl/pe-1/baseline')
     expect(row.queryAllByRole('link').some(a => a.getAttribute('href')!.includes('/hypotheses/'))).toBe(false)
@@ -95,9 +95,9 @@ describe('the branch of a job', () => {
       </SWRConfig>,
     )
     const tested = (id: string) => within(screen.getByText(id).closest('tr')!).getByRole('link', { name: 'a claim' }).closest('td')!.getAttribute('title')
-    await screen.findByText('own-0001…')
-    expect(tested('own-0001…')).toBe('a claim\nbranch hl/pe-1/warmup-ag-1')
+    await screen.findByText('own-0001')
+    expect(tested('own-0001')).toBe('a claim\nbranch hl/pe-1/warmup-ag-1')
     // A job from before branches were kept names none.
-    expect(tested('old-0001…')).toBe('a claim')
+    expect(tested('old-0001')).toBe('a claim')
   })
 })

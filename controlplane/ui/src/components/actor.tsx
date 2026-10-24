@@ -62,7 +62,7 @@ function Credential({ actor }: { actor: ActorRecord }) {
     case 'unverified':
       return <>{actor.name && <span>{actor.name}</span>}<Badge tone="neutral" title={UNVERIFIED}>unverified</Badge></>
     case 'agent':
-      return <Text as="span" variant="code" title={actor.id}>{actor.name}</Text>
+      return <span title={actor.id}>{actor.name}</span>
   }
 }
 
@@ -77,7 +77,7 @@ export function Actor({ actor, agentID = '', compact = false, self = false }: { 
     const label = actorLabel(actor, agentID, agentName)
     return <span className={clsx('max-w-28 truncate', !agentID && 'text-warning')} title={label}>{label}</span>
   }
-  const agent = agentID && <Text as="span" variant="code" title={agentName === agentID ? undefined : agentID}>{agentName}</Text>
+  const agent = agentID && <span title={agentName === agentID ? undefined : agentID}>{agentName}</span>
   if (ownersOwn(actor, agentID)) return agent
   return (
     <span className="inline-flex items-center gap-1.5">

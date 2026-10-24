@@ -91,10 +91,10 @@ function StatusBar({ stats }: { stats?: HypothesisStats }) {
 function StatusCounts({ stats }: { stats?: HypothesisStats }) {
   return (
     <Inline gap="md" className="text-xs text-muted">
-      {hypothesisStatusValues.map(s => (
+      {hypothesisStatusValues.filter(s => (stats?.by_status[s] ?? 0) > 0).map(s => (
         <span key={s} className="inline-flex items-center gap-1.5 tabular-nums">
           <span className="inline-block size-2 rounded-full" style={{ background: statusColor(s) }} />
-          {stats?.by_status[s] ?? 0} {s}
+          {stats?.by_status[s]} {s}
         </span>
       ))}
     </Inline>

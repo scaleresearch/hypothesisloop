@@ -165,7 +165,7 @@ describe('the team of an experiment', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     unmount()
     show({ ...pe, status: 'closed', editable: [] })
-    await screen.findByText('3 executors at work of 4 max')
+    await screen.findByText('3 entries')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })
 })

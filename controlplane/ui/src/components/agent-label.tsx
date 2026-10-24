@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { keys } from '@/lib/keys'
+import { shortId } from '@/lib/format'
 
 const Names = createContext<{ names: Map<string, string>; error?: Error }>({ names: new Map() })
 
@@ -27,6 +28,6 @@ export function AgentLabel({ id }: { id: string }) {
   const { names, error } = useContext(Names)
   const name = names.get(id)
   if (name) return <span title={id}>{name}</span>
-  if (error) return <span className="cursor-help font-mono text-danger" title={`Could not load the agents' names: ${error.message}`}>{id}</span>
-  return <span>{id}</span>
+  if (error) return <span className="cursor-help font-mono text-danger" title={`${id}: could not load the agents' names, ${error.message}`}>{shortId(id)}</span>
+  return <span title={id}>{shortId(id)}</span>
 }

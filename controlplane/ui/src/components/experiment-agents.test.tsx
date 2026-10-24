@@ -99,8 +99,10 @@ describe('messaging an agent', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(sendPlatformExperimentMessage).toHaveBeenCalledExactlyOnceWith('pe-1', 'ag-old', 'try warmup')
     await userEvent.click(screen.getByRole('button', { name: 'Details of ag-old' }))
-    expect(await screen.findByText(/From the owner, .*: try warmup/)).toBeTruthy()
-    expect(screen.getByText(/From the coordinator, .*: leave the lr line/)).toBeTruthy()
+    expect(await screen.findByText(/From the owner, /)).toBeTruthy()
+    expect(screen.getByText('try warmup')).toBeTruthy()
+    expect(screen.getByText(/From the coordinator, /)).toBeTruthy()
+    expect(screen.getByText('leave the lr line')).toBeTruthy()
   })
 
   it('offers no message to an agent that finished or in a closed experiment', async () => {
@@ -296,7 +298,7 @@ describe('agent types in the roster', () => {
     show('running')
     expect((await row('ag-finished')).getByText(/^Finished /)).toBeTruthy()
     expect((await row('ag-cut')).getByText('Cut at a stage boundary')).toBeTruthy()
-    expect((await row('ag-closed')).getByText('Stopped, experiment closed')).toBeTruthy()
+    expect((await row('ag-closed')).getByText('Stopped')).toBeTruthy()
     expect((await row('ag-planned')).getByText('Answered the draft')).toBeTruthy()
     expect((await row('ag-working')).getByText('Running')).toBeTruthy()
   })

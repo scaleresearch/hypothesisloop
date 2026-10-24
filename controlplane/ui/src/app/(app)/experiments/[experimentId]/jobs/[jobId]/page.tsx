@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 import { TextLink } from '@/components/ui/link'
@@ -15,17 +16,20 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Code, Pill, Text } from '@/components/ui/text'
 import { Badge, TierBadge } from '@/components/ui/badge'
 import { Actor } from '@/components/actor'
-import { Branch } from '@/components/code-ref'
+import { Branch, Commit } from '@/components/code-ref'
+import { Claim } from '@/components/ui/claim'
+import { Prose } from '@/components/ui/prose'
 import { BASELINE_JOB, measuresBaseline } from '@/components/job-hypothesis'
 import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
 import { MetricLineChart } from '@/components/metric-line-chart'
-import { formatAccH, formatDate, formatDuration, formatMetric } from '@/lib/format'
+import { formatAccH, formatDate, formatDuration, formatMetric, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import { endedStatusValues } from '@/types/api'
 import type { MetricDataPoint } from '@/types/api'
 
 // What eviction_reason says of a job in each status that carries one: a QUEUED job's is the
@@ -39,6 +43,7 @@ const LAST_ATTEMPT: Record<string, string> = {
 
 export default function JobDetailPage({ params }: { params: { experimentId: string; jobId: string } }) {
   const { experimentId, jobId: id } = params
+  const router = useRouter()
 
   const { data: job, error } = useSWR(keys.job(id), () => fetchExperiment(id), { refreshInterval: POLL.reports })
   const { data: logs, error: logsError } = useSWR(
@@ -79,23 +84,19 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
     <Page
         title={
           <>
-            <span className="line-clamp-3 min-w-0 text-lg leading-snug" title={j.hypothesis}>{baseline ? BASELINE_JOB : j.hypothesis}</span>
+            <span className="min-w-0">{baseline ? BASELINE_JOB : <Claim text={j.hypothesis} lines={2} />}</span>
             <Badge status={j.status ?? 'UNKNOWN'} />
           </>
         }
         description={
           <Inline gap="md" className="text-xs">
-            <Text as="span" variant="meta" mono tone="default">Job {j.id}</Text>
+            <Text as="span" variant="meta" mono tone="default" title={j.id}>Job {shortId(j.id)}</Text>
             <CopyButton value={j.id} />
             {!baseline && <TextLink href={hypothesisPath(experimentId, j.hypothesis_id!)} className="whitespace-nowrap">View hypothesis →</TextLink>}
             <TextLink href={graphHref(j.platform_experiment_id, j.hypothesis_id)} className="whitespace-nowrap">In graph →</TextLink>
           </Inline>
         }
-        actions={
-          <TextLink href={experimentPath(experimentId, 'jobs')} className="whitespace-nowrap text-xs">
-            ← This experiment&apos;s jobs
-          </TextLink>
-        }
+        back={{ label: 'Jobs', onClick: () => router.push(experimentPath(experimentId, 'jobs')) }}
     >
       {lastAttempt && j.eviction_reason && (
         <Callout tone="warning">
@@ -142,7 +143,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
                 </Text>
               </Inline>
             ))}
-            {j.summary && <Text pre className="max-w-4xl leading-relaxed">{j.summary}</Text>}
+            {j.summary && <Prose text={j.summary} linkId={ref => ref.startsWith('job-') ? jobPath(experimentId, ref) : undefined} />}
             {!j.summary && j.status === 'COMPLETED' && (
               <Text tone="warning">No summary: the agent did not write up what this job found.</Text>
             )}
@@ -153,29 +154,31 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
       {/* Job metadata */}
       <Section title="Job details">
         <DetailList>
-          <Detail label="Agent"><span title={j.agent_id}>{j.agent_name}</span></Detail>
-          <Detail label="Submitted by"><Actor actor={j.actor} /></Detail>
-          <Detail label="Experiment">
+          <Detail label="Agent" mono={false}><span title={j.agent_id}>{j.agent_name}</span></Detail>
+          <Detail label="Submitted by" mono={false}><Actor actor={j.actor} /></Detail>
+          <Detail label="Experiment" mono={false}>
             <TextLink href={experimentPath(experimentId)}><PlatformExperimentName id={j.platform_experiment_id} /></TextLink>
           </Detail>
-          <Detail label="Capacity tier"><TierBadge tier={j.capacity_tier} /></Detail>
+          <Detail label="Capacity tier" mono={false}><TierBadge tier={j.capacity_tier} /></Detail>
           <Detail label="Accelerator">{`${j.accelerator_count}× ${j.accelerator_type}`}</Detail>
-          <Detail label="Est. duration">{j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'}</Detail>
-          <Detail label="Est. cost">{costEstimate != null ? `${costEstimate} ${budgetUnit(j.accelerator_kind)}` : '—'}</Detail>
-          <Detail label="Submitted">{formatDate(j.created_at)}</Detail>
-          {j.submitted_at && <Detail label="Sent to cluster">{formatDate(j.submitted_at)}</Detail>}
+          <Detail label="Est. duration" mono={false}>{j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'}</Detail>
+          <Detail label="Est. cost" mono={false}>{costEstimate != null ? `${costEstimate} ${budgetUnit(j.accelerator_kind)}` : '—'}</Detail>
+          <Detail label="Submitted" mono={false}>{formatDate(j.created_at)}</Detail>
+          {j.submitted_at && <Detail label="Sent to cluster" mono={false}>{formatDate(j.submitted_at)}</Detail>}
           {j.finished_at && (
-            <Detail label="Finished">
+            <Detail label="Finished" mono={false}>
               {formatDate(j.finished_at)}
               {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.finished_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
             </Detail>
           )}
-          {j.theory && <Detail label="Rationale">{j.theory}</Detail>}
+          {j.theory && <Detail label="Rationale" mono={false}><Prose text={j.theory} collapsedLines={4} linkId={ref => ref.startsWith('job-') ? jobPath(experimentId, ref) : undefined} /></Detail>}
           {j.job?.env && Object.keys(j.job.env).length > 0 && (
-            <Detail label="Environment">
-              <Inline gap="lg" className="gap-y-1">
-                {Object.entries(j.job.env).sort().map(([k, v]) => <span key={k}>{k}={v}</span>)}
-              </Inline>
+            <Detail label="Environment" mono={false}>
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(j.job.env).sort().map(([k, v]) => (
+                  <span key={k} className="break-all rounded-sm bg-surface-inset px-1.5 py-0.5 font-mono text-2xs">{k}={v}</span>
+                ))}
+              </div>
             </Detail>
           )}
         </DetailList>
@@ -212,7 +215,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
               )})}
             </div>
           ) : (
-            <EmptyState>No metric data yet — waiting for job to start reporting.</EmptyState>
+            <EmptyState>{(endedStatusValues as readonly string[]).includes(j.status) ? 'This job reported no metric data.' : 'No metric data yet.'}</EmptyState>
           )}
       </Section>
 
@@ -222,7 +225,15 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
           <DetailList>
             {j.image && <Detail label="Image">{j.image}</Detail>}
             {j.branch && <Detail label="Branch"><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} /></Detail>}
-            {j.code_ref && <Detail label="Code (git commit)">{j.code_ref}</Detail>}
+            {j.code_ref && (
+              <Detail label="Code (git commit)">
+                <Inline gap="sm" className="gap-y-1">
+                  <span className="min-w-0 break-all" title={j.code_ref.slice(0, j.code_ref.lastIndexOf('@'))}>{j.code_ref.slice(0, j.code_ref.lastIndexOf('@'))}</span>
+                  <Commit codeRef={j.code_ref} />
+                  <CopyButton value={j.code_ref.slice(j.code_ref.lastIndexOf('@') + 1)} />
+                </Inline>
+              </Detail>
+            )}
             {j.config_hash && <Detail label="Configuration checksum">{j.config_hash}</Detail>}
             {j.data_ref && <Detail label="Data">{j.data_ref}</Detail>}
           </DetailList>

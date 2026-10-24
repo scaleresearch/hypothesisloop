@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ObjectiveBar } from '@/components/hypotheses/panel'
 import type { HypothesisGraph, PlatformExperiment } from '@/types/api'
@@ -21,13 +21,13 @@ describe('ObjectiveBar', () => {
       },
     } as unknown as HypothesisGraph
     render(<ObjectiveBar graph={graph} pe={pe} />)
-    expect(screen.getByText('7 comments on the objective, the newest 1')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Comments (7)' }))
     expect(screen.getByText('Published: 4.3x on KITTI')).toBeTruthy()
   })
 
   it('says nothing of comments while there are none', () => {
     const graph = { root: 'pe-x', nodes: [], edges: [], objective: {} } as unknown as HypothesisGraph
     render(<ObjectiveBar graph={graph} pe={pe} />)
-    expect(screen.queryByText(/comments on the objective/)).toBeNull()
+    expect(screen.queryByText(/Comments \(/)).toBeNull()
   })
 })

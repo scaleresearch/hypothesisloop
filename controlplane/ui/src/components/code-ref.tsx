@@ -27,7 +27,7 @@ export function Commit({ codeRef }: { codeRef: string }) {
   const { repository, sha } = parts(codeRef)
   return (
     <a href={`${repository}/commit/${sha}`} target="_blank" rel="noreferrer" className={textLinkClass} title={codeRef}>
-      {sha.slice(0, 8)}
+      {sha.slice(0, 7)}
     </a>
   )
 }

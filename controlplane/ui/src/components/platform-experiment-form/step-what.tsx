@@ -2,6 +2,7 @@ import { GoalGuide } from '@/components/goal-guide'
 import { namesRepository, RepositorySelect } from '@/components/repository-select'
 import { Button } from '@/components/ui/button'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Input, Textarea } from '@/components/ui/input'
 import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
@@ -22,7 +23,7 @@ const FILE = '.hypothesisloop/experiment.yaml'
 
 const listed = (words: string[]) => words.length === 1 ? words[0] : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
 
-const GOAL_PLACEHOLDER = 'What to find out, the number that decides it and how it is measured, what to compare against, and what must stay the same.'
+const GOAL_PLACEHOLDER = 'What to find out, how it is measured, what to compare against, what stays the same.'
 
 /** Step 1: the code, the name and the experiment goal. */
 export function StepWhat({ form, set, isEdit, locked, fileNote, onRead }: StepProps & {
@@ -76,7 +77,7 @@ export function StepWhat({ form, set, isEdit, locked, fileNote, onRead }: StepPr
       </FormField>
       <FormField
         label="Experiment goal"
-        hint="The only text every agent reads about the task."
+        hint={<>The only text every agent reads about the task.<InfoTip>Say what to find out, the number that decides it and how it is measured, what to compare against, and what must stay the same.</InfoTip></>}
       >
         <Textarea
           rows={8}

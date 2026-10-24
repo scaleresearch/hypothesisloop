@@ -6,7 +6,7 @@
 // (to render) or evictionCodeLabel (to label an already-extracted code).
 const EVICTION_REASON_LABELS: Record<string, string> = {
   silent: 'Stopped reporting metrics (3× interval)',
-  never_reported_metrics: 'Never reported any metric — reporting path broken, not a hung job',
+  never_reported_metrics: 'Never reported any metric, so its reporting path is broken',
   resource_disbalance: 'CPU/memory out of proportion to its accelerators',
   unschedulable: 'Could not be scheduled (bad image or container config)',
   quota_exhaustion: 'Quota exhausted',
@@ -37,7 +37,7 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   no_cluster_for_org: 'No cluster takes this org’s jobs: register one, or ask for a shared one',
   clusters_disabled: 'Every cluster this org can use is turned off for its jobs: an owner turns one on in Settings',
   'waiting-for-scale-up': 'Waiting for an autoscaler node already booting on this cluster',
-  no_scalable_capacity: 'No autoscaler cluster had room to try — will retry as clusters free up',
+  no_scalable_capacity: 'No autoscaler cluster had room to try, retries as clusters free up',
   concurrency_cap: 'At its experiment’s max concurrent accelerators',
   exceeds_accelerator_share: 'Requests more cpu/memory/storage than its accelerators’ share of a node',
   exceeds_cluster_capacity: 'Asks for more than any connected cluster has when idle',
@@ -79,7 +79,7 @@ export function evictionDetailLines(reason?: string | null): string[] {
 export function evictionLabel(reason?: string | null): string {
   const [code, detail] = splitReason(reason)
   const label = EVICTION_REASON_LABELS[code] ?? code
-  return detail ? `${label} — ${detail}` : label
+  return detail ? `${label}: ${detail}` : label
 }
 
 // evictionCodeLabel labels a code that has already been extracted (e.g. a grouping key), where

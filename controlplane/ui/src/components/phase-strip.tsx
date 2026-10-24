@@ -46,6 +46,12 @@ const NEXT_IS: Record<Exclude<StatusReason['waits_for'], 'owner' | undefined>, s
   platform: 'the platform acts next',
 }
 
+// The platform's closing sentences all open with "Closed": the date goes right after it.
+function closedLine(summary: string, closedAt: string): string {
+  const when = `Closed ${formatDate(closedAt)}`
+  return summary.startsWith('Closed') ? when + summary.slice('Closed'.length) : `${when}. ${summary}`
+}
+
 /** Where the baseline agent's job stands, in a line of its own. */
 function BaselineJob({ job }: { job: Experiment | undefined }) {
   if (!job) return <Text variant="note">It has submitted no job yet.</Text>
@@ -97,8 +103,7 @@ export function PhaseStrip({ pe, jobs = [], stages, children }: {
   const why = (
     <Text role="status">
       {phase === 'baseline' && !pe.baseline_job_id && reasonOf(pe).reason !== 'repository_creating' && 'Preparing the baseline. '}
-      {phase === 'closed' && pe.closed_at && `Closed ${formatDate(pe.closed_at)}. `}
-      {reasonOf(pe).summary}
+      {phase === 'closed' && pe.closed_at ? closedLine(reasonOf(pe).summary, pe.closed_at) : reasonOf(pe).summary}
     </Text>
   )
   // A closed experiment waits for nobody, and a reader is told neither whose move it is.

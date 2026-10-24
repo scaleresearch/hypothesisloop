@@ -19,7 +19,7 @@ describe('a reason a job was requeued or evicted for', () => {
 
   it('follows the label with the sentence the platform wrote', () => {
     expect(evictionLabel('no_offer: no machine to rent for shape rtx4090 in 3m0s of asking'))
-      .toBe('No machine was on offer to rent (platform fault, no cost) — no machine to rent for shape rtx4090 in 3m0s of asking')
+      .toBe('No machine was on offer to rent (platform fault, no cost): no machine to rent for shape rtx4090 in 3m0s of asking')
   })
 })
 

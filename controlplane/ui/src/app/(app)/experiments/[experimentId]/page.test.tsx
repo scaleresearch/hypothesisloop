@@ -76,14 +76,6 @@ describe('a shared platform experiment of another org', () => {
     expect(screen.queryByRole('note')).toBeNull()
   })
 
-  it('shows its agents and no control that writes', async () => {
-    show('', {})
-    expect(await screen.findByRole('cell', { name: 'ag-self' })).toBeTruthy()
-    for (const control of ['Add agent', 'Show token', 'Remove']) {
-      expect(screen.queryByRole('button', { name: control })).toBeNull()
-    }
-  })
-
   it('reads its lists within the experiment\'s own project, never the reader\'s', async () => {
     show('', {})
     await screen.findByRole('heading', { name: 'Vision benchmark' })
@@ -112,9 +104,9 @@ describe('the baseline of a platform experiment', () => {
       status: 'running', baseline_job_id: 'job-base',
       metrics: [{ key: 'val_loss', direction: 'minimize' }, { key: 'exact_match', direction: 'maximize', role: 'constraint', bound: 1 }],
     })
-    const link = await screen.findByRole('link', { name: 'job job-base' })
+    const link = await screen.findByRole('link', { name: 'job-base' })
     expect(link.getAttribute('href')).toBe('/experiments/pe-x/jobs/job-base')
-    await waitFor(() => expect(link.parentElement!.textContent).toBe('Baseline measured by job job-base: val_loss 1.8, exact_match 1.'))
+    await waitFor(() => expect(link.parentElement!.textContent).toBe('Baseline measured by job-base: val_loss 1.800, exact_match 1.000.'))
     expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
   })
 
@@ -125,8 +117,8 @@ describe('the baseline of a platform experiment', () => {
       status: 'running', baseline_job_id: 'job-2', metrics: [{ key: 'val_loss', direction: 'minimize' }],
       baseline_raises: [{ from: 'job-1', to: 'job-2', reason: "the control's other coder", detail: '', actor: { kind: 'coordinator', id: 'pe-x', name: 'Coordinator' }, at: '2026-10-08T19:00:00Z' }],
     })
-    const link = await screen.findByRole('link', { name: 'job job-2' })
-    await waitFor(() => expect(link.parentElement!.textContent).toBe("Baseline measured by job job-2: val_loss 1.6. Raised from job job-1 by Coordinator: the control's other coder."))
+    const link = await screen.findByRole('link', { name: 'job-2' })
+    await waitFor(() => expect(link.parentElement!.textContent).toBe("Baseline measured by job-2: val_loss 1.600. Raised from job-1 by Coordinator: the control's other coder."))
   })
 })
 
@@ -158,10 +150,8 @@ describe('the references of a platform experiment', () => {
 
 describe('a shared platform experiment of the caller\'s own org', () => {
   it('is theirs to change, marked shared, with no read-only note', async () => {
-    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([{ ...self, actions: ['message', 'remove', 'show_token'] }])
     show('', { project_id: 'prj_1', editable: ['name'], actions: ['remove', 'close', 'add_agent', 'add_idea'] })
-    expect(await screen.findByRole('button', { name: 'Add agent' })).toBeTruthy()
-    expect(await screen.findByRole('button', { name: 'Show token' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Edit' })).toBeTruthy()
     expect(screen.getByText('Shared')).toBeTruthy()
     expect(screen.queryByRole('note')).toBeNull()
   })

@@ -20,9 +20,12 @@ export function runClock(pe: { started_at?: string; ends_at?: string; baseline_d
   return null
 }
 
-// The start of a long id, enough to tell records apart in a list; the full id goes in a title.
+// A long id as its kind and its last characters: ids are time-ordered, so their starts repeat
+// across a list and their ends tell records apart. The full id goes in a title.
 export function shortId(id: string): string {
-  return `${id.slice(0, 8)}…`
+  const kind = /^[a-z]+-/.exec(id)?.[0] ?? ''
+  const rest = id.slice(kind.length)
+  return rest.length <= 8 ? id : `${kind}…${rest.slice(-6)}`
 }
 
 // Formats a AccH (Accelerator-hour) quantity for display. Values ≥ 1 round to the nearest
@@ -63,14 +66,20 @@ export function formatDuration(ms: number): string {
 // A long text as a label: its first sentence, cut at a word near max characters. A sentence's
 // closing full stop goes, so the label can sit inside a sentence of its own.
 export function headline(text: string, max = 120): string {
-  const t = text.trim()
+  const t = text.trim().replace(/^(mechanism|claim|hypothesis|idea):\s*/i, '')
   const first = (/^[\s\S]*?[.!?](?=\s|$)/.exec(t)?.[0] ?? t).replace(/\.$/, '')
   if (first.length <= max) return first
   const space = first.lastIndexOf(' ', max)
   return `${first.slice(0, space > max / 2 ? space : max).replace(/[\s,;:(–-]+$/, '')}…`
 }
 
-// Every metric value the UI shows, in a table, a sentence or a chart's tooltip.
+// Every metric value the UI shows, in a table, a sentence or a chart's tooltip: four significant
+// digits, so 0.37109421 reads 0.3711 and 1234.56 reads 1235.
 export function formatMetric(v: number): string {
-  return v.toFixed(4)
+  if (!Number.isFinite(v)) return String(v)
+  if (v === 0) return '0'
+  const a = Math.abs(v)
+  if (a >= 1e4) return Math.round(v).toLocaleString('en-US')
+  if (a < 1e-3) return v.toExponential(2)
+  return v.toPrecision(4)
 }

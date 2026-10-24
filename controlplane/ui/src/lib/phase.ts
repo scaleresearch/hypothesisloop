@@ -71,3 +71,10 @@ export function phaseOf(pe: Stated & { proposed_at?: string }): Phase {
     case 'closed': return 'closed'
   }
 }
+
+// The reasons a draft closes for, before anything was accepted: such an experiment had no team.
+const PLANNED_ONLY: NonNullable<PlatformExperiment['close_reason']>[] = ['planning_limit_reached', 'proposal_expired', 'planner_stopped', 'repository_not_created']
+
+export function closedWhilePlanned(pe: Pick<PlatformExperiment, 'close_reason'>): boolean {
+  return pe.close_reason != null && PLANNED_ONLY.includes(pe.close_reason)
+}

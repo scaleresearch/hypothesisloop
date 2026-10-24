@@ -14,6 +14,9 @@ import { ConfirmDialog, Dialog } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Table } from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { InfoTip } from '@/components/ui/info-tip'
+import { Prose } from '@/components/ui/prose'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Facts } from '@/components/ui/facts'
 import { Section } from '@/components/ui/section'
@@ -29,7 +32,8 @@ import { inheritedModel, useModels } from '@/lib/models'
 import { useTenant } from '@/lib/tenant'
 import { errorMessage, refusalMessage } from '@/lib/errors'
 import { Select } from '@/components/ui/select'
-import { formatDate, relTime } from '@/lib/format'
+import { formatDate, relTime, shortId } from '@/lib/format'
+import { phaseOf } from '@/lib/phase'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import type { Tone } from '@/lib/colors'
 import { keys } from '@/lib/keys'
@@ -124,9 +128,10 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
       </Inline>
       {role && <Text variant="hint">{role.description}</Text>}
       <Text variant="hint">
-        {sandboxed
+        {sandboxed ? 'The platform runs the agent on a machine of its own.' : 'You start the agent yourself with its token.'}
+        <InfoTip>{sandboxed
           ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent finishes or is cut.'
-          : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
+          : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}</InfoTip>
       </Text>
       {error && <ErrorMessage>{error}</ErrorMessage>}
     </Stack>
@@ -134,12 +139,12 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
 }
 
 // One short word on where an agent is, and the longer story behind it for its title.
-function statusOf(agent: JoinedAgent): { label: string; tone: Tone; detail?: string } {
+function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: Tone; detail?: string } {
   const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.summary].filter(Boolean).join(' ') || undefined
   switch (agent.ended) {
     case 'finished': return { label: `Finished ${relTime(agent.finished_at!)}`, tone: 'neutral', detail }
     case 'cut': return { label: agent.cut_reason === 'max_agents_lowered' ? 'Cut, max executors lowered' : 'Cut at a stage boundary', tone: 'neutral', detail }
-    case 'closed': return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
+    case 'closed': return { label: 'Stopped', tone: 'neutral', detail }
     case 'planned': return { label: 'Answered the draft', tone: 'neutral', detail }
   }
   if (!agent.instance) return { label: agent.in_agentsandbox ? 'Not reported yet' : 'Run by its operator', tone: 'neutral', detail }
@@ -149,7 +154,7 @@ function statusOf(agent: JoinedAgent): { label: string; tone: Tone; detail?: str
     case 'requested': return { label: 'Machine asked for', tone: 'neutral', detail }
     case 'waiting': return { label: 'Waiting for the start', tone: 'neutral', detail }
     case 'stopped': return agent.instance.end_reason === 'released'
-      ? { label: 'Stopped, run over', tone: 'neutral', detail }
+      ? closed ? { label: 'Stopped', tone: 'neutral', detail } : { label: 'Stopped, run over', tone: 'neutral', detail }
       : { label: 'Stopped', tone: 'danger', detail }
   }
 }
@@ -198,9 +203,10 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
     <Stack gap="xs" aria-label="Messages">
       <Eyebrow>Messages</Eyebrow>
       {messages.map((m, i) => (
-        <Text key={i} variant="note" className="max-w-md" title={formatDate(m.at)}>
-          From the {m.from}, {relTime(m.at)}: {m.text}
-        </Text>
+        <div key={i}>
+          <Text variant="hint" title={formatDate(m.at)}>From the {m.from}, {relTime(m.at)}</Text>
+          <Prose text={m.text} collapsedLines={3} />
+        </div>
       ))}
     </Stack>
   )
@@ -221,7 +227,7 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
   return (
     <Stack gap="sm">
       <Facts facts={[
-        ['Id', agent.agent_id],
+        ['Id', <span key="id" className="font-mono" title={agent.agent_id}>{shortId(agent.agent_id)}</span>],
         ['Run by', agent.in_agentsandbox ? 'the platform' : 'its operator'],
         ['Type', <AgentTypeLabel key="type" agent={agent} catalog={catalog} />],
         ['Model', agent.model ? <ModelName key="model" model={agent.model} /> : 'default'],
@@ -254,6 +260,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [removing, setRemoving] = useState<JoinedAgent | null>(null)
   const [messaging, setMessaging] = useState<JoinedAgent | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  const closed = phaseOf(pe) === 'closed'
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
   const { data: roles } = useAgentRoles()
@@ -288,7 +295,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   }
 
   return (
-    <Section id={AGENTS_CARD} title="Agents" note={agents && `(${agents.length})`} scrollX>
+    <Section id={AGENTS_CARD} title="Agents" note={agents && (closed ? `${agents.length} · experiment closed` : `(${agents.length})`)} scrollX>
         <Stack>
           {pe.actions.includes('add_agent') && <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {shown.map(agent => (
@@ -297,11 +304,8 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               label={`Env file of ${agent.name}`}
               value={envFile(agent)}
               note={<>
-                Save it as an env file readable by you alone and start the agent with it. The token
-                works for this agent in this experiment and nowhere else. It never changes:{' '}
-                <span className="font-medium">Show token</span> in the agent&apos;s row shows the same one again, as does{' '}
-                <Code>hl platform-experiments agents add --platform-experiment {pe.id} --agent {agent.agent_id}</Code>.
-                Removing the agent is what stops it working.
+                Save it as an env file readable by you alone and start the agent with it.
+                <InfoTip>{`The token works for this agent in this experiment and nowhere else. It never changes: Show token in the agent's row shows the same one again, as does hl platform-experiments agents add --platform-experiment ${pe.id} --agent ${agent.agent_id}. Removing the agent is what stops it working.`}</InfoTip>
               </>}
               dismiss="Hide"
               onDismiss={() => hide(agent.agent_id)}
@@ -313,8 +317,17 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                 <Eyebrow>Coordinator</Eyebrow>
                 <Text as="span" variant="note">run by the platform · model <ModelName model={pe.coordinator.model} /></Text>
               </Inline>
-              <InstanceHealth instance={pe.coordinator.instance} />
-              {pe.coordinator.activity && <Activity activity={pe.coordinator.activity} />}
+              {closed && pe.coordinator.instance.end_reason === 'released' ? (
+                <Inline>
+                  <Badge tone="neutral">Stopped</Badge>
+                  <Text as="span" variant="note">Experiment closed</Text>
+                </Inline>
+              ) : (
+                <>
+                  <InstanceHealth instance={pe.coordinator.instance} />
+                  {pe.coordinator.activity && <Activity activity={pe.coordinator.activity} />}
+                </>
+              )}
             </InsetCard>
           )}
           {error && <ErrorMessage>Could not load agents: {error.message}</ErrorMessage>}
@@ -330,7 +343,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               </thead>
               <tbody>
                 {agents.map(agent => {
-                  const status = statusOf(agent)
+                  const status = statusOf(agent, closed)
                   const expanded = open === agent.agent_id
                   const sent = messagesTo(agent)
                   return (

@@ -13,7 +13,10 @@ import { ApiError, MAX_LIST_PAGE_SIZE } from '@/lib/api/request'
 import { Page } from '@/components/ui/page'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Code, Text } from '@/components/ui/text'
+import { ExperimentAgents } from '@/components/experiment-agents'
+import { Team } from '@/components/team'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { FormField } from '@/components/ui/form-field'
@@ -25,6 +28,7 @@ import { PlatformExperimentSelect } from '@/components/platform-experiment-selec
 import { Pagination } from '@/components/ui/pagination'
 import { formatAccH, formatMetric } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
+import { closedWhilePlanned } from '@/lib/phase'
 import { useRouter } from 'next/navigation'
 import { experimentPath, jobPath, projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
@@ -185,17 +189,23 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
           />
         </FormField>
         <Text variant="note" className="max-w-4xl">
-          What an experiment&apos;s baseline leaves of its budget is split equally among its agents when it starts, the baseline agent apart,
-          and each stage releases its part of it. An agent that placed in the top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to
-          twice that amount as burst compute, which can be preempted.
+          Each agent gets an equal share of the budget its baseline leaves.
+          <InfoTip>What an experiment&apos;s baseline leaves of its budget is split equally among its agents when it starts, the baseline agent apart, and each stage releases its part of it. An agent that placed in the top three of an earlier experiment is guaranteed 25% more. Beyond what is guaranteed, an agent may use up to twice that amount as burst compute, which can be preempted.</InfoTip>
         </Text>
       </Stack>
+
+      {selectedPE && (
+        <>
+          {!closedWhilePlanned(selectedPE) && <Team pe={selectedPE} />}
+          <ExperimentAgents pe={selectedPE} />
+        </>
+      )}
 
       {error && <ErrorMessage>Could not load the agents of {project.name}: {error.message}</ErrorMessage>}
       {!agents && !error && <Loading />}
 
       {agents && (
-        <Section title="Agents" note={total} scrollX>
+        <Section title={experimentFilter ? 'Compute and results' : 'Agents'} note={total} scrollX>
           <Table>
             <thead>
               <tr>

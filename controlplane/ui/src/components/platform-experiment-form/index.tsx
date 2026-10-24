@@ -37,6 +37,8 @@ interface FormProps {
   onSaved: (saved: PlatformExperiment, created?: boolean) => void
   /** Offers Cancel. A form that is the page's own content has nothing to go back to and passes none. */
   onCancel?: () => void
+  /** The form is in a dialog: the steps stay at the top and the buttons at the bottom while the panel scrolls. */
+  docked?: boolean
 }
 
 /** What the dialog asks of the form it holds: to be left, keeping what was typed. */
@@ -58,7 +60,7 @@ const FILE_FIELDS = [
  * rule is the API's: the editors hint at what the API will refuse as it is typed, and a refusal
  * is shown at the step it concerns. A new experiment left with anything typed is kept as a draft.
  */
-export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function PlatformExperimentForm({ initial, draft, onSaved, onCancel }, ref) {
+export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function PlatformExperimentForm({ initial, draft, onSaved, onCancel, docked }, ref) {
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
   const needsGitHub = useNeedsGitHub()
@@ -311,7 +313,9 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
   return (
     <Stack gap="xl">
-      <Tabs label="Steps" tabs={[...STEPS]} value={step} onChange={go} />
+      <div className={docked ? 'sticky -top-6 z-10 -mx-6 -mt-2 bg-surface-raised px-6 pt-2' : undefined}>
+        <Tabs label="Steps" tabs={[...STEPS]} value={step} onChange={go} />
+      </div>
 
       <Stack as="form" gap="xl" onSubmit={handleSubmit}>
         <div ref={panel} role="tabpanel" tabIndex={-1} aria-label={STEPS[at].label} className="grid gap-6 outline-none">
@@ -334,7 +338,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         )}
         {error && <ErrorMessage>{error}</ErrorMessage>}
 
-        <Inline nowrap className="mt-1">
+        <Inline nowrap className={docked ? 'sticky -bottom-6 z-10 -mx-6 -mb-6 mt-1 border-t bg-surface-raised px-6 py-4' : 'mt-1'}>
           {onCancel && <Button type="button" disabled={savingDraft} onClick={() => void leave()}>Cancel</Button>}
           {!isEdit && <Button type="button" loading={savingDraft} disabled={!unsaved} onClick={() => void saveDraft()}>{draftID && !unsaved ? 'Draft saved' : 'Save draft'}</Button>}
           <span className="flex-1" />
@@ -369,7 +373,7 @@ export function PlatformExperimentDialog({ initial, draft, onSaved, onClose }: {
   const form = useRef<FormHandle>(null)
   return (
     <Dialog open onClose={() => form.current?.leave()} title={initial ? 'Edit experiment' : 'New experiment'}>
-      <PlatformExperimentForm ref={form} initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, created) => { onSaved(saved, created); onClose() }} />
+      <PlatformExperimentForm ref={form} docked initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, created) => { onSaved(saved, created); onClose() }} />
     </Dialog>
   )
 }

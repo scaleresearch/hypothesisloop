@@ -236,9 +236,8 @@ export function OrgClusters() {
           void change(cluster, () => removeCluster(org.id, cluster))
         }}
       >
-        Every job placed on it goes back to the queue and is placed on another cluster, keeping its
-        retries. Its runtime token is refused from then on, so stop its agent. The name is free to
-        register again.
+        Its jobs go back to the queue and run on another cluster, keeping their retries. Its runtime
+        token is refused from then on, so stop its agent. The name is free to register again.
       </ConfirmDialog>
     </Stack>
   )

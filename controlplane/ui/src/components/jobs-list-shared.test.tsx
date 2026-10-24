@@ -61,7 +61,7 @@ function asked() {
 }
 
 beforeEach(() => {
-  vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 1, by_status: { RUNNING: 1 } } as never)
+  vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 3, by_status: { RUNNING: 1, EVICTED: 2 } } as never)
   vi.mocked(fetchOrgClusters).mockResolvedValue([])
   vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 0 })
 })
@@ -69,7 +69,7 @@ beforeEach(() => {
 describe('the jobs of a shared platform experiment of another org', () => {
   it('are asked for by the experiment alone: the reader\'s project would match none of them', async () => {
     show('', { project_id: 'prj_platform', shared: true }, 'pe-x')
-    await screen.findByText('job-0000…')
+    await screen.findByText('job-00001')
     for (const params of asked()) {
       expect(params.platform_experiment_id).toBe('pe-x')
       expect('project_id' in params).toBe(false)
@@ -82,7 +82,7 @@ describe('the jobs of a shared platform experiment of another org', () => {
 
   it('cannot be cancelled, and open under their experiment', async () => {
     show('', { project_id: 'prj_platform', shared: true }, 'pe-x')
-    expect((await screen.findByRole('link', { name: 'job-0000…' })).getAttribute('href')).toBe('/experiments/pe-x/jobs/job-00001')
+    expect((await screen.findByRole('link', { name: 'job-00001' })).getAttribute('href')).toBe('/experiments/pe-x/jobs/job-00001')
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 })
@@ -90,7 +90,7 @@ describe('the jobs of a shared platform experiment of another org', () => {
 describe('the jobs of a platform experiment of the caller\'s own', () => {
   it('are asked for within the selected project and can be cancelled, shared or not', async () => {
     show('', { project_id: 'prj_1', shared: true }, 'pe-x')
-    await screen.findByText('job-0000…')
+    await screen.findByText('job-00001')
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
     const [jobs, stats, agents] = asked()
     for (const params of [jobs, stats]) expect(params).toMatchObject({ project_id: 'prj_1', platform_experiment_id: 'pe-x' })
@@ -111,12 +111,13 @@ describe('the jobs of the whole project', () => {
 
   it('are counted per status whatever status is listed, and each count leads to its jobs', async () => {
     show('status=RUNNING', {})
-    await screen.findByText('job-0000…')
+    await screen.findByText('job-00001')
     const [jobs, stats] = asked()
     expect(jobs.status).toBe('RUNNING')
     expect('status' in stats).toBe(false)
     expect(screen.getByRole('link', { name: /Evicted/ }).getAttribute('href')).toBe('/projects/prj_1/jobs?status=EVICTED')
     expect(screen.getByRole('link', { name: /All/ }).getAttribute('href')).toBe('/projects/prj_1/jobs')
+    expect(screen.queryByRole('link', { name: /Failed/ })).toBeNull()
     expect(screen.getByRole('link', { current: true }).textContent).toContain('Running')
   })
 })
@@ -124,7 +125,7 @@ describe('the jobs of the whole project', () => {
 describe('the jobs of one platform experiment', () => {
   it('are their own page, and each status of them a filter on it', async () => {
     show('status=RUNNING', { project_id: 'prj_1', shared: false }, 'pe-x')
-    await screen.findByText('job-0000…')
+    await screen.findByText('job-00001')
     expect(screen.getByRole('link', { name: /Evicted/ }).getAttribute('href')).toBe('/experiments/pe-x/jobs?status=EVICTED')
     expect(screen.getByRole('link', { name: /All/ }).getAttribute('href')).toBe('/experiments/pe-x/jobs')
   })

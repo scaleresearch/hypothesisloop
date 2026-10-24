@@ -15,6 +15,7 @@ import { ProposalForm } from '@/components/proposal-form'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Page } from '@/components/ui/page'
+import { Prose } from '@/components/ui/prose'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
@@ -53,7 +54,7 @@ export function DraftView({ draft }: { draft: PlatformExperiment }) {
       {draft.declined_reason && (
         <Section title="What the planner needs">
           <Stack gap="sm">
-            <Text>{draft.declined_reason}</Text>
+            <Prose collapsedLines={6} text={draft.declined_reason} />
             {state === 'declined' && (
               <Text variant="note">
                 Edit what you asked and the planner tries again. Otherwise the draft closes on {formatDate(draft.proposal_expires_at)}.

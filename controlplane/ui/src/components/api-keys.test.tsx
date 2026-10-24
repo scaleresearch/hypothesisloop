@@ -71,7 +71,7 @@ describe('creating an API key', () => {
     expect(createAPIKey).toHaveBeenCalledExactlyOnceWith('org_a', 'laptop', undefined)
     expect(await screen.findByTestId('secret')).toHaveProperty('textContent', TOKEN)
     expect(screen.getAllByText(TOKEN)).toHaveLength(1)
-    expect(screen.getByText(/only time it is shown/)).toBeTruthy()
+    expect(screen.getByText(/It is shown once/)).toBeTruthy()
   })
 
   it('lists the new key without its token', async () => {

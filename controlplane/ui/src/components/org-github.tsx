@@ -16,6 +16,7 @@ import { Table } from '@/components/ui/table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 import { formatDate } from '@/lib/format'
@@ -104,7 +105,8 @@ export function OrgGitHub() {
       {!data && !error && <Loading />}
       {installations && installations.length === 0 && (
         <EmptyState>
-          No GitHub account is connected to {org.name}, and an experiment needs one: it keeps its code in a repository there.
+          No GitHub account is connected to {org.name}.
+          <InfoTip>An experiment needs one: it keeps its code in a repository there.</InfoTip>
           {editsOrg ? '' : ' An owner installs the GitHub App here.'}
         </EmptyState>
       )}
@@ -157,8 +159,8 @@ export function OrgGitHub() {
           onConfirm={() => disconnect(disconnecting)}
           onClose={() => setDisconnecting(null)}
         >
-          Experiments that name one of its repositories keep running, but their agents and jobs can no longer
-          clone, fetch or push within the hour. The App stays installed on GitHub.
+          Experiments that use its repositories keep running. Their agents and jobs can no longer clone,
+          fetch or push within the hour. The App stays installed on GitHub.
         </ConfirmDialog>
       )}
     </Stack>

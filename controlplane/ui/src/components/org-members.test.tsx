@@ -184,8 +184,8 @@ describe('inviting', () => {
     const link = `${window.location.origin}/invite#${TOKEN}`
     expect(await screen.findByTestId('secret')).toHaveProperty('textContent', link)
     expect(document.body.textContent!.split(TOKEN)).toHaveLength(2)
-    expect(screen.getByText(/joins Lab as a member/)).toBeTruthy()
-    expect(screen.getByText(/only time it is shown/)).toBeTruthy()
+    expect(screen.getByRole('img', { name: /joins Lab as a member/ })).toBeTruthy()
+    expect(screen.getByText(/It is shown once/)).toBeTruthy()
   })
 
   it('invites with the role that was picked', async () => {
@@ -193,7 +193,7 @@ describe('inviting', () => {
     await choose(await screen.findByLabelText('Role of the invited person'), 'Invite as owner')
     await userEvent.click(screen.getByRole('button', { name: 'Create invite link' }))
     expect(createOrgInvite).toHaveBeenCalledExactlyOnceWith('org_a', 'owner')
-    expect(await screen.findByText(/joins Lab as an owner/)).toBeTruthy()
+    expect(await screen.findByRole('img', { name: /joins Lab as an owner/ })).toBeTruthy()
   })
 
   it('copies the link to the clipboard', async () => {
