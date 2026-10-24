@@ -22,7 +22,7 @@ import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
 import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
 import { StepBudget } from '@/components/platform-experiment-form/step-budget'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, namingSent } from '@/lib/errors'
 import { toTeam, toTeamRows } from '@/lib/team'
 import { keys } from '@/lib/keys'
 import type { ExperimentDraft, PlatformExperiment } from '@/types/api'
@@ -246,6 +246,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     if (err) { setError(err); return }
     setSubmitting(true)
     setError(null)
+    let sent: CreatePlatformExperimentRequest | undefined
     try {
       if (isEdit && initial) {
         const patch = changes()
@@ -274,6 +275,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         duration_hours: Number(form.duration_hours),
       }
       setRefused(null)
+      sent = payload
       // No start time: the platform starts it once its baseline is declared.
       const experiment = await createPlatformExperiment(project.id, { ...payload, coordinator_in_agentsandbox: true })
       // The draft goes once the experiment it was for exists. One that stays is listed, to delete.
@@ -287,7 +289,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         return
       }
       // A refused create keeps what was typed, as a draft that names why, at the step of its first problem.
-      const problems = problemsOf(err)
+      const problems = problemsOf(err).map(p => namingSent(p, sent))
       const at = refusedStep(problems[0].reason)
       setRefused(problems)
       go(at)

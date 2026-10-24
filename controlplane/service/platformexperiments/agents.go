@@ -22,7 +22,7 @@ type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
 	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Executor 2\", \"Researcher 1\", \"Baseline 1\"."`
 	Role            string         `json:"role,omitempty" default:"executor" doc:"\"executor\", \"researcher\", \"baseline\" or \"reviewer\" (GET /agent-roles)."`
-	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
+	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies. Refused for a researcher, which holds no quota (422 invalid_request)."`
 	InAgentSandbox  bool           `json:"in_agentsandbox,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
 	AgentType       string         `json:"agent_type,omitempty" doc:"The agent type it runs, which it reads from its signup, of the role role gives: for an executor generalist (default), hyperparameter-search, architecture-search, data-search or an executor type of the org, for a researcher researcher (default), for a baseline agent baseline (default)."`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object the agent reads from its signup, at most 4096 bytes as JSON."`
@@ -185,6 +185,9 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	}
 	if !experimentspec.ValidQuotaTierOverride(req.QuotaTier) {
 		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, `quota_tier must be "guaranteed", "burst_only", or omitted`).On("quota_tier")
+	}
+	if role == domain.SignupRoleResearcher && req.QuotaTier != "" {
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "quota_tier is set and a researcher holds no quota: leave it out").On("quota_tier")
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {

@@ -293,6 +293,7 @@ var routes = []route{
 
 	// ---- platform experiments ----
 	{method: "POST", path: "/platform-experiments", body: pe1, rule: createsIn},
+	{method: "POST", path: "/platform-experiments/check", body: pe1, rule: createsIn},
 	{method: "POST", path: "/platform-experiments/drafts", body: `{"project_id":"<prj>","goal":"find the best learning rate"}`, rule: createsIn},
 	{method: "GET", path: "/projects/{id}/experiment-file", request: "/projects/<prj>/experiment-file?repository=acme/model&branch=main", rule: createsIn},
 	{method: "POST", path: "/projects/{id}/repositories", request: "/projects/<prj>/repositories", body: `{"repository":"acme/model"}`, rule: answeredBy(createsIn, http.StatusOK)},

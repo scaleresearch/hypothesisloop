@@ -37,6 +37,16 @@ func (s *agentSandboxStore) CreatePlatformExperiment(ctx context.Context, pe *do
 
 func agentSandboxAPI(t *testing.T, repos *fakeRepositories) (*agentSandboxStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
+	store, post := agentSandboxPosts(t, repos)
+	return store, func(body map[string]any) (int, map[string]any) {
+		t.Helper()
+		return post("/platform-experiments", body)
+	}
+}
+
+// agentSandboxPosts is agentSandboxAPI posting to any path, an answer with no body read as none.
+func agentSandboxPosts(t *testing.T, repos *fakeRepositories) (*agentSandboxStore, func(path string, body map[string]any) (int, map[string]any)) {
+	t.Helper()
 	store := &agentSandboxStore{}
 	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithServedModels(testModels), domain.CPUType)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
@@ -44,17 +54,20 @@ func agentSandboxAPI(t *testing.T, repos *fakeRepositories) (*agentSandboxStore,
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	handler := svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxAgentSandboxes: createMaxAgentSandboxes})
 	registerPlatformExperimentsAndBudget(doc, handler)
-	return store, func(body map[string]any) (int, map[string]any) {
+	return store, func(path string, body map[string]any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)
 		}
-		req := authtest.Authorize(httptest.NewRequest("POST", "/platform-experiments", &payload))
+		req := authtest.Authorize(httptest.NewRequest("POST", path, &payload))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		var out map[string]any
+		if rec.Body.Len() == 0 {
+			return rec.Code, nil
+		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 			t.Fatalf("answer %d %q is not JSON: %v", rec.Code, rec.Body, err)
 		}

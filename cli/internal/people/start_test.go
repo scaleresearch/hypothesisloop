@@ -1,6 +1,8 @@
 package people
 
 import (
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,10 +75,13 @@ func TestStartPushesDIRAsABranchTheRepositoryDoesNotHave(t *testing.T) {
 	if commits := clitest.MustGit(t, origin, "rev-list", "--count", "exp"); commits != "1" {
 		t.Errorf("branch exp has %s commits, want one", commits)
 	}
-	if len(*calls) != 2 || (*calls)[0].Path != "/projects/prj_1/repositories" || (*calls)[0].Body["repository"] != "acme/model" {
+	if len(*calls) != 3 || (*calls)[0].Path != "/projects/prj_1/repositories" || (*calls)[0].Body["repository"] != "acme/model" {
 		t.Fatalf("calls = %+v, want the repository asked for in the file's project", *calls)
 	}
-	if created := (*calls)[1]; created.Path != "/platform-experiments" || created.Body["repository"] != "Acme/model" || created.Body["branch"] != "exp" || created.Body["project_id"] != "prj_1" {
+	if checked := (*calls)[1]; checked.Path != "/platform-experiments/check" || checked.Body["repository"] != "Acme/model" || checked.Body["name"] != "tune the model" {
+		t.Errorf("check = %+v, want the file's experiment checked in the repository as the platform names it", checked)
+	}
+	if created := (*calls)[2]; created.Path != "/platform-experiments" || created.Body["repository"] != "Acme/model" || created.Body["branch"] != "exp" || created.Body["project_id"] != "prj_1" {
 		t.Errorf("create = %+v, want the file's placement with the repository as the platform names it", created)
 	}
 	if head := clitest.MustGit(t, dir, "symbolic-ref", "--short", "HEAD"); head != "local-work" {
@@ -100,7 +105,7 @@ func TestStartPushesNothingToABranchThatHoldsDIR(t *testing.T) {
 	if after := clitest.MustGit(t, origin, "rev-parse", "exp"); after != before {
 		t.Errorf("branch exp moved from %s to %s", before, after)
 	}
-	if len(*calls) != 2 || (*calls)[1].Path != "/platform-experiments" {
+	if len(*calls) != 3 || (*calls)[2].Path != "/platform-experiments" {
 		t.Errorf("calls = %+v, want the experiment created", *calls)
 	}
 }
@@ -125,8 +130,35 @@ func TestStartRefusesABranchThatHoldsOtherCode(t *testing.T) {
 	if after := clitest.MustGit(t, origin, "rev-parse", "exp"); after != before {
 		t.Errorf("branch exp moved from %s to %s", before, after)
 	}
-	if len(*calls) != 1 {
-		t.Errorf("calls = %+v, want the repository read and no experiment created", *calls)
+	if len(*calls) != 2 {
+		t.Errorf("calls = %+v, want the repository read, the experiment checked and none created", *calls)
+	}
+}
+
+// An experiment the platform refuses exits 1 with its refusal before anything is pushed, so
+// starting again once the file is fixed pushes the branch then.
+func TestStartPushesNothingForAnExperimentThePlatformRefuses(t *testing.T) {
+	dir, origin := startDir(t)
+	var paths []string
+	clitest.SetAPIURL(t, clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/repositories") {
+			_ = json.NewEncoder(w).Encode(map[string]string{"repository": "Acme/model", "repository_url": origin})
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]string{"reason": "model_not_served", "message": "agents[0].model is not served: anthropic serves no model of that id"})
+	}))
+	code, _, stderr := clitest.Output(t, PlatformExperimentsStart, dir)
+	if code != 1 || !strings.Contains(stderr, "agents[0].model is not served") {
+		t.Fatalf("exit %d, stderr %q, want 1 with the refusal", code, stderr)
+	}
+	if heads := clitest.MustGit(t, origin, "for-each-ref", "refs/heads"); heads != "" {
+		t.Errorf("origin holds %q, want no branch pushed", heads)
+	}
+	if strings.Join(paths, " ") != "/projects/prj_1/repositories /platform-experiments/check" {
+		t.Errorf("calls = %v, want the repository and the check and no create", paths)
 	}
 }
 

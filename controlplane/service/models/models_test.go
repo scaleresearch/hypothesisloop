@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -137,7 +138,8 @@ func TestAModelTheListingDoesNotHoldIsRefused(t *testing.T) {
 	}
 }
 
-// A choice of no model names none, and one the platform does not serve is refused on its field.
+// A choice of no model names none, and one the platform does not serve is refused on its field,
+// which its message names without repeating the model sent.
 func TestAChoiceIsCheckedOnItsField(t *testing.T) {
 	models := served(catalog, nil, nil)
 	if err := models.CheckChoice(context.Background(), "agents[0].model", ""); err != nil {
@@ -145,8 +147,9 @@ func TestAChoiceIsCheckedOnItsField(t *testing.T) {
 	}
 	err := models.CheckChoice(context.Background(), "agents[0].model", "anthropic/claude-fable-5-1")
 	var refused *refusal.Refusal
-	if !errors.As(err, &refused) || refused.Reason != domain.ReasonModelNotServed || len(refused.Problems) != 1 || refused.Problems[0].Field != "agents[0].model" {
-		t.Errorf("a model not served: %v, want model_not_served on agents[0].model", err)
+	if !errors.As(err, &refused) || refused.Reason != domain.ReasonModelNotServed || len(refused.Problems) != 1 || refused.Problems[0].Field != "agents[0].model" ||
+		!strings.HasPrefix(refused.Message, "agents[0].model is not served: ") || refused.Problems[0].Message != refused.Message || strings.Contains(refused.Message, "fable") {
+		t.Errorf("a model not served: %v, want model_not_served on agents[0].model, named in its message", err)
 	}
 }
 

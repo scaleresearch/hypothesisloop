@@ -44,7 +44,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 		Summary: "Create a repository from the experiment template unless it exists", Tags: []string{"platform-experiments"},
 		Description: "Answers repository as the git host names it, with repository_url, when the org of the project reaches it, and otherwise creates it from the deployment's experiment template " +
 			"(git_host.experiment_template_repository): its default branch holds one commit of the template's files. POST /platform-experiments does the same for the repository it names; " +
-			"this is for a client that pushes its own branch to the repository before it creates the experiment there. " +
+			"this is for a client that pushes its own branch to the repository before it creates the experiment there, after POST /platform-experiments/check accepts the rest. " +
 			"Refused with the reasons of that create: 422 invalid_repository, git_host_not_connected, installation_not_connected, installation_gone, installation_suspended, git_host_permission_missing, " +
 			"repository_creation_not_permitted, repository_not_reachable when it exists and the platform cannot reach it; 502 git_host_failed and repository_not_created when the git host did not create it.",
 	}, a.ensureRepository)
@@ -103,6 +103,14 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"one of them is kept for an agent of role baseline, and an agent that finished holds none. " +
 			"GET /platform-experiments/{id} shows the coordinator's model and what became of its machine.",
 	}, a.createPlatformExperiment)
+
+	register(doc, auth.AudienceCoordinator, huma.Operation{
+		OperationID: "check-platform-experiment", Method: "POST", Path: "/platform-experiments/check", DefaultStatus: http.StatusNoContent,
+		Summary: "Check a platform experiment before creating it", Tags: []string{"platform-experiments"},
+		Description: "Runs every check of POST /platform-experiments on the same body but those of its repository and branch, with the same refusals, and creates nothing. " +
+			"repository, when named, is taken as the git host names it, as POST /projects/{id}/repositories answers it. " +
+			"A client that pushes its own branch before the create checks the rest here first, so a refused experiment leaves no branch behind.",
+	}, a.checkPlatformExperiment)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-agentsandbox", Method: "GET", Path: "/agentsandbox",
@@ -307,6 +315,25 @@ func (a platformExperimentsAPI) createPlatformExperiment(ctx context.Context, in
 		return nil, err
 	}
 	return a.answer(ctx, pe)
+}
+
+func (a platformExperimentsAPI) checkPlatformExperiment(ctx context.Context, in *struct {
+	Body platformexperiments.CreatePlatformExperimentRequest
+}) (*struct{}, error) {
+	if err := platformexperiments.CheckCreate(in.Body); err != nil {
+		return nil, err
+	}
+	if err := a.access.Project(ctx, in.Body.ProjectID); err != nil {
+		return nil, err
+	}
+	caller, err := caller(ctx, a.logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.experiments.CheckExperiment(ctx, in.Body, caller.Actor()); err != nil {
+		return nil, err
+	}
+	return &struct{}{}, nil
 }
 
 func (a platformExperimentsAPI) getAgentSandbox(ctx context.Context, _ *struct{}) (*struct {

@@ -60,7 +60,7 @@ from an env file the container reads, never a command line.`, stderr)
 	model := fs.String("model", "", "the model the agent runs on, a <provider>/<model id> hl models lists; omitted, its agent type's, and for a researcher the coordinator's")
 	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
 	role := fs.String("role", "", "executor (default), baseline, reviewer or researcher")
-	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
+	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier, and for a researcher, which holds no quota")
 	named := command.ExperimentFlag(fs)
 	if err := command.ParseNone(fs, args); err != nil {
 		return command.ParseExit(err)

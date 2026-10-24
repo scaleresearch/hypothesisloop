@@ -159,20 +159,8 @@ func unreachableType(sizedFor domain.AcceleratorType, reachable map[string][]dom
 // the agents req carries signed up in the same write.
 func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	req, err := s.validate(req)
+	req, err := s.checked(ctx, req)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
-		return nil, err
-	}
-	if req.CoordinatorInAgentSandbox != (req.coordinator != nil) {
-		return nil, fmt.Errorf("platform_experiments.Create: coordinator_in_agentsandbox is %v and its model is resolved: %v", req.CoordinatorInAgentSandbox, req.coordinator != nil)
-	}
-	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
-		return nil, err
-	}
-	if err := s.requireContinuedMetrics(ctx, req.Continues, req.Metrics); err != nil {
 		return nil, err
 	}
 	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
@@ -218,6 +206,25 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 	pe.SignupCount = len(req.signups)
 	s.wakeRepositories(pe)
 	return pe, nil
+}
+
+// checked is req as Create stores it, refused for every rule of the platform experiment it
+// states and of the platform's settings and clusters.
+func (s *Service) checked(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+	req, err := s.validate(req)
+	if err != nil {
+		return req, err
+	}
+	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
+		return req, err
+	}
+	if req.CoordinatorInAgentSandbox != (req.coordinator != nil) {
+		return req, fmt.Errorf("platform_experiments.Create: coordinator_in_agentsandbox is %v and its model is resolved: %v", req.CoordinatorInAgentSandbox, req.coordinator != nil)
+	}
+	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
+		return req, err
+	}
+	return req, s.requireContinuedMetrics(ctx, req.Continues, req.Metrics)
 }
 
 // requireContinuable refuses a run to continue that is not one: continues names a closed platform
@@ -303,36 +310,57 @@ func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperi
 		return nil, err
 	}
 	req.Repository = named
-	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	create, err := s.prepared(ctx, req, by)
 	if err != nil {
-		return nil, auth.Internal(s.logger, "create platform experiment", err)
-	}
-	if req.Agents, err = s.resolvedPool(ctx, catalog, req.Agents); err != nil {
 		return nil, err
-	}
-	create, err := withAgentSandbox(req, s.launch)
-	if err != nil {
-		return nil, s.refusal("create platform experiment", err)
-	}
-	if err := s.served.CheckChoice(ctx, "coordinator_model", create.CoordinatorModel); err != nil {
-		return nil, s.refusal("create platform experiment", err)
-	}
-	create.createdBy = &by
-	if create.CoordinatorInAgentSandbox {
-		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Agents), by, time.Now().UTC()); err != nil {
-			return nil, s.refusal("create platform experiment", err)
-		}
 	}
 	if create.repository, err = s.chooseRepository(ctx, req.ProjectID, create.Repository, req.RepositoryAccount); err != nil {
 		return nil, err
 	}
 	pe, err := s.Create(ctx, create)
-	var answered interface{ GetStatus() int }
-	if errors.As(err, &answered) {
-		return nil, err
-	}
 	if err != nil {
-		return nil, auth.Internal(s.logger, "create platform experiment", err)
+		return nil, s.refusal("create platform experiment", err)
 	}
 	return pe, nil
+}
+
+// CheckExperiment refuses req, for by, as CreateExperiment would, and creates nothing. It checks
+// everything but its repository and branch, which POST /projects/{id}/repositories and a push of
+// the branch settle: a client that pushes the branch checks the rest first.
+func (s *Service) CheckExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) error {
+	create, err := s.prepared(ctx, req, by)
+	if err != nil {
+		return err
+	}
+	create.repository = RepositoryChoice{Named: req.Repository}
+	if _, err := s.checked(ctx, create); err != nil {
+		return s.refusal("check platform experiment", err)
+	}
+	return nil
+}
+
+// prepared is req with its agents resolved and checked, its coordinator resolved and checked, and
+// the agents it is created with, for by.
+func (s *Service) prepared(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (CreatePlatformExperimentRequest, error) {
+	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	if err != nil {
+		return req, auth.Internal(s.logger, "create platform experiment", err)
+	}
+	if req.Agents, err = s.resolvedPool(ctx, catalog, req.Agents); err != nil {
+		return req, err
+	}
+	create, err := withAgentSandbox(req, s.launch)
+	if err != nil {
+		return req, s.refusal("create platform experiment", err)
+	}
+	if err := s.served.CheckChoice(ctx, "coordinator_model", create.CoordinatorModel); err != nil {
+		return req, s.refusal("create platform experiment", err)
+	}
+	create.createdBy = &by
+	if create.CoordinatorInAgentSandbox {
+		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Agents), by, time.Now().UTC()); err != nil {
+			return req, s.refusal("create platform experiment", err)
+		}
+	}
+	return create, nil
 }

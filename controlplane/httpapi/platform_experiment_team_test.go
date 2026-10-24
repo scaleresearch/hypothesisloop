@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -81,6 +82,31 @@ func TestTheAnswerCountsTheAgentsAtWorkPerPoolEntryAndOutsideIt(t *testing.T) {
 	}
 }
 
+// A check refuses what the create would, and creates nothing: neither the experiment nor its
+// repository, whose branch it does not ask for.
+func TestACheckRefusesWhatTheCreateWouldAndCreatesNothing(t *testing.T) {
+	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
+	store, post := agentSandboxPosts(t, repos)
+	for name, c := range map[string]struct {
+		body   map[string]any
+		reason string
+	}{
+		"a model not listed": {run(map[string]any{"coordinator_in_agentsandbox": true, "repository": testRepository, "agents": []map[string]any{{"count": 1}, {"model": "anthropic/claude-fable-5-1", "count": 1}}}), "model_not_served"},
+		"no agent type":      {run(map[string]any{"coordinator_in_agentsandbox": true, "repository": testRepository, "agents": []map[string]any{{"agent_type": "poet", "count": 1}}}), "invalid_agents"},
+		"no duration":        {run(map[string]any{"repository": testRepository, "duration_hours": 0}), "invalid_length"},
+	} {
+		if code, out := post("/platform-experiments/check", c.body); code != http.StatusUnprocessableEntity || out["reason"] != c.reason {
+			t.Errorf("%s: got = %d %v, want 422 %s", name, code, out, c.reason)
+		}
+	}
+	if code, out := post("/platform-experiments/check", run(map[string]any{"coordinator_in_agentsandbox": true, "repository": testRepository, "agents": []map[string]any{{"count": 1}}})); code != http.StatusNoContent {
+		t.Errorf("a valid experiment: got = %d %v, want 204", code, out)
+	}
+	if len(store.created) != 0 || len(store.agentIDs) != 0 || len(repos.checked) != 0 || len(repos.created) != 0 {
+		t.Errorf("created %d experiments and %d agents, read %v and made %v of the git host, want nothing", len(store.created), len(store.agentIDs), repos.checked, repos.created)
+	}
+}
+
 // What the pool may say is checked before anything is created.
 func TestTheTeamIsCheckedBeforeAnythingIsCreated(t *testing.T) {
 	for name, agents := range map[string][]map[string]any{
@@ -99,9 +125,10 @@ func TestTheTeamIsCheckedBeforeAnythingIsCreated(t *testing.T) {
 		store, create := agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 		code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "agents": []map[string]any{{"count": 1}, {"model": model, "count": 1}}}))
 		problems, _ := out["problems"].([]any)
+		message, _ := out["message"].(string)
 		if code != http.StatusUnprocessableEntity || out["reason"] != "model_not_served" || len(problems) != 1 ||
-			problems[0].(map[string]any)["field"] != "agents[1].model" || len(store.created) != 0 {
-			t.Errorf("%s: got = %d %v, created %d, want 422 model_not_served on agents[1].model and nothing", name, code, out, len(store.created))
+			problems[0].(map[string]any)["field"] != "agents[1].model" || !strings.HasPrefix(message, "agents[1].model is not served: ") || len(store.created) != 0 {
+			t.Errorf("%s: got = %d %v, created %d, want 422 model_not_served on agents[1].model, named in the message, and nothing", name, code, out, len(store.created))
 		}
 	}
 	// The team is optional: the cap alone creates no agent.

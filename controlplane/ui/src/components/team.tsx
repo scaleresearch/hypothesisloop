@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import type { PlatformExperimentPatch } from '@/types/api'
-import { DEFAULT_AGENT_TYPE, typeName, useAgentRoles, useAgentTypes } from '@/lib/agent-types'
+import { DEFAULT_AGENT_TYPE, RESEARCHER_AGENT_TYPE, typeName, useAgentRoles, useAgentTypes } from '@/lib/agent-types'
+import { inheritedModel, useModels } from '@/lib/models'
 import { relTime } from '@/lib/format'
 import { atWorkByKey, cutByMax, executorsAtWork, poolKey, toTeam, toTeamRows } from '@/lib/team'
 import type { TeamRow } from '@/lib/team'
@@ -21,7 +22,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Pill, Text } from '@/components/ui/text'
-import { errorMessage } from '@/lib/errors'
+import { refusalMessage } from '@/lib/errors'
 import { keys } from '@/lib/keys'
 import type { JoinedAgent, PlatformExperiment } from '@/types/api'
 import { canEdit } from '@/lib/editable'
@@ -97,7 +98,7 @@ function TeamChange({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
       await mutate(keys.roster(pe.id))
       onDone()
     } catch (e) {
-      setError(errorMessage(e))
+      setError(refusalMessage(e, patch))
     } finally {
       setBusy(false)
     }
@@ -142,6 +143,7 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
   const { data: roster, error } = useRoster(pe)
   const { data: catalog } = useAgentTypes(org.id)
   const { data: roles } = useAgentRoles()
+  const { data: models } = useModels()
   const [editing, setEditing] = useState(false)
   const editable = canEdit(pe, 'agents')
 
@@ -152,6 +154,12 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
   const roleName = (agentType: string) => {
     const role = catalog?.find(t => t.id === agentType)?.role
     return roles?.find(r => r.role === role)?.name
+  }
+  // What an entry that names no model runs on, as the platform resolves it.
+  const runsOn = (agentType: string) => {
+    const { inherited, inheritedFrom } = inheritedModel(catalog?.find(t => t.id === agentType)?.current.settings.model, agentType === RESEARCHER_AGENT_TYPE, pe.coordinator?.model || models?.coordinator_model)
+    if (inherited && inheritedFrom) return { model: inherited, from: inheritedFrom.toLowerCase() }
+    return models && { model: models.default_model, from: 'platform default' }
   }
 
   return (
@@ -176,12 +184,17 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
                 {team.map((e, i) => {
                   const id = e.agent_type || DEFAULT_AGENT_TYPE
                   const role = roleName(id)
+                  const resolved = e.model ? undefined : runsOn(id)
                   return (
                     <tr key={poolKey(e.agent_type, e.model)}>
                       <td className="text-xs font-medium">
                         <Inline gap="xs">{typeName(id, catalog)}{role && <Pill tone="accent">{role}</Pill>}</Inline>
                       </td>
-                      <td className="text-xs">{e.model ? <ModelName model={e.model} /> : <span className="text-muted">inherited</span>}</td>
+                      <td className="text-xs">
+                        {e.model ? <ModelName model={e.model} /> : resolved ? (
+                          <Inline gap="xs" nowrap><ModelName model={resolved.model} /><span className="text-muted">({resolved.from})</span></Inline>
+                        ) : <span className="text-muted">inherited</span>}
+                      </td>
                       <td className={num}>{e.count}</td>
                       <td className={num}>{counts.pool[i]?.at_work ?? 0}</td>
                     </tr>

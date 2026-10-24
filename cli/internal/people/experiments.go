@@ -23,7 +23,8 @@ func PlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr
 DIR is the tree of an experiment's repository: its code and its experiment file at
 DIR/.hypothesisloop/experiment.yaml, which states the experiment and where it is: project_id,
 repository and branch. The file is checked first, a bad one exiting 2 before anything is asked.
-The platform creates the repository from the experiment template when it does not exist, then
+The platform creates the repository from the experiment template when it does not exist and
+checks the experiment the file states, a refused one exiting 1 before anything is pushed. Then
 git, with your own credentials, makes the branch hold DIR as git add -A would commit it,
 DIR/.gitignore respected and DIR's own .git untouched:
 
@@ -57,6 +58,9 @@ prints its id, what it waits for and, with $HL_UI_URL set, where the UI shows it
 		return command.Fail(stderr, err)
 	}
 	file.Repository = repository.Repository
+	if err := c.Do("POST", "/platform-experiments/check", file, nil); err != nil {
+		return command.Fail(stderr, err)
+	}
 	plan, err := planPush(dir, repository.RepositoryURL, file.Branch)
 	if plan != nil {
 		defer os.RemoveAll(plan.gitDir)

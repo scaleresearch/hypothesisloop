@@ -504,6 +504,7 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"no such agent":                 {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "not_found"},
 		"unknown role":                  {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 422, "unknown_role"},
 		"unknown tier":                  {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 422, "invalid_request"},
+		"a researcher's tier":           {domain.PlatformExpOpen, "pe-1", `{"role":"researcher","quota_tier":"guaranteed"}`, 422, "invalid_request"},
 		"name with agent_id":            {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 422, "invalid_request"},
 		"agent type not an id":          {domain.PlatformExpOpen, "pe-1", `{"agent_type":"../x"}`, 422, "invalid_request"},
 		"unknown agent type":            {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 422, "invalid_request"},

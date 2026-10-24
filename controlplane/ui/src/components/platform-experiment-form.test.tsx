@@ -290,6 +290,22 @@ describe('a stage ladder the API refuses', () => {
   })
 })
 
+describe('a model the API does not serve', () => {
+  it('names the entry and the model sent, which the API does not repeat', async () => {
+    const message = 'agents[0].model is not served: the model is not one GET /models lists: openrouter serves no model of that id that this platform runs an agent on'
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, message, 'model_not_served', {
+      reason: 'model_not_served', message, problems: [{ reason: 'model_not_served', message, field: 'agents[0].model' }],
+    }))
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    await pickModel(screen.getByLabelText('Team entry 1 model'), 'nano', 'openrouter/openai/gpt-5-nano')
+    await create()
+    expect(await screen.findByText(/^agents\[0\]\.model openrouter\/openai\/gpt-5-nano is not served: the model is not one/)).toBeTruthy()
+  })
+})
+
 describe('a repository that brings its own experiment', () => {
   // A person who picked such a repository in the form started agents with an empty brief: the
   // form knew nothing of the spec the repository keeps.

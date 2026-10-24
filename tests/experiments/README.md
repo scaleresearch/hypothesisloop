@@ -30,8 +30,8 @@ experiment its spec states:
     hl platform-experiments start tests/experiments/dummy-data-search-demo
 
 `start` checks the file first and exits 2 on a bad one before anything is asked. The platform
-then creates the repository from the experiment template when it does not exist, and `start`
-pushes the directory as the branch when the branch does not exist, pushes nothing when the
+then creates the repository from the experiment template when it does not exist and checks the
+experiment, a refused one stopping `start` before anything is pushed, and `start` pushes the directory as the branch when the branch does not exist, pushes nothing when the
 branch holds the directory already, and stops, changing nothing, when it holds other code. With
 `coordinator_in_agentsandbox: true` the platform runs the coordinator, measures the baseline and
 starts the agents the spec names. `hl platform-experiments get` says what the run waits for.

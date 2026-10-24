@@ -114,7 +114,8 @@ func (s *Service) Check(ctx context.Context, model string) error {
 }
 
 // CheckChoice refuses on field a model a choice names that the platform does not serve, as Check
-// does. An empty one names none: the agent type's or the platform's default.
+// does, the message naming the field. An empty one names none: the agent type's or the
+// platform's default.
 func (s *Service) CheckChoice(ctx context.Context, field, model string) error {
 	if model == "" {
 		return nil
@@ -122,7 +123,7 @@ func (s *Service) CheckChoice(ctx context.Context, field, model string) error {
 	err := s.Check(ctx, model)
 	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
-		return refused.On(field)
+		return refusal.Invalid(refused.Reason, field+" is not served: "+refused.Message).On(field)
 	}
 	return err
 }

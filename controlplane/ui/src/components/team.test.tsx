@@ -10,7 +10,7 @@ import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { Team } from '@/components/team'
 import { CATALOG } from '@/test-agent-types'
-import { MODELS } from '@/test-models'
+import { MODELS, pickModel } from '@/test-models'
 import { choose } from '@/test-select'
 import type { JoinedAgent, Me, PlatformExperiment } from '@/types/api'
 
@@ -68,7 +68,18 @@ describe('the team of an experiment', () => {
     expect(await screen.findByText('3 executors at work of 4 max')).toBeTruthy()
     await screen.findByText('LR sweeper')
     const rows = within(screen.getByRole('table', { name: 'Team' })).getAllByRole('row').slice(1).map(r => r.textContent)
-    expect(rows).toEqual(['GeneralistExecutorclaude-sonnet-5Claude22', 'LR sweeperExecutorclaude-sonnet-5Claude11', 'ResearcherResearcherinherited11'])
+    // A researcher's entry that names no model shows the one it runs on: the coordinator's.
+    await waitFor(() => expect(within(screen.getByRole('table', { name: 'Team' })).getAllByRole('row').slice(1).map(r => r.textContent)).toEqual([
+      'GeneralistExecutorclaude-sonnet-5Claude22', 'LR sweeperExecutorclaude-sonnet-5Claude11', "ResearcherResearcherclaude-opus-5-5Claude(coordinator's model)11",
+    ]))
+  })
+
+  it("shows an entry on its type's model, and one on no model of its own on the platform's default", async () => {
+    show({ ...pe, agents: [{ agent_type: 'at-lr', count: 1 }, { agent_type: 'generalist', count: 1 }], agents_at_work: { total: 0, pool: [], outside_team: 0 } })
+    await waitFor(() => expect(within(screen.getByRole('table', { name: 'Team' })).getAllByRole('row').slice(1).map(r => r.textContent)).toEqual([
+      "LR sweeperExecutormoonshotai/kimi-k2OpenRouter(type's model)10",
+      'GeneralistExecutorclaude-sonnet-5Claude(platform default)10',
+    ]))
   })
 
   it('counts what the coordinator added beyond the team on its own row', async () => {
@@ -133,6 +144,19 @@ describe('the team of an experiment', () => {
       agents: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', count: 1 }, { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', count: 1 }, { agent_type: 'researcher', count: 1 }],
     })
     expect(screen.getByRole('spinbutton', { name: 'Team entry 1 count' })).toBeTruthy()
+  })
+
+  it('names the model sent on the entry a refusal names, which the API does not repeat', async () => {
+    const refusal = 'agents[3].model is not served: the model is not one GET /models lists: openrouter serves no model of that id that this platform runs an agent on'
+    vi.mocked(updatePlatformExperiment).mockRejectedValue(new ApiError(422, refusal, 'model_not_served', {
+      reason: 'model_not_served', message: refusal, problems: [{ reason: 'model_not_served', message: refusal, field: 'agents[3].model' }],
+    }))
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(screen.getByRole('button', { name: '+ Add executor' }))
+    await pickModel(screen.getByLabelText('Team entry 4 model'), 'kimi', 'openrouter/moonshotai/kimi-k2')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/^agents\[3\]\.model openrouter\/moonshotai\/kimi-k2 is not served: /)).toBeTruthy()
   })
 
   it('offers no edit where the API lists no agents in editable: to a reader, or on a closed one', async () => {

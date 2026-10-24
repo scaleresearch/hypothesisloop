@@ -1245,6 +1245,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform-experiments/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a platform experiment before creating it
+         * @description Runs every check of POST /platform-experiments on the same body but those of its repository and branch, with the same refusals, and creates nothing. repository, when named, is taken as the git host names it, as POST /projects/{id}/repositories answers it. A client that pushes its own branch before the create checks the rest here first, so a refused experiment leaves no branch behind.
+         */
+        post: operations["check-platform-experiment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/platform-experiments/drafts": {
         parameters: {
             query?: never;
@@ -2012,7 +2032,7 @@ export interface paths {
         put?: never;
         /**
          * Create a repository from the experiment template unless it exists
-         * @description Answers repository as the git host names it, with repository_url, when the org of the project reaches it, and otherwise creates it from the deployment's experiment template (git_host.experiment_template_repository): its default branch holds one commit of the template's files. POST /platform-experiments does the same for the repository it names; this is for a client that pushes its own branch to the repository before it creates the experiment there. Refused with the reasons of that create: 422 invalid_repository, git_host_not_connected, installation_not_connected, installation_gone, installation_suspended, git_host_permission_missing, repository_creation_not_permitted, repository_not_reachable when it exists and the platform cannot reach it; 502 git_host_failed and repository_not_created when the git host did not create it.
+         * @description Answers repository as the git host names it, with repository_url, when the org of the project reaches it, and otherwise creates it from the deployment's experiment template (git_host.experiment_template_repository): its default branch holds one commit of the template's files. POST /platform-experiments does the same for the repository it names; this is for a client that pushes its own branch to the repository before it creates the experiment there, after POST /platform-experiments/check accepts the rest. Refused with the reasons of that create: 422 invalid_repository, git_host_not_connected, installation_not_connected, installation_gone, installation_suspended, git_host_permission_missing, repository_creation_not_permitted, repository_not_reachable when it exists and the platform cannot reach it; 502 git_host_failed and repository_not_created when the git host did not create it.
          */
         post: operations["ensure-repository"];
         delete?: never;
@@ -2176,7 +2196,7 @@ export interface components {
             model?: string;
             /** @description Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: "Executor 2", "Researcher 1", "Baseline 1". */
             name?: string;
-            /** @description "guaranteed" or "burst_only"; omitted, the platform experiment's default_quota_tier applies. */
+            /** @description "guaranteed" or "burst_only"; omitted, the platform experiment's default_quota_tier applies. Refused for a researcher, which holds no quota (422 invalid_request). */
             quota_tier?: string;
             /**
              * @description "executor", "researcher", "baseline" or "reviewer" (GET /agent-roles).
@@ -7715,6 +7735,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PlatformExperiment"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-platform-experiment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePlatformExperimentRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

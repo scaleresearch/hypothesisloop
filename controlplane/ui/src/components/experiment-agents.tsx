@@ -27,7 +27,7 @@ import { ModelPicker } from '@/components/model-picker'
 import { DEFAULT_AGENT_TYPE, RESEARCHER_AGENT_TYPE, typeLabel, typeName, useAgentRoles, useAgentTypes } from '@/lib/agent-types'
 import { inheritedModel, useModels } from '@/lib/models'
 import { useTenant } from '@/lib/tenant'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, refusalMessage } from '@/lib/errors'
 import { Select } from '@/components/ui/select'
 import { formatDate, relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
@@ -69,12 +69,11 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
     if (!role?.signup_role) return
     setBusy(true)
     setError('')
+    const sent = { in_agentsandbox: sandboxed, agent_type: typeID, role: role.signup_role, model: model.trim() || undefined }
     try {
-      await onAdded(await addPlatformExperimentAgents(pe.id, {
-        in_agentsandbox: sandboxed, agent_type: typeID, role: role.signup_role, model: model.trim() || undefined,
-      }))
+      await onAdded(await addPlatformExperimentAgents(pe.id, sent))
     } catch (e) {
-      setError(errorMessage(e))
+      setError(refusalMessage(e, sent))
     } finally {
       setBusy(false)
     }
