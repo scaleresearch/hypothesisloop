@@ -554,7 +554,7 @@ async function scenarios(browser) {
   section('a sandboxed agent shows what became of its machine')
   // Stood in for: an agent the platform really hosts needs a repository and a sandbox provider that rents.
   const agentsAPI = `${API}/platform-experiments/${experimentID}/agents`
-  const signedUp = { platform_experiment_id: experimentID, role: 'competitor', in_agentsandbox: true, agent_type: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
+  const signedUp = { platform_experiment_id: experimentID, role: 'executor', in_agentsandbox: true, agent_type: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
   await page.route(agentsAPI, route => route.request().method() === 'GET'
     ? route.fulfill({
       headers: { 'access-control-allow-origin': UI },

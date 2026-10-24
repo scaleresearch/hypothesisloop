@@ -37,9 +37,9 @@ printed in the last stage or the only one, before the run starts, or for an agen
 For one agent, where the platform sets a ceiling: data_bytes is what it holds under its data
 prefix and max_data_bytes the ceiling. At or over it every submit is refused with
 data_quota_exceeded until some is deleted. Where the platform caps submissions:
-max_submissions_per_hour is the most jobs it may submit in any hour, and submissions_left how
-many more it may submit now; at 0 a submit is refused with rate_limited until the oldest of the
-last hour's is an hour old.
+max_submissions_per_hour is the most submissions it may make in any hour, each the jobs of one
+hypothesis on one commit, and submissions_left how many more it may make now; at 0 a job of
+another hypothesis or commit is refused with rate_limited.
 Quota is granted when the platform experiment starts. Before that an agent that holds none
 is answered 404 quota_not_granted: hl prints that reason and the platform's word for what the
 start waits for and what you do until then, the same as status_reason of

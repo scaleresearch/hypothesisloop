@@ -33,12 +33,17 @@ const (
 
 type Config struct {
 	APIURL string
+	// PlacementGroupLabel is the key of the node label that names a node's placement group, ""
+	// on a cluster that has none.
+	PlacementGroupLabel string
 }
 
 type JobWorkloadClient struct {
 	kube   kubernetes.Interface
 	dyn    dynamic.Interface
 	apiURL string
+	// placementGroupLabel is Config.PlacementGroupLabel.
+	placementGroupLabel string
 
 	// read is the one look at nodes and pods a pass answers from (ForPass); nil outside a pass.
 	read func() (clusterRead, error)
@@ -65,5 +70,5 @@ func New(cfg Config) (*JobWorkloadClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workload: dynamic client: %w", err)
 	}
-	return &JobWorkloadClient{kube: kube, dyn: dyn, apiURL: cfg.APIURL}, nil
+	return &JobWorkloadClient{kube: kube, dyn: dyn, apiURL: cfg.APIURL, placementGroupLabel: cfg.PlacementGroupLabel}, nil
 }

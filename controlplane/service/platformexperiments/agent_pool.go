@@ -22,7 +22,7 @@ func (s *Service) resolvedPool(ctx context.Context, catalog domain.AgentTypeCata
 		return nil, refuseUpdate(422, "invalid_agents", "%s", err)
 	}
 	for i, e := range pool {
-		if err := s.checkModel(ctx, fmt.Sprintf("agents[%d].model", i), e.Model); err != nil {
+		if err := s.served.CheckChoice(ctx, fmt.Sprintf("agents[%d].model", i), e.Model); err != nil {
 			return nil, s.refusal("resolve agents", err)
 		}
 	}
@@ -35,8 +35,7 @@ func (s *Service) resolvedPool(ctx context.Context, catalog domain.AgentTypeCata
 // entry that finished or whose machine stopped with no restart left, with its hyperparameters and
 // quota tier, or of nobody where the pool gained a place, with the entry's. Never more executors than
 // max_agents leaves beside every executor at work, the coordinator's additions among them. A cut lowered
-// the pool in the write that cut, and a researcher's finish in the write that finished it, so no cut
-// agent and no researcher that finished is replaced. Nor is one that ended early, and an entry
+// the pool in the write that cut, so no cut agent is replaced. Nor is one that ended early, and an entry
 // is given at most domain.MaxReplacementsAnHour replacements an hour: the places it keeps empty
 // are told on the platform experiment (db.HoldAgents), and the entry is checked again in the
 // write that adds each one (db.LateJoin.Pool).
@@ -99,6 +98,8 @@ func (s *Service) KeepAgents(ctx context.Context, pe *domain.PlatformExperiment,
 		by = *pe.Actor
 	}
 	executorsFull := false
+	// What the executors used, read once for the pass: a newcomer has used nothing.
+	var share *db.LateJoin
 	for _, place := range places {
 		executor := !place.Entry.Key().Researches()
 		if executor && executorsFull || refused[s.poolModel(pe, catalog, place.Entry)] {
@@ -114,15 +115,21 @@ func (s *Service) KeepAgents(ctx context.Context, pe *domain.PlatformExperiment,
 			continue
 		}
 		signup := domain.AgentSignup{
-			Role: domain.SignupRoleOfPool(choice.AgentType), QuotaTier: tier, InAgentSandbox: true,
+			Role: domain.PoolRole(choice.AgentType).Info().SignupRole, QuotaTier: tier, InAgentSandbox: true,
 			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by, Replaces: place.Replaces,
 		}
-		late, err := s.lateShare(ctx, pe)
-		if err != nil {
-			s.logger.Error("keep agents: the share of a late agent", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces), zap.Error(err))
-			continue
+		late := db.LateJoin{Pool: true}
+		if executor {
+			if share == nil {
+				if share, err = s.lateShare(ctx, pe); err != nil {
+					s.logger.Error("keep agents: the share of a late executor, so no executor is added", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+					executorsFull = true
+					continue
+				}
+				share.Pool = true
+			}
+			late = *share
 		}
-		late.Pool = true
 		id, err := domain.NewID(domain.AgentIDPrefix)
 		if err != nil {
 			s.logger.Error("keep agents: an agent id", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
@@ -130,7 +137,7 @@ func (s *Service) KeepAgents(ctx context.Context, pe *domain.PlatformExperiment,
 		}
 		signup.AgentID = id
 		agent := &domain.Agent{ID: id, CreatedAt: now}
-		err = s.store.JoinRunning(ctx, pe.ID, agent, signup, *late)
+		err = s.store.JoinRunning(ctx, pe.ID, agent, signup, late)
 		switch {
 		case errors.Is(err, db.ErrNoShareLeft), errors.Is(err, db.ErrMaxAgentsReached):
 			s.logger.Info("keep agents: no further executor added", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces), zap.String("why", err.Error()))

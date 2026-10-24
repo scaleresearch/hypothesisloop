@@ -77,11 +77,11 @@ func sandboxedAgents(catalog domain.AgentTypeCatalog, team []ProposedAgent, by d
 	agents := make([]*domain.Agent, 0, len(team)+1)
 	signups := make([]domain.AgentSignup, 0, len(team)+1)
 	for i, asked := range append(slices.Clone(team), ProposedAgent{}) {
-		role := domain.SignupRoleOfPool(asked.AgentType)
+		role := domain.PoolRole(asked.AgentType)
 		if i == len(team) {
-			role = domain.SignupRoleBaseline
+			role = domain.AgentRoleBaseline
 		}
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.AgentType, asked.Model, asked.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, role, asked.AgentType, asked.Model, asked.Hyperparameters)
 		if err != nil {
 			return nil, nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
@@ -91,7 +91,7 @@ func sandboxedAgents(catalog domain.AgentTypeCatalog, team []ProposedAgent, by d
 		}
 		agents = append(agents, &domain.Agent{ID: agentID, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
-			AgentID: agentID, Role: role, InAgentSandbox: true,
+			AgentID: agentID, Role: role.Info().SignupRole, InAgentSandbox: true,
 			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by,
 		})
 	}

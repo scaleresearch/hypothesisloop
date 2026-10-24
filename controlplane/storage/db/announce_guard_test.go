@@ -35,10 +35,6 @@ var announcedUpdates = map[string][]string{
 // appendOnly are the tables no write updates or deletes.
 var appendOnly = map[string]bool{"platform_rules": true, "agent_type_events": true, "agent_type_versions": true}
 
-// formatMigrations rewrite rows of append-only tables in place at start: the same value stored in
-// the format of this release, as prefixBareModels makes a bare model the reference to it.
-var formatMigrations = map[string]bool{"prefixBareModels": true}
-
 var (
 	insertInto = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+(\w+)`)
 	updateSet  = regexp.MustCompile(`(?is)\bUPDATE\s+(\w+)(?:\s+(?:AS\s+)?\w+)?\s+SET\b`)
@@ -70,7 +66,7 @@ func TestEveryAnnouncedWriteAnnouncesAndAppendOnlyTablesAreOnlyAppended(t *testi
 	for name, f := range funcs {
 		for _, sql := range f.sql {
 			for _, write := range writesIn(sql) {
-				if write.appendOnly && !formatMigrations[name] {
+				if write.appendOnly {
 					t.Errorf("%s: %s, and the table is append-only", name, write.what)
 				}
 				if write.announced && !announces[name] {

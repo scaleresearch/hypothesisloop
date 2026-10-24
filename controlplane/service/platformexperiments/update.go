@@ -125,17 +125,13 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	// neither writes it nor loses it.
 	authored, _ := splitMeasuredBaseline(patched.Description)
 	_, measured := splitMeasuredBaseline(pe.Description)
-	catalog, err := s.store.AgentTypeCatalog(ctx, pe.ID)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
-	}
 	checked, err := s.validate(CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
 		Name: patched.Name, Description: authored,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Agents: patched.Agents,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: patched.DefaultQuotaTier,
-	}, StartsAt: patched.StartsAt, ModelBudgetUSD: patch.ModelBudgetUSD}, catalog)
+	}, StartsAt: patched.StartsAt, ModelBudgetUSD: patch.ModelBudgetUSD})
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +171,7 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	var below *db.PoolBelowAtWorkError
 	switch err := s.store.UpdatePlatformExperiment(ctx, pe, expectedStatus, agents); {
 	case errors.As(err, &below) && below.Key == (domain.PoolKey{}):
-		return nil, refuseUpdate(409, "max_agents_below_executors", "max_agents %d is below the %d executors (agents of role competitor) of platform experiment %s, which has not started: state at least %d, or remove executors first. Once it runs, a lower max_agents cuts the newest of them", below.Count, below.AtWork, pe.ID, below.AtWork)
+		return nil, refuseUpdate(409, "max_agents_below_executors", "max_agents %d is below the %d executors of platform experiment %s, which has not started: state at least %d, or remove executors first. Once it runs, a lower max_agents cuts the newest of them", below.Count, below.AtWork, pe.ID, below.AtWork)
 	case errors.As(err, &below):
 		return nil, refuseUpdate(409, "agents_below_at_work", "%s: a change of agents takes out no agent at work, so state at least that many", below)
 	case err != nil:

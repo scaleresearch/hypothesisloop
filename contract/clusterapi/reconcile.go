@@ -29,6 +29,10 @@ const (
 	// NodeSlotNoNetworkLabel is beside a NodeSlotNetworkLabel of 0: the runtime's reason, in words
 	// a person reads.
 	NodeSlotNoNetworkLabel = NodeLabelReservedPrefix + "slot-no-network"
+	// NodeSlotNetworkWithinLabel is on every slot of a runtime with private networks: the
+	// nearest level (NodesLevels) every instance on one of them is within. A job that spans
+	// several nodes takes slots only as near as its JobSpec.NodesWithin.
+	NodeSlotNetworkWithinLabel = NodeLabelReservedPrefix + "slot-network-within"
 	// NodeSlotStartupLabel is on every slot: how many seconds a machine rented for it may take to
 	// start a job's command, past which the runtime rents another.
 	NodeSlotStartupLabel = NodeLabelReservedPrefix + "slot-startup-seconds"
@@ -38,6 +42,14 @@ const (
 	// NodeArchitectureLabel is on every node a runtime reports: the architecture of its CPU as Go
 	// and image manifests name it (amd64, arm64). A job runs only on a node of its image's.
 	NodeArchitectureLabel = "kubernetes.io/arch"
+	// NodeRegionLabel and NodeZoneLabel name the region and the zone a node is in. A cluster none
+	// of whose nodes carries one is one region or zone.
+	NodeRegionLabel = "topology.kubernetes.io/region"
+	NodeZoneLabel   = "topology.kubernetes.io/zone"
+	// NodePlacementGroupKeyLabel is on a node whose runtime knows placement groups: its value is
+	// the key of the node's own label that names the node's placement group. A node without it
+	// is in none.
+	NodePlacementGroupKeyLabel = NodeLabelReservedPrefix + "placement-group-key"
 )
 
 // ReasonClusterNotRegistered is the reason on the 401 a runtime token gets once its cluster is

@@ -211,6 +211,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp.Job.AcceleratorType == "" {
 		exp.Job.AcceleratorType = domain.GroupAcceleratorType(exp.Job)
 	}
+	if err := domain.ValidateTopology(exp.Job); err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.topology.nodes_within", Message: err.Error()}
+	}
 	if err := domain.ValidateSecretEnv(exp.Job, exp.SecretEnv); err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Field: "secret_env", Message: err.Error()}
 	}

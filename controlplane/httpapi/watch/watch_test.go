@@ -147,7 +147,7 @@ func (f *fakeHypotheses) ConcernsAgent(_ context.Context, agentID string, events
 }
 
 // lookupStore places every job in exp's platform experiment, and signs up every agent of roles
-// in its role, a competitor otherwise.
+// in its role, an executor otherwise.
 type lookupStore struct {
 	exp   *domain.Experiment
 	roles map[string]domain.SignupRole
@@ -160,7 +160,7 @@ func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment
 func (s *lookupStore) GetAgentSignup(_ context.Context, pe, agentID string) (*domain.AgentSignup, error) {
 	role, ok := s.roles[agentID]
 	if !ok {
-		role = domain.SignupRoleCompetitor
+		role = domain.SignupRoleExecutor
 	}
 	return &domain.AgentSignup{AgentID: agentID, PlatformExperimentID: pe, Role: role}, nil
 }

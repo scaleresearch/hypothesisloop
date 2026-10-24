@@ -1,9 +1,6 @@
 package provider
 
-import (
-	"context"
-	"sort"
-)
+import "context"
 
 // Pauser is the capability of setting an instance aside without giving it up: a paused instance
 // keeps its identity and its disk and is not billed for compute, for as long as the vendor keeps
@@ -37,15 +34,18 @@ func Capabilities(p Provider) []string {
 		b = Bound(p)
 	}
 	found := []string{}
-	for name, has := range map[string]bool{
-		CapabilityPause: b.Pauser != nil, CapabilityMarket: b.Market != nil,
-		CapabilityWarm: b.Warmer != nil, CapabilityNetwork: b.Networker != nil,
-	} {
-		if has {
-			found = append(found, name)
-		}
+	if b.Market != nil {
+		found = append(found, CapabilityMarket)
 	}
-	sort.Strings(found)
+	if b.Networker != nil {
+		found = append(found, CapabilityNetwork)
+	}
+	if b.Pauser != nil {
+		found = append(found, CapabilityPause)
+	}
+	if b.Warmer != nil {
+		found = append(found, CapabilityWarm)
+	}
 	return found
 }
 

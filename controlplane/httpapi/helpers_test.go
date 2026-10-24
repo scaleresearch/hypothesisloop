@@ -21,7 +21,7 @@ import (
 )
 
 // testModels is the models the tests' platform serves: platformexperimentstest.Catalog's.
-var testModels = models.New(platformexperimentstest.Catalog, nil, platformexperimentstest.Defaults)
+var testModels = models.New(map[string]models.Provider{domain.ModelProviderAnthropic: models.Catalog(platformexperimentstest.Catalog)}, platformexperimentstest.Defaults)
 
 // testExperiments is the platform experiments service over store, with the models it serves
 // and nothing else wired.

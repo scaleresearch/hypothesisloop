@@ -84,7 +84,7 @@ func (s *poolStore) GetAgentSignup(_ context.Context, _, agentID string) (*domai
 	if agentID == "agent-elsewhere" {
 		return nil, nil
 	}
-	role := domain.SignupRoleCompetitor
+	role := domain.SignupRoleExecutor
 	switch {
 	case agentID == "baseline-agent":
 		role = domain.SignupRoleBaseline

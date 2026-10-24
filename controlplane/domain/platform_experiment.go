@@ -102,7 +102,7 @@ type PlatformExperiment struct {
 	// BudgetKind is what the budget is spent on, worked out on every answer
 	// (platformexperiments.Service.budgetKinds) and stored nowhere.
 	BudgetKind TypeKind `json:"budget_kind" doc:"What budget_accelerator_hours and consumed_accelerator_hours count: cpu when they are CPU core-hours, accelerator when they are accelerator-hours. The kind of the accelerator_type its proposal was sized for, and without a proposal cpu only once it has jobs and every one of them runs on CPU cores. On every platform experiment, listed or read."`
-	MaxAgents  int      `json:"max_agents" doc:"How many executors may be at work at once, the one count of them: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the executors at work nor below the executors of agents. On a draft: the most executors its planner may propose, which accepting replaces with the number accepted."`
+	MaxAgents  int      `json:"max_agents" doc:"How many executors may be at work at once, the one count of them: the agents of role executor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the executors at work nor below the executors of agents. On a draft: the most executors its planner may propose, which accepting replaces with the number accepted."`
 	// Agents is the desired state of the team: how many of each agent type and model are to be at
 	// work, executors at most MaxAgents in all. The platform keeps it while the run goes on
 	// (platformexperiments.Service.KeepAgents). Optional; empty on a draft, which its accepted proposal fills.
@@ -110,7 +110,7 @@ type PlatformExperiment struct {
 	// AgentsAtWork counts who is at work against the pool, on every answer about one platform
 	// experiment (httpapi platformExperimentsAPI.answer), stored nowhere.
 	AgentsHeld   string        `json:"agents_held,omitempty" doc:"On a running platform experiment whose platform hosts the coordinator, the places of agents it keeps empty and why, absent when none: an agent that ended within 10 minutes of joining, or an executor that ended before submitting a job, is never replaced, and one whose pool entry had 3 replacements in the last hour waits. platform_experiment.status tells each change. On a read of one."`
-	AgentsAtWork *AgentsAtWork `json:"agents_at_work,omitempty" doc:"The agents at work: total, the executors max_agents holds to, then for each entry of agents, and outside_pool for those of an agent type and model it names no entry of. Absent on a list."`
+	AgentsAtWork *AgentsAtWork `json:"agents_at_work,omitempty" doc:"The agents at work: total, the executors max_agents holds to, then for each entry of agents, and outside_team for those of an agent type and model it names no entry of. Absent on a list."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING, summed across
 	// this platform experiment's agents' jobs) at any moment. Nil defers to
 	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on
@@ -441,11 +441,11 @@ type SignupRole = platformapi.SignupRole
 // TakesSignup says an agent of role joins a platform experiment in status: any while it is open,
 // and once it runs an executor or a researcher only.
 func TakesSignup(status PlatformExperimentStatus, role SignupRole) bool {
-	return status == PlatformExpOpen || status == PlatformExpRunning && (role == SignupRoleCompetitor || role == SignupRoleResearcher)
+	return status == PlatformExpOpen || status == PlatformExpRunning && (role == SignupRoleExecutor || role == SignupRoleResearcher)
 }
 
 const (
-	SignupRoleCompetitor = platformapi.SignupRoleCompetitor
+	SignupRoleExecutor   = platformapi.SignupRoleExecutor
 	SignupRoleBaseline   = platformapi.SignupRoleBaseline
 	SignupRoleReviewer   = platformapi.SignupRoleReviewer
 	SignupRoleResearcher = platformapi.SignupRoleResearcher
@@ -464,13 +464,13 @@ func BaselineShare(budget float64) float64 {
 }
 
 // ParseSignupRole resolves a requested role. Anything unrecognized is an error: defaulting a typo
-// to competitor would silently rank an agent nobody meant to rank.
+// to executor would silently rank an agent nobody meant to rank.
 func ParseSignupRole(s string) (SignupRole, error) {
 	switch SignupRole(s) {
-	case SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer, SignupRoleResearcher:
+	case SignupRoleExecutor, SignupRoleBaseline, SignupRoleReviewer, SignupRoleResearcher:
 		return SignupRole(s), nil
 	}
-	return "", fmt.Errorf("role must be one of competitor, baseline, reviewer, researcher")
+	return "", fmt.Errorf("role must be one of executor, baseline, reviewer, researcher")
 }
 
 // FinishBecause is the API's own (platformapi).

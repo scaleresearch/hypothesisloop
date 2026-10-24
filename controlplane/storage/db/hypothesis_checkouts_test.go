@@ -19,7 +19,7 @@ func TestACheckoutClaimsTheHypothesisBeforeAJob(t *testing.T) {
 	second, _, _ := seedRun(t, pool, "checkout-b", true)
 	stale, _, _ := seedRun(t, pool, "checkout-c", true)
 	finished, _, _ := seedRun(t, pool, "checkout-d", true)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, finished_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now())`, peID, finished)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, finished_at, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now(), 'executor')`, peID, finished)
 	t.Cleanup(func() {
 		exec(t, pool, `DELETE FROM experiment_signups WHERE agent_id = $1`, finished)
 		exec(t, pool, `DELETE FROM experiments WHERE platform_experiment_id = $1`, peID)
@@ -110,7 +110,7 @@ func TestAnAgentThatEndedWorksOnNothing(t *testing.T) {
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
 VALUES ('agent', 'ended-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', 'RUNNING', 1, now(), 'AK', 'SK')`, cut, peID, hypothesisID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, cut)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, peID, cut)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, peID, cut)
 
 	want := []domain.HypothesisWorker{{AgentID: worker, Name: worker}}

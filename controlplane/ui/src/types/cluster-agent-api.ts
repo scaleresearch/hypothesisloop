@@ -325,7 +325,11 @@ export interface components {
             started_at?: string;
         };
         TopologySpec: {
-            same_zone?: boolean;
+            /**
+             * @description How close the job's nodes are to each other: one region, one zone (the default of a job over several nodes) or one placement group. A job no such place of any idle cluster holds is refused exceeds_cluster_capacity at submit; one that such a place holds waits with capacity_unavailable while it is full. Ignored for a job on one node.
+             * @enum {string}
+             */
+            nodes_within?: "region" | "zone" | "placement_group";
             spread_across_hosts?: boolean;
         };
     };
@@ -526,3 +530,4 @@ type ReadonlyArray<T> = [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
+export const topologySpecNodes_withinValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["TopologySpec"]["nodes_within"]> = ["region", "zone", "placement_group"];

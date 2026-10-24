@@ -21,7 +21,7 @@ import (
 type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
 	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Executor 2\", \"Researcher 1\", \"Baseline 1\"."`
-	Role            string         `json:"role,omitempty" default:"competitor" doc:"\"competitor\" (an executor), \"researcher\", \"baseline\" or \"reviewer\" (GET /agent-roles)."`
+	Role            string         `json:"role,omitempty" default:"executor" doc:"\"executor\", \"researcher\", \"baseline\" or \"reviewer\" (GET /agent-roles)."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	InAgentSandbox  bool           `json:"in_agentsandbox,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
 	AgentType       string         `json:"agent_type,omitempty" doc:"The agent type it runs, which it reads from its signup, of the role role gives: for an executor generalist (default), hyperparameter-search, architecture-search, data-search or an executor type of the org, for a researcher researcher (default), for a baseline agent baseline (default)."`
@@ -96,7 +96,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 			return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 		}
 		for i, signup := range signups {
-			if signup.SharesBudget() && (signup.Instance == nil || signup.Instance.AskedAt == nil) {
+			if signup.WaitsForStart() && (signup.Instance == nil || signup.Instance.AskedAt == nil) {
 				out[i].StatusReason = neverLaunched(why)
 			}
 		}
@@ -118,7 +118,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 	}
 	for i, signup := range signups {
-		if !signup.SharesBudget() {
+		if !signup.WaitsForStart() {
 			continue
 		}
 		waits, summary := "it takes its first turn when the platform starts the run", "It starts with the run."
@@ -205,7 +205,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkModel(ctx, "model", choice.Model); err != nil {
+	if err := s.served.CheckChoice(ctx, "model", choice.Model); err != nil {
 		return nil, s.refusal("add agent", err)
 	}
 	signup := domain.AgentSignup{
@@ -278,7 +278,7 @@ func (s *Service) lateShare(ctx context.Context, pe *domain.PlatformExperiment) 
 // executorQuotas is the quota and use of each executor of pe that holds one and was not cut.
 // Ended is left unset.
 func (s *Service) executorQuotas(ctx context.Context, pe *domain.PlatformExperiment) ([]domain.ExecutorQuota, error) {
-	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (s *Service) executorQuotas(ctx context.Context, pe *domain.PlatformExperim
 func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
 	switch {
 	case errors.Is(err, db.ErrSignupClosed) && pe.Status == domain.PlatformExpRunning:
-		return refuseSignup(409, "signup_closed", "platform experiment %s is running, and only an executor (role competitor) or a researcher joins it then", pe.ID)
+		return refuseSignup(409, "signup_closed", "platform experiment %s is running, and only an executor or a researcher joins it then", pe.ID)
 	case errors.Is(err, db.ErrSignupClosed):
 		return refuseSignup(409, "signup_closed", "experiment is %s", pe.Status)
 	case errors.Is(err, db.ErrAgentNameTaken):

@@ -17,7 +17,7 @@ import (
 // SendMessageRequest is the body of POST /platform-experiments/{id}/messages.
 type SendMessageRequest struct {
 	AgentID     string `json:"agent_id,omitempty" doc:"The agent to send it to. Exactly one of agent_id, all and coordinator."`
-	All         bool   `json:"all,omitempty" doc:"Send it to every agent of the team at work, executors (role competitor) and researchers: none that finished or was cut."`
+	All         bool   `json:"all,omitempty" doc:"Send it to every agent of the team at work, executors and researchers: none that finished or was cut."`
 	Coordinator bool   `json:"coordinator,omitempty" doc:"Send it to the sandboxed coordinator, from a person or a key."`
 	Text        string `json:"text" minLength:"1" doc:"What the agent is told, at most 1500 bytes."`
 }

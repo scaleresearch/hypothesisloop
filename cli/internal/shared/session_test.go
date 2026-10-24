@@ -16,7 +16,7 @@ func TestAgentsSessionWritesTheStoredBytesAsTheyAre(t *testing.T) {
 	var asked string
 	clitest.SetAPIURL(t, clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/agents") {
-			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"ag-p","role":"planner"},{"agent_id":"ag-1","role":"competitor"}]}`))
+			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"ag-p","role":"planner"},{"agent_id":"ag-1","role":"executor"}]}`))
 			return
 		}
 		asked = r.Method + " " + r.URL.Path
@@ -40,7 +40,7 @@ func TestAgentsSessionWritesTheStoredBytesAsTheyAre(t *testing.T) {
 
 func TestAgentsSessionOfAPlannerThatNeverWasSaysSo(t *testing.T) {
 	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
-		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "role": "competitor"}}}
+		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "role": "executor"}}}
 	})
 	var stdout, stderr bytes.Buffer
 	code := clitest.Run(AgentsSession, []string{"--platform-experiment", "pe-1", "planner"}, &stdout, &stderr)

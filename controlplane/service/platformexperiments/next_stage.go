@@ -38,7 +38,7 @@ func (s *Service) nextStage(ctx context.Context, pe *domain.PlatformExperiment) 
 	if pe.Status != domain.PlatformExpRunning || pe.CurrentStage >= len(pe.Stages) {
 		return nil, nil
 	}
-	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, fmt.Errorf("next stage: %w", err)
 	}
@@ -46,8 +46,8 @@ func (s *Service) nextStage(ctx context.Context, pe *domain.PlatformExperiment) 
 	if err != nil {
 		return nil, fmt.Errorf("next stage: %w", err)
 	}
-	standing := make(map[string]bool, len(competitors))
-	for _, agentID := range competitors {
+	standing := make(map[string]bool, len(executors))
+	for _, agentID := range executors {
 		standing[agentID] = true
 	}
 	for _, cut := range cuts {

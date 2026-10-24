@@ -14,8 +14,9 @@ func slotSize(cores, memoryGi, storageGi int64) map[string]int64 {
 	}
 }
 
+// slotLabels are the labels of a slot of a runtime whose private networks are placement groups.
 func slotLabels(name string, devices int) map[string]string {
-	labels := map[string]string{domain.NodeSlotLabel: name}
+	labels := map[string]string{domain.NodeSlotLabel: name, domain.NodeSlotNetworkWithinLabel: string(domain.NodesWithinPlacementGroup)}
 	if devices > 0 {
 		labels[domain.NodeSlotAcceleratorsLabel] = strconv.Itoa(devices)
 		labels["nvidia.com/gpu.product"] = "NVIDIA-H100-80GB-HBM3"
@@ -272,5 +273,37 @@ func TestNetworkWait(t *testing.T) {
 	labels["a"][domain.NodeSlotNetworkLabel], labels["b"][domain.NodeSlotNetworkLabel] = "2", "2"
 	if _, _, _, ok := NetworkWait(h100Gang(2, "4"), "c", sizes, sizes, labels); ok {
 		t.Error("a job a network holds waits on one")
+	}
+}
+
+// A slot takes a node of a job that spans nodes only when its private networks join nodes as near
+// as the job asks, and a job asking for nearer is told what the cluster's networks join.
+func TestAJobThatSpansNodesTakesSlotsOnlyAsNearAsItAsks(t *testing.T) {
+	sizes := map[string]map[string]int64{"a": slotSize(8, 32, 100), "b": slotSize(8, 32, 100)}
+	labels := map[string]map[string]string{"a": networked(slotLabels("a", 1), 2, ""), "b": networked(slotLabels("b", 1), 2, "")}
+	for _, l := range labels {
+		l[domain.NodeSlotNetworkWithinLabel] = string(domain.NodesWithinZone)
+	}
+	for level, near := range map[domain.NodesLevel]bool{domain.NodesWithinRegion: true, domain.NodesWithinZone: true, domain.NodesWithinPlacementGroup: false} {
+		exp := h100Gang(2, "4")
+		exp.Job.Topology = &domain.TopologySpec{NodesWithin: level}
+		_, isFree, misfit := SlotsFor(exp, "c", sizes, sizes, labels)
+		if near != (misfit == "" && isFree) {
+			t.Errorf("within %s on slots within a zone: free %v, misfit %q", level, isFree, misfit)
+		}
+		if !near && !strings.Contains(misfit, "within one zone of each other, and job.topology.nodes_within asks for one placement group") {
+			t.Errorf("within %s: misfit %q does not say how near the networks join nodes", level, misfit)
+		}
+		resolved, _ := ResolveOntoSlots(h100Gang(2, "4"), "c", sizes, sizes, labels)
+		resolved.Topology = exp.Job.Topology
+		exp.ResolvedJob = resolved
+		if got := TopologyFits(map[string]map[string]int64{"a": {h100: 1}, "b": {h100: 1}}, CloneNodes(sizes), labels, exp); got != near {
+			t.Errorf("within %s on slots within a zone: TopologyFits %v", level, got)
+		}
+	}
+	delete(labels["a"], domain.NodeSlotNetworkWithinLabel)
+	delete(labels["b"], domain.NodeSlotNetworkWithinLabel)
+	if _, _, misfit := SlotsFor(h100Gang(2, "4"), "c", sizes, sizes, labels); !strings.Contains(misfit, "share no private network") {
+		t.Errorf("slots of a runtime with no private network: misfit %q", misfit)
 	}
 }

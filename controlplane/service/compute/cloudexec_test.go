@@ -146,48 +146,13 @@ func TestAnInstanceNameIsReadBackAsWhatItWasBuiltFrom(t *testing.T) {
 	}
 	for _, foreign := range []string{
 		"hl-agent-t1-pe-bot", "hl-job-t1-exp-a1-h100", "hl-job-t1--a1-h100-0", "hl-job-t1-exp-a01-h100-0",
-		"hl-job-t2-exp-a1-h100-0", "hl-job-t10-exp-a1-h100-0", "hl-exp-a1-h100-0",
+		"hl-job-t1-exp-1-a0-h100-0", "hl-job-t2-exp-a1-h100-0", "hl-job-t10-exp-a1-h100-0", "hl-exp-a1-h100-0",
 		"hl-job-t1--a1-r0of1-h100-0", "hl-job-t1-exp-a1-r1of1-h100-0", "hl-job-t1-exp-a1-r0of0-h100-0",
 		"hl-job-t1-exp-a1-r01of2-h100-0", "hl-job-t1-exp-a1-r0of2x-h100-0", "hl-job-t1-exp-r0of1-h100-0",
 	} {
 		if _, ok := e.parseInstanceName(foreign); ok {
 			t.Errorf("%q was read as a job's instance of namespace t1", foreign)
 		}
-	}
-}
-
-// An instance rented before a job could span several nodes has no rank in its name. It reads as
-// the only rank of its job, so a deploy keeps the one-node jobs it finds running: the pass matches
-// it, reports it, and neither destroys it nor rents it again.
-func TestAnInstanceNamedBeforeRanksIsTheOnlyRankOfItsJob(t *testing.T) {
-	e, p := newTestExecutor(t)
-	ctx := context.Background()
-	const name = "hl-job-t1-exp-1-a0-h100-0"
-	parsed, ok := e.parseInstanceName(name)
-	if !ok || parsed.experimentID != "exp-1" || parsed.attempt != 0 || parsed.rank != 0 || parsed.ranks != 1 || parsed.slot() != "h100-0" {
-		t.Fatalf("parsed = %+v, %v", parsed, ok)
-	}
-	if _, err := p.Create(ctx, provider.Spec{Name: name, Architecture: "amd64"}); err != nil {
-		t.Fatal(err)
-	}
-	p.Start(name)
-	p.Print(name, "epoch 3")
-	exp := job(t, "exp-1", 0, 1)
-	mustCreate(t, e, exp)
-	if matches, err := e.WorkloadMatchesDesired(ctx, exp); err != nil || !matches {
-		t.Fatalf("matches %v, %v", matches, err)
-	}
-	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning || attempt != 0 {
-		t.Fatalf("phase %v, attempt %d", phase, attempt)
-	}
-	if tail, err := e.FetchLogTail(ctx, "exp-1", 10); err != nil || !reflect.DeepEqual(tail, []string{"epoch 3"}) {
-		t.Fatalf("tail %q, %v", tail, err)
-	}
-	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err != nil {
-		t.Fatal(err)
-	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{name}) {
-		t.Fatalf("rented %v, want the instance kept and nothing rented beside it", names)
 	}
 }
 
@@ -351,7 +316,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 		}
 		available, total, byNode, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 		if err != nil || total[h100] != 2 || len(labels) != 3 || labels["h100-1"]["nvidia.com/gpu.product"] != "NVIDIA-H100" ||
-			labels["h100-1"][clusterapi.NodeSlotLabel] != "h100-1" || labels["h100-1"][clusterapi.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{clusterapi.NodeSlotLabel: "cpu-0", clusterapi.NodeArchitectureLabel: "amd64", clusterapi.NodeSlotStartupLabel: "240"}) {
+			labels["h100-1"][clusterapi.NodeSlotLabel] != "h100-1" || labels["h100-1"][clusterapi.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{clusterapi.NodeSlotLabel: "cpu-0", clusterapi.NodeArchitectureLabel: "amd64", clusterapi.NodeSlotStartupLabel: "240", clusterapi.NodeSlotNetworkWithinLabel: "placement_group"}) {
 			t.Fatalf("accelerator snapshot = %v %v %v, %v", total, byNode, labels, err)
 		}
 		nodes, err = e.GetLiveNodeResourceCapacity(ctx)

@@ -67,14 +67,6 @@ func TestPoolDeficitHoldsThePlacesOfEarlyEndsAndAboveTheReplacementLimit(t *test
 	}
 }
 
-func TestACutLowersItsEntryAndNoOther(t *testing.T) {
-	pool := AgentPool{{AgentType: "generalist", Model: "m", Count: 2}, {AgentType: "data-search", Model: "m", Count: 1}}
-	got := pool.Lowered([]PoolKey{{AgentType: "data-search", Model: "m"}, {AgentType: "data-search", Model: "m"}, {AgentType: "architecture-search", Model: "m"}})
-	if got[0].Count != 2 || got[1].Count != 0 || pool[1].Count != 1 {
-		t.Errorf("got = %+v from %+v, want data-search at 0, generalist kept and the pool given unchanged", got, pool)
-	}
-}
-
 func TestAPoolIsCheckedAndResolved(t *testing.T) {
 	for name, c := range map[string]struct {
 		pool AgentPool
@@ -88,7 +80,7 @@ func TestAPoolIsCheckedAndResolved(t *testing.T) {
 		"a bare model":             {AgentPool{{Model: "claude-sonnet-5", Count: 1}}, false},
 		"a model reference":        {AgentPool{{Model: "openrouter/moonshotai/kimi-k2", Count: 1}}, true},
 	} {
-		if err := c.pool.Check(testCatalog()); (err == nil) != c.ok {
+		if _, err := c.pool.Resolved(testCatalog()); (err == nil) != c.ok {
 			t.Errorf("%s: got = %v, want ok %v", name, err, c.ok)
 		}
 	}
@@ -124,7 +116,7 @@ func TestResearchersOfAPoolAreKeptBesideTheExecutorsAndCountTowardNoMaxAgents(t 
 	r := PoolKey{AgentType: ResearcherAgentType}
 	g := PoolKey{AgentType: "generalist"}
 	pool := AgentPool{{AgentType: ResearcherAgentType, Count: 1}, {AgentType: "generalist", Count: 2}}
-	if pool.Executors() != 2 || PoolRole(ResearcherAgentType) != AgentRoleResearcher || PoolRole("generalist") != AgentRoleExecutor || SignupRoleOfPool(ResearcherAgentType) != SignupRoleResearcher {
+	if pool.Executors() != 2 || PoolRole(ResearcherAgentType) != AgentRoleResearcher || PoolRole("generalist") != AgentRoleExecutor || AgentRoleResearcher.Info().SignupRole != SignupRoleResearcher {
 		t.Fatalf("executors %d, want 2 and the researcher type of role researcher", pool.Executors())
 	}
 	places, _ := PoolDeficit(pool, 2, map[PoolKey]int{g: 2}, map[PoolKey][]EndedPlace{r: {{AgentID: "ag-r"}}}, nil)
@@ -139,16 +131,13 @@ func TestResearchersOfAPoolAreKeptBesideTheExecutorsAndCountTowardNoMaxAgents(t 
 		t.Errorf("capped to 1 = %+v, want the researcher kept and one executor", got)
 	}
 	counts := pool.AtWorkOf(map[PoolKey]int{r: 1, g: 2})
-	if counts.Total != 2 || counts.Pool[0].AtWork != 1 || counts.Pool[1].AtWork != 2 || counts.OutsidePool != 0 {
+	if counts.Total != 2 || counts.Pool[0].AtWork != 1 || counts.Pool[1].AtWork != 2 || counts.OutsideTeam != 0 {
 		t.Errorf("at work = %+v, want 2 executors counted and the researcher on its entry", counts)
-	}
-	if err := pool.Check(testCatalog()); err != nil {
-		t.Errorf("check: %v", err)
 	}
 	if resolved, err := pool.Resolved(testCatalog()); err != nil || resolved[0].Key() != r {
 		t.Errorf("resolved = %+v %v, want the researcher entry as it is", resolved, err)
 	}
-	if err := (AgentPool{{AgentType: "at-custom", Count: 1}, {AgentType: "planner", Count: 1}}).Check(testCatalog()); err == nil {
+	if _, err := (AgentPool{{AgentType: "at-custom", Count: 1}, {AgentType: "planner", Count: 1}}).Resolved(testCatalog()); err == nil {
 		t.Error("a planner entry: want refused")
 	}
 }

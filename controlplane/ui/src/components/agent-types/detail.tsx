@@ -215,11 +215,11 @@ function Editor({ type, editable, onSaved, onReload }: {
   )
 }
 
-/** One agent type: what it is, its editor for an owner, and its versions. */
 function RoleName({ role }: { role: ListedAgentType['role'] }) {
   return <>{useRoleName(role)}</>
 }
 
+/** One agent type: what it is, its editor for an owner, and its versions. */
 export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const router = useRouter()
   const { org } = useTenant()

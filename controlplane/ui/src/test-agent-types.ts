@@ -43,9 +43,9 @@ export const CATALOG: ListedAgentType[] = [
 
 /** Every role as GET /agent-roles answers it. */
 export const ROLES: AgentRoleInfo[] = [
-  { role: 'executor', name: 'Executor', description: 'Implements experiments and runs their jobs.', agent_type: 'generalist', signup_role: 'competitor', in_team: true, org_types: true },
+  { role: 'executor', name: 'Executor', description: 'Implements experiments and runs their jobs.', agent_type: 'generalist', signup_role: 'executor', in_team: true, org_types: true },
   { role: 'researcher', name: 'Researcher', description: 'Keeps the hypothesis graph correct and points the work.', agent_type: 'researcher', signup_role: 'researcher', in_team: true, org_types: false },
   { role: 'baseline', name: 'Baseline', description: 'Measures the control before the run starts.', agent_type: 'baseline', signup_role: 'baseline', in_team: false, org_types: true },
   { role: 'coordinator', name: 'Coordinator', description: 'Assembles and steers the team.', agent_type: 'coordinator', in_team: false, org_types: false },
-  { role: 'planner', name: 'Planner', description: 'Plans a draft.', agent_type: 'planner', in_team: false, org_types: false },
+  { role: 'planner', name: 'Planner', description: 'Plans a draft.', agent_type: 'planner', signup_role: 'planner', in_team: false, org_types: false },
 ]

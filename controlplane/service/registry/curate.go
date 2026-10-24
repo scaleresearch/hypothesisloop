@@ -22,30 +22,6 @@ var (
 	ErrReasonRequired = errors.New("reason is required: say why the idea is no longer worth a job")
 )
 
-// isResearcher says whether agentID is a researcher of platform experiment pe.
-func (s *Service) isResearcher(ctx context.Context, pe, agentID string) (bool, error) {
-	if agentID == "" {
-		return false, nil
-	}
-	signup, err := s.store.GetAgentSignup(ctx, pe, agentID)
-	if err != nil {
-		return false, err
-	}
-	return signup != nil && signup.Role == domain.SignupRoleResearcher, nil
-}
-
-// curator refuses with ErrNotResearcher unless agentID is a researcher of platform experiment pe.
-func (s *Service) curator(ctx context.Context, pe, agentID string) error {
-	researcher, err := s.isResearcher(ctx, pe, agentID)
-	if err != nil {
-		return err
-	}
-	if !researcher {
-		return ErrNotResearcher
-	}
-	return nil
-}
-
 // curated reads hypothesis id for a curation by agentID, refusing unless it exists and agentID is
 // a researcher of its platform experiment.
 func (s *Service) curated(ctx context.Context, id, agentID string) (*domain.Hypothesis, error) {
@@ -56,7 +32,14 @@ func (s *Service) curated(ctx context.Context, id, agentID string) (*domain.Hypo
 	if h == nil {
 		return nil, fmt.Errorf("%w: %s", ErrHypothesisNotFound, id)
 	}
-	return h, s.curator(ctx, h.PlatformExperimentID, agentID)
+	curates, err := s.Curates(ctx, h.PlatformExperimentID, agentID)
+	if err != nil {
+		return nil, err
+	}
+	if !curates {
+		return nil, ErrNotResearcher
+	}
+	return h, nil
 }
 
 // idle refuses with ErrHypothesisInFlight while a job is queued or running on h. A running job is

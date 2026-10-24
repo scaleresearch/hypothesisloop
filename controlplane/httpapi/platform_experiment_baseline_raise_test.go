@@ -24,7 +24,7 @@ func strongerControl() *platformexperiments.Baseline {
 	b := measuredBaseline()
 	b.Job.ID, b.Job.AgentID, b.Job.Branch = "job-2", "ag-r1", "hl/pe-1/executor-1/coder"
 	b.Job.Job.Env = map[string]string{"CODER": "rans"}
-	b.OwnerRole, b.Reported = domain.SignupRoleCompetitor, map[string]float64{"val_loss": 1.6, "exact_match": 1}
+	b.OwnerRole, b.Reported = domain.SignupRoleExecutor, map[string]float64{"val_loss": 1.6, "exact_match": 1}
 	return b
 }
 

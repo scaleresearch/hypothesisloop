@@ -35,7 +35,9 @@ var EventKinds = []EventKindDoc{
 	{Kind: platformapi.EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, headed by why it stopped when it said (Blocked, or Nothing left worth a job), and for an executor the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
 	{Kind: platformapi.EventAgentReplaced, Subject: "agent id of the new agent", Value: "agent id of the agent it replaces",
-		Description: "The platform added an agent in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, to keep the agents the run is to have at work (agents on GET /platform-experiments/{id}). detail says why the place was free. Nobody adds it: the platform does, while the time and the budget left hold a trial for it. A cut executor is not replaced, nor a researcher that finished: a researcher's work lasts as long as the run, and one that finishes leaves the agents with its place."},
+		Description: "The platform added an agent in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, to keep the agents the run is to have at work (agents on GET /platform-experiments/{id}). detail says why the place was free. Nobody adds it: the platform does, while the time and the budget left hold a trial for it. A cut executor is not replaced."},
+	{Kind: platformapi.EventAgentStopped, Subject: "agent id", Value: "the model it ran on: its own, else its agent type's, else for a researcher the coordinator's; empty on the platform's default",
+		Description: "The platform gave up on this agent's machine: it stopped with every restart spent, and no machine is asked for it again. detail is why, as the code of its last end, a colon and the sentence or last output that goes with it (gone: the provider lost the machine ...). Where the run's team keeps its place, agent.replaced follows; any other agent's place stays empty until someone adds one."},
 	{Kind: platformapi.EventAgentIdle, Subject: "agent id", Value: "new or continues",
 		Description: "No job of this executor of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
@@ -135,7 +137,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventQuotaChanged, platformapi.EventAgentCut, platformapi.EventAgentFinished, platformapi.EventAgentReplaced, platformapi.EventAgentIdle, platformapi.EventAgentInstructions, platformapi.EventAgentMessage, platformapi.EventJobUnderperforming, platformapi.EventJobHeld,
+	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventQuotaChanged, platformapi.EventAgentCut, platformapi.EventAgentFinished, platformapi.EventAgentReplaced, platformapi.EventAgentStopped, platformapi.EventAgentIdle, platformapi.EventAgentInstructions, platformapi.EventAgentMessage, platformapi.EventJobUnderperforming, platformapi.EventJobHeld,
 		platformapi.EventJobDuplicate, platformapi.EventPlatformExperimentGoal:
 		return true
 	default:

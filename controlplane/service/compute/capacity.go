@@ -12,15 +12,9 @@ import (
 )
 
 // slot is room for one instance of one shape, reported as a node. It is taken while any instance
-// carries its name, whatever that instance's state, since an instance is billed until it is
-// destroyed. It is offerless when no instance holds it and the vendor has no machine to rent for
-// it right now, or its market was not read because no job waits for it. noOffer then says why,
-// for whoever waits for the slot. architecture is that of the instance's machine, and for a slot
-// no instance holds the one it is dealt (slotsAgainst).
-//
-// network is, for a free slot of a shape some waiting job that spans several nodes wants, how
-// many instances of the shape one private network can hold now, and why none when it can hold
-// none. It is nil for every other slot.
+// carries its name, as an instance is billed until destroyed. noOffer says why a slot no instance
+// holds cannot be rented now. network is set only on a free slot of a shape a waiting gang wants:
+// how many instances of the shape one private network holds now.
 type slot struct {
 	shape        Shape
 	name         string
@@ -130,11 +124,11 @@ func (e *Executor) networked(ctx context.Context, v *view) map[string]onOffer {
 	for _, shape := range e.shapes {
 		for _, arch := range e.architectures {
 			key := marketKey(shape.Name, arch)
-			g, wanted := e.demanded(ctx, v).gangs[key]
+			nodes, wanted := e.demanded(ctx, v).gangs[key]
 			if !wanted {
 				continue
 			}
-			supply, err := e.network.Networked(ctx, shape.spec(arch), g.nodes, g.spread)
+			supply, err := e.network.Networked(ctx, shape.spec(arch), nodes)
 			switch {
 			case err != nil:
 				v.networks[key] = onOffer{why: "shape " + key + ": the provider's private networks could not be read: " + err.Error()}
@@ -362,6 +356,9 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	for _, s := range slots {
 		nodeLabels[s.name] = s.labels(e.imageNeeds)
 		nodeLabels[s.name][clusterapi.NodeSlotStartupLabel] = strconv.Itoa(int(e.startup.Seconds()))
+		if e.network != nil {
+			nodeLabels[s.name][clusterapi.NodeSlotNetworkWithinLabel] = e.network.Within()
+		}
 		unit, units := s.shape.units()
 		free := units
 		if !s.free() {

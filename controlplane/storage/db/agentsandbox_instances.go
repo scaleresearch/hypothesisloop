@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -220,6 +221,17 @@ WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
 				platformExpID, agentID); err != nil {
 				return fmt.Errorf("platform_experiments_store.EndInstance: close the draft of a stopped planner: %w", err)
 			}
+			src, err := agentInstructions(ctx, tx, platformExpID, agentID)
+			if err != nil {
+				return fmt.Errorf("platform_experiments_store.EndInstance: model of a stopped agent: %w", err)
+			}
+			if src == nil {
+				return fmt.Errorf("platform_experiments_store.EndInstance: stopped agent %s is not in %s", agentID, platformExpID)
+			}
+			// The platform's default is told as none.
+			model := src.ModelChoice().Model(domain.ModelDefaults{})
+			tx.Change(domain.Change{Kind: platformapi.EventAgentStopped, Subject: agentID, Value: model, Detail: after.EndReason + ": " + after.ExitLog,
+				PlatformExperimentID: platformExpID, AgentID: agentID})
 		}
 		tx.agentActivity(platformExpID, agentID, domain.ActivityMachine)
 		recorded = true

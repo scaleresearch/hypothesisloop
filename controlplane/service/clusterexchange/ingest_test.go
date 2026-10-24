@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -67,5 +69,35 @@ func TestReconcileHandsEachJobItsOwnToken(t *testing.T) {
 	h.signingSecret = ""
 	if _, err := h.desiredJob(context.Background(), &domain.Experiment{Image: wireImage, ID: "job-1"}); err == nil {
 		t.Error("desired job with no signing secret: got = nil, want an error")
+	}
+}
+
+type contactStore struct {
+	Store
+	refusal string
+}
+
+func (s *contactStore) RecordContactRefusal(_ context.Context, _, refusal string) error {
+	s.refusal = refusal
+	return nil
+}
+
+// A report naming a slot whose count label is no count is refused whole, before anything it
+// reports is recorded, and the refusal is kept as the cluster's last error.
+func TestReconcileRefusesAReportWithAMalformedSlotLabel(t *testing.T) {
+	store := &contactStore{}
+	h := &Service{store: store, logger: zap.NewNop()}
+	report := clusterapi.ReconcileRequest{
+		AcceleratorAvailableByType: map[string]int64{}, AcceleratorTotalByType: map[string]int64{},
+		AcceleratorAvailableByNode: map[string]map[string]int64{},
+		NodeResourcesByNode:        map[string]map[string]int64{}, NodeResourcesTotalByNode: map[string]map[string]int64{},
+		NodeLabelsByNode: map[string]map[string]string{"slot-1": {domain.NodeSlotLabel: "slot-1", domain.NodeSlotNetworkLabel: "two"}},
+	}
+	_, err := h.Reconcile(context.Background(), "edge-7", "v1", report)
+	if err == nil || !strings.Contains(err.Error(), "slot-1") || !strings.Contains(err.Error(), domain.NodeSlotNetworkLabel) {
+		t.Fatalf("reconcile = %v, want a refusal naming the node and its label", err)
+	}
+	if store.refusal == "" {
+		t.Error("the refusal is not kept as the cluster's last error")
 	}
 }

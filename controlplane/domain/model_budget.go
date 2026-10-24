@@ -21,8 +21,9 @@ type ModelPrice struct {
 type ModelCatalog map[string]ModelPrice
 
 // Validate refuses a catalog with no model, an id no model reference of provider holds, or a price
-// that is not positive.
-func (c ModelCatalog) Validate(provider string) error {
+// that is not positive. The cache write price is required of a provider whose calls write to the
+// cache, cacheWrites, and refused of any other, which never counts one.
+func (c ModelCatalog) Validate(provider string, cacheWrites bool) error {
 	if len(c) == 0 {
 		return errors.New("the model catalog names no model")
 	}
@@ -30,8 +31,14 @@ func (c ModelCatalog) Validate(provider string) error {
 		if _, err := NewModelRef(provider, name); err != nil {
 			return fmt.Errorf("model %q: %w", name, err)
 		}
-		if p.InputUSDPerMTok <= 0 || p.OutputUSDPerMTok <= 0 || p.CacheWriteUSDPerMTok <= 0 || p.CacheReadUSDPerMTok <= 0 {
-			return fmt.Errorf("model %q: every price must be positive", name)
+		if p.InputUSDPerMTok <= 0 || p.OutputUSDPerMTok <= 0 || p.CacheReadUSDPerMTok <= 0 {
+			return fmt.Errorf("model %q: the input, output and cache read prices must be positive", name)
+		}
+		if cacheWrites && p.CacheWriteUSDPerMTok <= 0 {
+			return fmt.Errorf("model %q: the cache write price must be positive", name)
+		}
+		if !cacheWrites && p.CacheWriteUSDPerMTok != 0 {
+			return fmt.Errorf("model %q: %s counts no cache write, so the model states no cache_write_usd_per_mtok", name, provider)
 		}
 	}
 	return nil
@@ -45,6 +52,16 @@ func (c ModelCatalog) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ServedModel is one model a provider serves, by the model id a call states, with what the provider
+// charges for its input and output in US dollars per million tokens.
+type ServedModel struct {
+	ID               string
+	Name             string
+	ContextLength    int
+	InputUSDPerMTok  float64
+	OutputUSDPerMTok float64
 }
 
 // ModelTokens is what the provider counted of one model's calls.

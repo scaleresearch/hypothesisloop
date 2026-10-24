@@ -41,12 +41,13 @@ runs, the coordinator or the owner adds an agent in a place max_agents leaves fr
 with a share of what the executors left unspent; the platform itself replaces an agent of the
 experiment's agents entries that finished or lost its machine. The first form creates one; the
 second joins a registered one again under its id (a removed agent), or prints a self-run agent's
-token again. max_agents counts the executors (role competitor) at work. --role researcher adds
+token again. max_agents counts the executors at work. --role researcher adds
 a researcher: it keeps the hypothesis graph (proposes, reviews, merges, retires and relinks),
 runs no job, has no quota and a read-only clone, runs the built-in researcher type and defaults
 to the coordinator's model when neither --model nor its type names one; it is not ranked, cut or
-counted. A reviewer re-checks others' claims and records agreement or dispute; like a baseline
-agent it is not ranked, cut or counted.
+counted. A reviewer verifies others' claims by running their jobs again and records agreement or
+dispute: it runs jobs where a researcher runs none, and like a baseline agent it is not ranked,
+cut or counted.
 The agent types an org has, each with its role, are GET /orgs/{id}/agent-types.
 --in-agentsandbox: the platform runs the agent, starting a baseline agent's machine at once and any
 other's at the start of the run (its status_reason says what the start waits for). Without --in-agentsandbox the line printed
@@ -58,7 +59,7 @@ from an env file the container reads, never a command line.`, stderr)
 	hyperparameters := fs.String("hyperparameters", "", "the direction you give the agent, a JSON object of any keys: the approach it explores")
 	model := fs.String("model", "", "the model the agent runs on, a <provider>/<model id> hl models lists; omitted, its agent type's, and for a researcher the coordinator's")
 	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
-	role := fs.String("role", "", "competitor (default; an executor), baseline, reviewer or researcher")
+	role := fs.String("role", "", "executor (default), baseline, reviewer or researcher")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
 	named := command.ExperimentFlag(fs)
 	if err := command.ParseNone(fs, args); err != nil {

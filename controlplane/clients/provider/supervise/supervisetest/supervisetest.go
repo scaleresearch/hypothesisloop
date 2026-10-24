@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // shells are tried by name: the host's own sh, then the two the images carry.
@@ -40,7 +39,9 @@ func Command(shell []string, args ...string) *exec.Cmd {
 
 // Start starts cmd as the leader of its own process group, and at the end of the test kills the
 // whole group and reaps cmd, so nothing the script left behind outlives the test, whether it
-// passed, failed or timed out.
+// passed, failed or timed out. One SIGKILL to the group ends every member at once. Nothing waits
+// for the group to be gone: a killed member stays a zombie, and so signallable, until whatever
+// adopted it reaps it, which a host's subreaper may never do.
 func Start(t *testing.T, cmd *exec.Cmd) {
 	t.Helper()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -48,9 +49,7 @@ func Start(t *testing.T, cmd *exec.Cmd) {
 		t.Fatalf("start supervisor: %v", err)
 	}
 	t.Cleanup(func() {
-		for syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) == nil {
-			time.Sleep(10 * time.Millisecond)
-		}
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = cmd.Wait()
 	})
 }

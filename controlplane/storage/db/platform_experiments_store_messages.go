@@ -70,7 +70,7 @@ SELECT s.agent_id, (`+runEndSQL+`) <> '',
 FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND s.role <> $2 AND (cardinality($3::text[]) = 0 AND s.role = ANY($4) OR s.agent_id = ANY($3))
 ORDER BY s.signed_up_at, s.agent_id
-FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, []string{string(domain.SignupRoleCompetitor), string(domain.SignupRoleResearcher)}, from)
+FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, []string{string(domain.SignupRoleExecutor), string(domain.SignupRoleResearcher)}, from)
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
 		}

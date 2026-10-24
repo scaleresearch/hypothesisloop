@@ -79,7 +79,7 @@ func wireCases() map[string]wireCase {
 					},
 					MaxRetries:                    &retries,
 					TerminationGracePeriodSeconds: &shortShutdown,
-					Topology:                      &domain.TopologySpec{SpreadAcrossHosts: &spread, SameZone: true},
+					Topology:                      &domain.TopologySpec{SpreadAcrossHosts: &spread, NodesWithin: domain.NodesWithinPlacementGroup},
 				},
 				AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 4,
 				EstimatedDurationHours: 1, CapacityTier: domain.CapacityBurst, Status: domain.StatusRunning,

@@ -28,7 +28,7 @@ const me: Me = {
 
 function agent(id: string, hour: number, agentType = 'generalist', more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
-    platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
+    platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'executor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
     in_agentsandbox: true, agent_type: agentType, model: 'anthropic/claude-sonnet-5', hyperparameters: null, at_work: true, ended: '', signed_up_at: `2026-01-01T0${hour}:00:00Z`, actions: [], ...more,
   }
 }
@@ -36,7 +36,7 @@ function agent(id: string, hour: number, agentType = 'generalist', more: Partial
 const pe = {
   id: 'pe-1', project_id: 'prj_1', status: 'running', max_agents: 4, editable: ['name', 'description', 'duration_hours', 'max_agents', 'agents'],
   agents: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', count: 2 }, { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', count: 1 }, { agent_type: 'researcher', count: 1 }],
-  agents_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', at_work: 2 }, { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', at_work: 1 }, { agent_type: 'researcher', at_work: 1 }], outside_pool: 0 },
+  agents_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', at_work: 2 }, { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', at_work: 1 }, { agent_type: 'researcher', at_work: 1 }], outside_team: 0 },
   coordinator: { model: 'anthropic/claude-opus-5-5' },
 } as unknown as PlatformExperiment
 
@@ -72,7 +72,7 @@ describe('the team of an experiment', () => {
   })
 
   it('counts what the coordinator added beyond the team on its own row', async () => {
-    show({ ...pe, agents_at_work: { ...pe.agents_at_work!, total: 5, outside_pool: 2 } })
+    show({ ...pe, agents_at_work: { ...pe.agents_at_work!, total: 5, outside_team: 2 } })
     expect(await screen.findByText('5 executors at work of 4 max')).toBeTruthy()
     const rows = within(screen.getByRole('table', { name: 'Team' })).getAllByRole('row').slice(1).map(r => r.textContent)
     expect(rows.at(-1)).toBe('Added by the coordinator beyond the team2')

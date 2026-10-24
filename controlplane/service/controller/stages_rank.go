@@ -84,9 +84,9 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 		if !anyCompleted && anyInFlight {
 			return nil, nil, ErrStageRankingPending
 		}
-		reason := "stages: no surviving competitor has a job that can still rank, advancing with nobody cut"
+		reason := "stages: no surviving executor has a job that can still rank, advancing with nobody cut"
 		if anyCompleted {
-			reason = "stages: surviving competitors completed jobs without a ranking value, advancing with nobody cut"
+			reason = "stages: surviving executors completed jobs without a ranking value, advancing with nobody cut"
 		}
 		c.logger.Info(reason, zap.String("platform_experiment", pe.ID), zap.Int("stage", pe.CurrentStage))
 		return survivors, nil, nil
@@ -103,11 +103,11 @@ func (c *Controller) computeCut(ctx context.Context, pe *domain.PlatformExperime
 	return kept, cut, nil
 }
 
-// currentSurvivors lists the agents still standing in a platform experiment: every competitor
+// currentSurvivors lists the agents still standing in a platform experiment: every executor
 // with a quota, minus everyone cut at an earlier boundary. Sorted for deterministic ranking.
 //
 // Roles enter the ladder here and nowhere else. Baselines and reviewers hold quota and run jobs
-// exactly like competitors, so filtering them out of this one list is what keeps them out of the
+// exactly like executors, so filtering them out of this one list is what keeps them out of the
 // cut, out of the guardrail counts and out of every ranking derived from it.
 func (c *Controller) currentSurvivors(ctx context.Context, pe *domain.PlatformExperiment) ([]string, error) {
 	quotas, err := c.stagesStore.ListAgentQuotas(ctx, pe.ID)
@@ -118,13 +118,13 @@ func (c *Controller) currentSurvivors(ctx context.Context, pe *domain.PlatformEx
 	if err != nil {
 		return nil, fmt.Errorf("stages: list cut agents: %w", err)
 	}
-	competitors, err := c.stagesStore.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := c.stagesStore.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
-		return nil, fmt.Errorf("stages: list competitors: %w", err)
+		return nil, fmt.Errorf("stages: list executors: %w", err)
 	}
-	isCompetitor := make(map[string]bool, len(competitors))
-	for _, agentID := range competitors {
-		isCompetitor[agentID] = true
+	isExecutor := make(map[string]bool, len(executors))
+	for _, agentID := range executors {
+		isExecutor[agentID] = true
 	}
 	isCut := make(map[string]bool, len(cuts))
 	for _, cut := range cuts {
@@ -132,7 +132,7 @@ func (c *Controller) currentSurvivors(ctx context.Context, pe *domain.PlatformEx
 	}
 	survivors := make([]string, 0, len(quotas))
 	for _, q := range quotas {
-		if isCompetitor[q.AgentID] && !isCut[q.AgentID] {
+		if isExecutor[q.AgentID] && !isCut[q.AgentID] {
 			survivors = append(survivors, q.AgentID)
 		}
 	}

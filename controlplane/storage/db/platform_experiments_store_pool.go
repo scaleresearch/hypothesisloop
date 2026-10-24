@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -199,24 +200,19 @@ ORDER BY s.agent_id`, platformExpID, agentIDs)
 	})
 }
 
-// lowerPoolTx writes the agents of platform experiment platformExpID less the executors and
-// researchers of agentIDs, who leave it for good (domain.AgentPool.Lowered): nobody takes their
-// places.
+// lowerPoolTx lowers the agents of platform experiment platformExpID for the executors of
+// agentIDs it cut, who leave it for good: nobody takes their places. Each lowers its
+// entry by one while that entry wants more at work than are, so one the coordinator added beyond
+// the entry lowers nothing.
 func lowerPoolTx(ctx context.Context, tx *Write, platformExpID string, agentIDs []string) error {
-	pool, err := lockedPoolTx(ctx, tx, platformExpID)
-	if err != nil {
-		return err
-	}
 	keys, err := signupKeysTx(ctx, tx, platformExpID, agentIDs)
-	if err != nil || len(keys) == 0 {
-		return err
-	}
-	encoded, err := poolJSON(pool.Lowered(keys))
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET agents = $2 WHERE id = $1`, platformExpID, encoded); err != nil {
-		return fmt.Errorf("lower agents: %w", err)
+	for _, key := range keys {
+		if err := shrinkPoolToAtWorkTx(ctx, tx, platformExpID, key); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -232,18 +228,17 @@ func shrinkPoolToAtWorkTx(ctx context.Context, tx *Write, platformExpID string, 
 	if err != nil {
 		return err
 	}
-	for i, e := range pool {
-		if e.Key() == key && e.Count > atWork[key] {
-			pool[i].Count--
-			encoded, err := poolJSON(pool)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET agents = $2 WHERE id = $1`, platformExpID, encoded); err != nil {
-				return fmt.Errorf("lower agents: %w", err)
-			}
-			return nil
-		}
+	i := slices.IndexFunc(pool, func(e domain.AgentPoolEntry) bool { return e.Key() == key })
+	if i < 0 || pool[i].Count <= atWork[key] {
+		return nil
+	}
+	pool[i].Count--
+	encoded, err := poolJSON(pool)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET agents = $2 WHERE id = $1`, platformExpID, encoded); err != nil {
+		return fmt.Errorf("lower agents: %w", err)
 	}
 	return nil
 }
@@ -268,9 +263,8 @@ type PoolState struct {
 	// MaxAgents is the cap on the executors at work, read with the rest.
 	MaxAgents int
 	// Ended is every agent whose place is free for good, by agent type and model, the one that
-	// ended first first: an executor that finished, and an executor or a researcher whose machine
-	// stopped with no restart left. A researcher that finished left the agents with its place
-	// (FinishAgent).
+	// ended first first: an executor or a researcher that finished or whose machine stopped with
+	// no restart left.
 	Ended map[domain.PoolKey][]EndedAgent
 	// Recent counts the agents added in the places of others in the last hour, by agent type
 	// and model.
@@ -305,7 +299,7 @@ SELECT `+signupKeySQL+`, s.role, s.agent_id, s.quota_tier, s.hyperparameters, s.
 FROM experiment_signups s`+signupInstanceJoin+`
 CROSS JOIN LATERAL (SELECT COALESCE(s.finished_at, i.exited_at, s.signed_up_at) AS at) ended
 WHERE s.platform_experiment_id = $1 AND `+teamSQL+`
-  AND (s.finished_at IS NOT NULL AND s.role = '`+string(domain.SignupRoleCompetitor)+`' OR s.finished_at IS NULL AND `+stoppedSQL+`)
+  AND (s.finished_at IS NOT NULL OR `+stoppedSQL+`)
   AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
   AND NOT `+replacedSQL+`
 ORDER BY 8, s.agent_id`, platformExpID, domain.ReplacementMinRun.Seconds())

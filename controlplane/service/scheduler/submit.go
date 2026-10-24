@@ -339,7 +339,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	return nil
 }
 
-// runBest is the competitors' best job of pe on its first ranking metric, as the standings rank
+// runBest is the executors' best job of pe on its first ranking metric, as the standings rank
 // it, ties to the lowest agent id: nil when there is none or it ran exp's commit.
 func (s *Service) runBest(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) (*domain.RunBest, error) {
 	metric, ok := domain.PrimaryRankingMetric(pe.Metrics)
@@ -354,13 +354,13 @@ func (s *Service) runBest(ctx context.Context, pe *domain.PlatformExperiment, ex
 	if err != nil {
 		return nil, err
 	}
-	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, err
 	}
-	slices.Sort(competitors)
+	slices.Sort(executors)
 	var top *domain.RunBest
-	for _, agentID := range competitors {
+	for _, agentID := range executors {
 		if b, ok := best[agentID]; ok && (top == nil || metric.Better(b.Value, top.Value)) {
 			top = &domain.RunBest{JobID: b.ExperimentID, AgentID: agentID, Metric: metric.Key, Value: b.Value}
 		}

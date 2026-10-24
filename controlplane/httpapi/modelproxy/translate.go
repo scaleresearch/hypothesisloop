@@ -9,15 +9,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	"go.uber.org/zap"
 )
 
-// An openai call is made in Anthropic's Messages shape, as Claude Code makes every call, and
-// passed on in OpenAI's Responses shape, as the Codex CLI makes one on a ChatGPT subscription;
-// the answer comes back the other way. A request field neither shape shares, such as max_tokens,
-// temperature, stop_sequences or cache_control, which the ChatGPT backend refuses or has no
-// counterpart of, is not passed on.
-
-// messagesRequest is the part of an Anthropic Messages call that is translated.
+// messagesRequest is the part of an Anthropic Messages call that is translated to a Responses call.
+// A field it leaves out, such as max_tokens, temperature, stop_sequences or cache_control, is one
+// the ChatGPT backend refuses or has no counterpart of, and is not passed on.
 type messagesRequest struct {
 	Model    string          `json:"model"`
 	System   json.RawMessage `json:"system"`
@@ -60,6 +59,7 @@ type block struct {
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
 	Content   json.RawMessage `json:"content"`
 	Source    *struct {
 		Type      string `json:"type"`
@@ -141,8 +141,8 @@ type functionTool struct {
 	Strict      bool            `json:"strict"`
 }
 
-// efforts is OpenAI's reasoning effort for each of Anthropic's.
-var efforts = map[string]string{"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"}
+// efforts are OpenAI's reasoning efforts by Anthropic's efforts. OpenAI's highest is xhigh.
+var efforts = map[string]string{"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "xhigh"}
 
 // shape is what the translated answer is asked for in: streamed or whole, and with what it
 // thought, its summary unless display is omitted.
@@ -353,7 +353,7 @@ func mediaPart(b block) (part, error) {
 	return part{}, fmt.Errorf("a %s of source %s has no counterpart for an openai model", b.Type, s.Type)
 }
 
-// toolOutput is a tool result's text and the images it holds.
+// toolOutput is a tool result's text, said to be an error where it is one, and the images it holds.
 func toolOutput(b block) (string, []part, error) {
 	blocks, err := contentBlocks(b.Content)
 	if err != nil {
@@ -375,7 +375,12 @@ func toolOutput(b block) (string, []part, error) {
 			return "", nil, fmt.Errorf("tool_result %s: a %s block has no counterpart for an openai model", b.ToolUseID, c.Type)
 		}
 	}
-	return strings.Join(texts, "\n"), images, nil
+	output := strings.Join(texts, "\n")
+	// A function's output has no field that says it failed: the text says so.
+	if b.IsError {
+		output = "Error: " + output
+	}
+	return output, images, nil
 }
 
 // event is one event of a Responses stream, the fields of every kind translated.
@@ -411,18 +416,21 @@ type event struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
-		Usage *struct {
-			InputTokens        int64 `json:"input_tokens"`
-			InputTokensDetails struct {
-				CachedTokens int64 `json:"cached_tokens"`
-			} `json:"input_tokens_details"`
-			OutputTokens int64 `json:"output_tokens"`
-		} `json:"usage"`
+		Usage *responseUsage `json:"usage"`
 	} `json:"response"`
 	Error *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// responseUsage is the usage a Responses answer states.
+type responseUsage struct {
+	InputTokens        int64 `json:"input_tokens"`
+	InputTokensDetails struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+	OutputTokens int64 `json:"output_tokens"`
 }
 
 // sink takes the Anthropic events of an answer, each its type and its data.
@@ -433,6 +441,7 @@ type sink func(kind string, data map[string]any)
 type translator struct {
 	how       shape
 	emit      sink
+	logger    *zap.Logger
 	started   bool
 	finished  bool
 	index     int
@@ -543,6 +552,11 @@ func (t *translator) take(e event) {
 		if failure := e.Response.Error; failure != nil {
 			code, message = failure.Code, failure.Message
 		}
+		// The tokens a failed answer spent are counted before its error, so they are metered.
+		if t.started && e.Response.Usage != nil {
+			t.close()
+			t.emit("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": nil, "stop_sequence": nil}, "usage": anthropicUsage(e.Response.Usage)})
+		}
 		t.fail(errorType(code, http.StatusInternalServerError), errorMessage(code, message))
 	case "error":
 		code, message := e.Code, e.Message
@@ -571,9 +585,15 @@ func (t *translator) searched(e event) {
 	t.close()
 }
 
-// complete ends the answer with its stop reason and its usage. OpenAI counts the cached input
-// within the input, Anthropic beside it.
+// complete ends the answer with its stop reason and its usage. An answer that never started, or states no usage, is
+// one the platform cannot count, and ends in an error.
 func (t *translator) complete(e event) {
+	u := e.Response.Usage
+	if !t.started || u == nil {
+		t.logger.Error("model proxy: the ChatGPT backend's answer cannot be counted", zap.String("event", e.Type), zap.Bool("started", t.started), zap.Bool("usage", u != nil))
+		t.fail("api_error", "the model's answer stated no usage")
+		return
+	}
 	t.close()
 	t.finished = true
 	stop := "end_turn"
@@ -588,14 +608,16 @@ func (t *translator) complete(e event) {
 			stop = "refusal"
 		}
 	}
-	usage := map[string]any{"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
-	if u := e.Response.Usage; u != nil {
-		cached := u.InputTokensDetails.CachedTokens
-		usage = map[string]any{"input_tokens": u.InputTokens - cached, "output_tokens": u.OutputTokens,
-			"cache_creation_input_tokens": 0, "cache_read_input_tokens": cached}
-	}
-	t.emit("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop, "stop_sequence": nil}, "usage": usage})
+	t.emit("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop, "stop_sequence": nil}, "usage": anthropicUsage(u)})
 	t.emit("message_stop", map[string]any{"type": "message_stop"})
+}
+
+// anthropicUsage is OpenAI's usage of an answer as Anthropic states it. OpenAI counts the cached
+// input within the input, Anthropic beside it.
+func anthropicUsage(u *responseUsage) map[string]any {
+	cached := u.InputTokensDetails.CachedTokens
+	return map[string]any{"input_tokens": u.InputTokens - cached, "output_tokens": u.OutputTokens,
+		"cache_creation_input_tokens": 0, "cache_read_input_tokens": cached}
 }
 
 // end ends a stream that stopped: one that stopped before its answer was complete ends in an error.
@@ -653,20 +675,25 @@ func errorBody(kind, message string) []byte {
 }
 
 // refusedAnswer is the status and the Anthropic error answer of a call the ChatGPT backend refused
-// with status and body, whose message it states as {"detail": ...} or {"error": ...}. A refusal of
-// the platform's credential, 401 or 403, is the platform's failure and none of the caller's: it is
-// a 502 api_error, where an authentication_error would have Claude Code sign out.
-func refusedAnswer(status int, body []byte) (int, []byte) {
+// with status and body at now, whose message it states as {"detail": ...} or {"error": ...}. A
+// refusal of the platform's credential, 401 or 403, is the platform's failure and none of the
+// caller's: it is a 502 api_error, where an authentication_error would have Claude Code sign out.
+// resetsAt is when a usage_limit_reached refusal says the subscription takes calls again, zero for
+// any other.
+func refusedAnswer(status int, body []byte, now time.Time) (int, []byte, time.Time) {
 	var refused struct {
 		Detail any             `json:"detail"`
 		Error  json.RawMessage `json:"error"`
 	}
+	var resetsAt time.Time
 	code, message := "", strings.TrimSpace(string(body))
 	if json.Unmarshal(body, &refused) == nil {
 		var detailed struct {
-			Code    string `json:"code"`
-			Type    string `json:"type"`
-			Message string `json:"message"`
+			Code            string `json:"code"`
+			Type            string `json:"type"`
+			Message         string `json:"message"`
+			ResetsAt        int64  `json:"resets_at"`
+			ResetsInSeconds int64  `json:"resets_in_seconds"`
 		}
 		var plain string
 		switch {
@@ -674,6 +701,13 @@ func refusedAnswer(status int, body []byte) (int, []byte) {
 			code, message = detailed.Code, detailed.Message
 			if code == "" {
 				code = detailed.Type
+			}
+			switch {
+			case code != "usage_limit_reached":
+			case detailed.ResetsAt > 0:
+				resetsAt = time.Unix(detailed.ResetsAt, 0)
+			case detailed.ResetsInSeconds > 0:
+				resetsAt = now.Add(time.Duration(detailed.ResetsInSeconds) * time.Second)
 			}
 		case json.Unmarshal(refused.Error, &plain) == nil && plain != "":
 			message = plain
@@ -685,18 +719,23 @@ func refusedAnswer(status int, body []byte) (int, []byte) {
 		message = http.StatusText(status)
 	}
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return http.StatusBadGateway, errorBody("api_error", "the ChatGPT backend refused the platform's credential: "+message)
+		return http.StatusBadGateway, errorBody("api_error", "the ChatGPT backend refused the platform's credential: "+message), time.Time{}
 	}
-	return status, errorBody(errorType(code, status), errorMessage(code, message))
+	return status, errorBody(errorType(code, status), errorMessage(code, message)), resetsAt
 }
 
-// readEvents hands each event of the Responses stream r to t, and ends t when r ends.
+// readEvents hands each event of the Responses stream r to t, and ends t when r ends. An event
+// that is no JSON ends the answer in an error.
 func readEvents(r *bufio.Reader, t *translator) error {
 	line, err := r.ReadBytes('\n')
 	if data, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r\n"), []byte("data:")); ok {
 		var e event
-		if json.Unmarshal(bytes.TrimSpace(data), &e) == nil {
+		switch failed := json.Unmarshal(bytes.TrimSpace(data), &e); {
+		case failed == nil:
 			t.take(e)
+		case !t.finished:
+			t.logger.Error("model proxy: the ChatGPT backend's answer holds an event that is no JSON", zap.Error(failed))
+			t.fail("api_error", "the model's answer holds an event that could not be read")
 		}
 	}
 	if err != nil {
@@ -718,9 +757,9 @@ type translatedStream struct {
 	ended    bool
 }
 
-func newTranslatedStream(upstream io.ReadCloser, how shape) *translatedStream {
+func newTranslatedStream(upstream io.ReadCloser, how shape, logger *zap.Logger) *translatedStream {
 	s := &translatedStream{upstream: upstream, lines: bufio.NewReader(upstream)}
-	s.t = &translator{how: how, emit: func(kind string, data map[string]any) {
+	s.t = &translator{how: how, logger: logger, emit: func(kind string, data map[string]any) {
 		encoded, _ := json.Marshal(data)
 		fmt.Fprintf(&s.out, "event: %s\ndata: %s\n\n", kind, encoded)
 	}}
@@ -742,13 +781,13 @@ func (s *translatedStream) Read(b []byte) (int, error) {
 func (s *translatedStream) Close() error { return s.upstream.Close() }
 
 // wholeMessage is the Anthropic message of a Responses stream read to its end, or the error it
-// ended in with that error's HTTP status.
-func wholeMessage(upstream io.Reader, how shape) (int, []byte) {
+// ended in with that error's HTTP status, beside the usage a failed answer states.
+func wholeMessage(upstream io.Reader, how shape, logger *zap.Logger) (int, []byte) {
 	message := map[string]any{}
 	var content []map[string]any
 	var partial []string
-	var failure map[string]any
-	t := &translator{how: how, emit: func(kind string, data map[string]any) {
+	var failure, counted map[string]any
+	t := &translator{how: how, logger: logger, emit: func(kind string, data map[string]any) {
 		switch kind {
 		case "message_start":
 			message = data["message"].(map[string]any)
@@ -773,7 +812,8 @@ func wholeMessage(upstream io.Reader, how shape) (int, []byte) {
 			}
 		case "message_delta":
 			message["stop_reason"] = data["delta"].(map[string]any)["stop_reason"]
-			message["usage"] = data["usage"]
+			counted = data["usage"].(map[string]any)
+			message["usage"] = counted
 		case "error":
 			failure = data["error"].(map[string]any)
 		}
@@ -783,7 +823,11 @@ func wholeMessage(upstream io.Reader, how shape) (int, []byte) {
 	}
 	if failure != nil {
 		kind, _ := failure["type"].(string)
-		return errorStatus(kind), errorBody(kind, failure["message"].(string))
+		body := errorBody(kind, failure["message"].(string))
+		if counted != nil {
+			body, _ = json.Marshal(map[string]any{"type": "error", "error": failure, "usage": counted})
+		}
+		return errorStatus(kind), body
 	}
 	if content == nil {
 		content = []map[string]any{}

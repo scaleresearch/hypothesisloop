@@ -24,18 +24,10 @@ type AgentPool []AgentPoolEntry
 // PoolRole is the role of the agents of an entry of agentType: researcher for
 // ResearcherAgentType, executor for any other.
 func PoolRole(agentType string) AgentRole {
-	if agentType == ResearcherAgentType {
+	if (PoolKey{AgentType: agentType}).Researches() {
 		return AgentRoleResearcher
 	}
 	return AgentRoleExecutor
-}
-
-// SignupRoleOfPool is the role an agent of an entry of agentType is signed up with.
-func SignupRoleOfPool(agentType string) SignupRole {
-	if agentType == ResearcherAgentType {
-		return SignupRoleResearcher
-	}
-	return SignupRoleCompetitor
 }
 
 // Executors is how many executors the pool wants at work.
@@ -47,27 +39,6 @@ func (p AgentPool) Executors() int {
 		}
 	}
 	return total
-}
-
-// Check refuses a pool by what the platform's catalog says of it: an agent type catalog holds no
-// type of the entry's role of (LookupAgentType), and a model that is no reference. Every other
-// rule of a pool is the spec's (experimentspec.Spec.Validate).
-func (p AgentPool) Check(catalog AgentTypeCatalog) error {
-	for i, e := range p {
-		agentType := e.AgentType
-		if agentType == "" {
-			agentType = DefaultAgentType
-		}
-		if _, err := LookupAgentType(catalog, agentType, PoolRole(agentType)); err != nil {
-			return fmt.Errorf("agents[%d]: %w", i, err)
-		}
-		if e.Model != "" {
-			if _, err := ParseModelRef(e.Model); err != nil {
-				return fmt.Errorf("agents[%d]: %w", i, err)
-			}
-		}
-	}
-	return nil
 }
 
 // Resolved is the pool with each entry's agent type filled as a joining agent's is
@@ -106,19 +77,6 @@ func PoolOf(keys []PoolKey) AgentPool {
 		pool = append(pool, AgentPoolEntry{AgentType: key.AgentType, Model: key.Model, Count: 1})
 	}
 	return pool
-}
-
-// Lowered is the pool once agents of the keys given leave it for good, as a cut makes them: each
-// lowers the entry of its agent type and model. One of no entry, an agent the coordinator added
-// beyond the pool, lowers nothing. No entry goes below zero.
-func (p AgentPool) Lowered(keys []PoolKey) AgentPool {
-	out := slices.Clone(p)
-	for _, key := range keys {
-		if i := slices.IndexFunc(out, func(e AgentPoolEntry) bool { return e.Key() == key && e.Count > 0 }); i >= 0 {
-			out[i].Count--
-		}
-	}
-	return out
 }
 
 // Capped is the pool with its last entries of executors lowered until it wants at most maxAgents

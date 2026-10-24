@@ -27,10 +27,10 @@ func registerModels(doc *Doc, served *models.Service, logger *zap.Logger) {
 	}, a.list)
 }
 
-func (a modelsAPI) list(ctx context.Context, _ *struct{}) (*struct{ Body *models.Listing }, error) {
+func (a modelsAPI) list(ctx context.Context, _ *struct{}) (*struct{ Body *models.ModelListing }, error) {
 	listing, err := a.models.List(ctx)
 	if err != nil {
 		return nil, auth.Internal(a.logger, "list models", err)
 	}
-	return &struct{ Body *models.Listing }{Body: listing}, nil
+	return &struct{ Body *models.ModelListing }{Body: listing}, nil
 }

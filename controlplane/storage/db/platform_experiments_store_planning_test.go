@@ -89,7 +89,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 
 	// Nobody joins a draft: joining is for an open platform experiment.
 	other := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "x", CreatedAt: time.Now()}
-	if err := pes.SpawnAgent(ctx, pe, other, domain.AgentSignup{Actor: testActor, AgentID: other.ID, Role: domain.SignupRoleCompetitor, AgentType: "generalist", Model: "m"}); err != ErrSignupClosed {
+	if err := pes.SpawnAgent(ctx, pe, other, domain.AgentSignup{Actor: testActor, AgentID: other.ID, Role: domain.SignupRoleExecutor, AgentType: "generalist", Model: "m"}); err != ErrSignupClosed {
 		t.Fatalf("joining a draft: got = %v, want ErrSignupClosed", err)
 	}
 
@@ -370,7 +370,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		var signups []domain.AgentSignup
 		// The executors, and last the agent that measures the baseline.
 		for i := 0; i <= executors; i++ {
-			role := domain.SignupRoleCompetitor
+			role := domain.SignupRoleExecutor
 			if i == executors {
 				role = domain.SignupRoleBaseline
 			}
@@ -548,7 +548,7 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	agents := spawnTestAgents(t, pes, id,
 		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"},
 		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, AgentType: "baseline"},
-		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleCompetitor, AgentType: "generalist"},
+		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleExecutor, AgentType: "generalist"},
 		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleReviewer, AgentType: "generalist"})
 	// Half the budget of 10.
 	for i, want := range [][2]float64{{5, 0}, {0, 5}} {
@@ -593,7 +593,7 @@ func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 	agents := spawnTestAgents(t, pes, id,
 		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"},
 		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, QuotaTier: domain.QuotaTierBurstOnly, AgentType: "baseline"},
-		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleCompetitor, AgentType: "generalist"})
+		domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleExecutor, AgentType: "generalist"})
 	held := func(when string, want float64) {
 		t.Helper()
 		for i, columns := range [][2]float64{{want, 0}, {0, want}} {
@@ -904,7 +904,7 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	acceptedAt := time.Now().UTC()
 	pe.AcceptedAt = &acceptedAt
 	executor := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
-	if err := pes.AcceptDraft(ctx, pe, []*domain.Agent{executor}, []domain.AgentSignup{{Actor: testActor, AgentID: executor.ID, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1"}}); err != nil {
+	if err := pes.AcceptDraft(ctx, pe, []*domain.Agent{executor}, []domain.AgentSignup{{Actor: testActor, AgentID: executor.ID, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1"}}); err != nil {
 		t.Fatal(err)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, agent.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {

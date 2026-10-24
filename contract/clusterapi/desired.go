@@ -5,6 +5,7 @@ package clusterapi
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -260,19 +261,50 @@ type JobSpec struct {
 	ShmSize string `json:"shm_size,omitempty" yaml:"shm_size,omitempty"`
 }
 
-// TopologySpec expresses placement requirements for a distributed job's nodes — the difference
+// TopologySpec expresses placement requirements for a distributed job's nodes: the difference
 // between "8 pods that happen to exist" and "8 pods that can do synchronous multi-host gradient
-// sync." Backend-agnostic vocabulary; the k8s backend compiles it into pod (anti-)affinity.
+// sync." Backend-agnostic vocabulary.
 type TopologySpec struct {
-	// SpreadAcrossHosts requires no two of this job's nodes to land on the same physical host —
-	// two ranks sharing a host silently halves real parallelism. Defaults to true whenever
+	// SpreadAcrossHosts requires no two of this job's nodes to share a host's accelerators: two
+	// ranks on one host's devices silently halve real parallelism. A runtime whose nodes share
+	// hosts (Kubernetes) puts every node on a host of its own; on rented compute every node is
+	// an instance of its own with its own accelerators, which meets it. Defaults to true whenever
 	// NumNodes > 1 (set false only for local/dev clusters with fewer hosts than NumNodes).
 	SpreadAcrossHosts *bool `json:"spread_across_hosts,omitempty" yaml:"spread_across_hosts,omitempty"`
-	// SameZone prefers co-locating every node in the same topology zone/rack, minimizing
-	// cross-zone latency for gradient all-reduce (NCCL). Best-effort only: the first rank has no
-	// sibling to co-locate with yet, so this can't be a hard requirement without risking the
-	// whole job going unschedulable.
-	SameZone bool `json:"same_zone,omitempty" yaml:"same_zone,omitempty"`
+	// NodesWithin is how close every node of the job is to the others (JobSpec.NodesWithin).
+	// The scheduler picks nodes that agree at this level and names it in the resolved job's
+	// NodeSelector.
+	NodesWithin NodesLevel `json:"nodes_within,omitempty" yaml:"nodes_within,omitempty" enum:"region,zone,placement_group" doc:"How close the job's nodes are to each other: one region, one zone (the default of a job over several nodes) or one placement group. A job no such place of any idle cluster holds is refused exceeds_cluster_capacity at submit; one that such a place holds waits with capacity_unavailable while it is full. Ignored for a job on one node."`
+}
+
+// NodesLevel is a level of nearness. Levels nest: a placement group is within a zone, a zone
+// within a region.
+type NodesLevel string
+
+const (
+	NodesWithinRegion         NodesLevel = "region"
+	NodesWithinZone           NodesLevel = "zone"
+	NodesWithinPlacementGroup NodesLevel = "placement_group"
+)
+
+// NodesLevels are the levels from the widest to the nearest.
+var NodesLevels = []NodesLevel{NodesWithinRegion, NodesWithinZone, NodesWithinPlacementGroup}
+
+// AsNearAs says whether every node within l is also within want: l is want or a nearer level.
+func (l NodesLevel) AsNearAs(want NodesLevel) bool {
+	return slices.Contains(NodesLevels, l) && slices.Index(NodesLevels, l) >= slices.Index(NodesLevels, want)
+}
+
+// NodesWithin is the level every node of the job is within: the one Topology names, zone when it
+// names none, and "" for a job on one node.
+func (j JobSpec) NodesWithin() NodesLevel {
+	switch {
+	case j.Nodes() <= 1:
+		return ""
+	case j.Topology == nil || j.Topology.NodesWithin == "":
+		return NodesWithinZone
+	}
+	return j.Topology.NodesWithin
 }
 
 // JobGroup is one homogeneous slice of a heterogeneous job: Replicas identical nodes with their

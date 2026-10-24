@@ -12,8 +12,8 @@ import (
 )
 
 // max_agents is decided inside the signup's own transaction. Counted before it, concurrent
-// competitors each saw room and all of them committed.
-func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
+// executors each saw room and all of them committed.
+func TestConcurrentExecutorSignupsNeverExceedMaxAgents(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -38,7 +38,7 @@ func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, results[i] = pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agentID, Role: domain.SignupRoleCompetitor})
+			_, results[i] = pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agentID, Role: domain.SignupRoleExecutor})
 		}()
 	}
 	wg.Wait()
@@ -55,12 +55,12 @@ func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
 	if refused != contenders-maxAgents {
 		t.Errorf("refused signups: got = %v, want = %v", refused, contenders-maxAgents)
 	}
-	competitors, err := pes.ListSignupsByRole(ctx, pe, domain.SignupRoleCompetitor)
+	executors, err := pes.ListSignupsByRole(ctx, pe, domain.SignupRoleExecutor)
 	if err != nil {
-		t.Fatalf("list competitors: got = %v, want = nil", err)
+		t.Fatalf("list executors: got = %v, want = nil", err)
 	}
-	if len(competitors) != maxAgents {
-		t.Errorf("competitors signed up: got = %v, want = %v", len(competitors), maxAgents)
+	if len(executors) != maxAgents {
+		t.Errorf("executors signed up: got = %v, want = %v", len(executors), maxAgents)
 	}
 	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: baseline, Role: domain.SignupRoleBaseline}); err != nil || !inserted {
 		t.Errorf("baseline signup into a full field: got = %v, %v, want = true, nil", inserted, err)

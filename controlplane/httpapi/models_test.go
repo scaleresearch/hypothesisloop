@@ -10,32 +10,38 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/openrouter"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 )
 
 type openRouterListing struct {
-	models []openrouter.Model
+	models []domain.ServedModel
 	err    error
 }
 
-func (l openRouterListing) Models(context.Context) ([]openrouter.Model, error) {
+func (l openRouterListing) Models(context.Context) ([]domain.ServedModel, error) {
 	return l.models, l.err
 }
 
-func modelsRouter(t *testing.T, caller auth.Principal, listing models.OpenRouter) http.Handler {
+func (openRouterListing) Cost(string, domain.ModelTokens, *float64) (float64, error) {
+	return 0, errors.New("no call is priced here")
+}
+
+func modelsRouter(t *testing.T, caller auth.Principal, listing models.Provider) http.Handler {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(sessionPlacement), zap.NewNop())
-	registerModels(doc, models.New(platformexperimentstest.Catalog, listing, platformexperimentstest.Defaults), zap.NewNop())
+	registerModels(doc, models.New(map[string]models.Provider{
+		domain.ModelProviderAnthropic: models.Catalog(platformexperimentstest.Catalog), domain.ModelProviderOpenRouter: listing,
+	}, platformexperimentstest.Defaults), zap.NewNop())
 	return r
 }
 
 // Every caller with a token reads the models the platform serves, each under its reference, and
 // the defaults an agent and a coordinator that name none run on.
 func TestEveryCallerListsTheModelsServedAndTheDefaults(t *testing.T) {
-	listing := openRouterListing{models: []openrouter.Model{{ID: "moonshotai/kimi-k2", Name: "MoonshotAI: Kimi K2", ContextLength: 131072, InputUSDPerMTok: 0.6, OutputUSDPerMTok: 2.5}}}
+	listing := openRouterListing{models: []domain.ServedModel{{ID: "moonshotai/kimi-k2", Name: "MoonshotAI: Kimi K2", ContextLength: 131072, InputUSDPerMTok: 0.6, OutputUSDPerMTok: 2.5}}}
 	for _, caller := range []auth.Principal{
 		{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}},
 		{Kind: auth.KindAgent, AgentID: "ag-1", PlatformExperimentID: "pe-1", OrgIDs: []string{"org-a"}},

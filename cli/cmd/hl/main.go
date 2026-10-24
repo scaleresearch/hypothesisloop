@@ -85,7 +85,7 @@ func init() {
 			{Name: "submit", About: "register an idea under the objective or the hypotheses it builds on", Run: shared.HypothesisSubmit},
 			{Name: "checkout", About: "put the clone on your branch for a hypothesis, made from what the hypothesis builds on, and record you as working on it", Run: agent.HypothesisCheckout},
 			{Name: "link", About: "add a link from your own hypothesis, or from any as a researcher", Run: shared.HypothesisLink},
-			{Name: "unlink", About: "remove a link from your own hypothesis, or from any as a researcher; a hypothesis keeps one builds_on", Run: shared.HypothesisUnlink},
+			{Name: "unlink", About: "a researcher's: remove a link from a hypothesis; a hypothesis keeps one builds_on", Run: shared.HypothesisUnlink},
 			{Name: "merge", About: "a researcher's: merge an open duplicate into the hypothesis that states its claim, its incoming links moved there", Run: shared.HypothesisMerge},
 			{Name: "retire", About: "a researcher's: take an open idea off the frontier with the reason; it takes no job and is no verdict", Run: shared.HypothesisRetire},
 			{Name: "comment", About: "add a note to a hypothesis, or to the objective as root", Run: shared.HypothesisComment},

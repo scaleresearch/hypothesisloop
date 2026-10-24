@@ -58,6 +58,14 @@ func TestPickKeepsFailuresAndRankZeroWhenNotEveryRankFits(t *testing.T) {
 	}
 }
 
+// A node whose rank cannot be read takes no place of rank 0's.
+func TestPickKeepsRankZeroBeforeARankUnknown(t *testing.T) {
+	picked, omitted := Pick([]Section{{Rank: -1}, {Rank: 2}, {Rank: 0}, {Rank: -1}}, 2)
+	if got, want := ranks(picked), []int{-1, 0}; !reflect.DeepEqual(got, want) || omitted != 2 {
+		t.Fatalf("ranks = %v with %d omitted, want %v with 2", got, omitted, want)
+	}
+}
+
 func TestHeaderNamesTheRankItsGroupAndWhereItRan(t *testing.T) {
 	for _, tc := range []struct {
 		s    Section
@@ -87,10 +95,7 @@ func TestAssembleSharesTheBudgetAndPassesUnusedLinesOn(t *testing.T) {
 		}
 	}
 	sections := []Section{{Rank: 1, Where: "a", Read: read("a")}, {Rank: 0, Where: "b", Read: read("b")}, {Rank: 2, Exit: 1, Where: "c", Read: read("c")}}
-	lines, err := assemble(sections, 4, 31)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lines := assemble(sections, 4, 31)
 	if want := map[string]int{"a": 9, "b": 13, "c": 13}; !reflect.DeepEqual(asked, want) {
 		t.Errorf("asked %v, want %v", asked, want)
 	}
@@ -108,19 +113,26 @@ func TestTailLeavesOutARankWithNoLines(t *testing.T) {
 		{Rank: 1, Where: "instance one", Read: func(int) ([]string, error) { return nil, nil }},
 		{Rank: 0, Where: "instance zero", Read: repeat("zero")},
 	}
-	lines, err := Tail(sections, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lines := Tail(sections, 20)
 	if want := append([]string{"--- rank 0 (instance zero) ---"}, slices.Repeat([]string{"zero"}, 19)...); !reflect.DeepEqual(lines, want) {
 		t.Errorf("tail = %q, want %q", lines, want)
 	}
 }
 
-func TestTailFailsWhenARankCannotBeRead(t *testing.T) {
-	broken := errors.New("unreachable")
-	sections := []Section{{Rank: 0, Where: "instance zero", Read: func(int) ([]string, error) { return nil, broken }}}
-	if _, err := Tail(sections, 20); !errors.Is(err, broken) {
-		t.Fatalf("err = %v, want %v", err, broken)
+// A rank whose log cannot be read shows why under its header, and the other ranks still show.
+func TestTailShowsWhyARankCannotBeReadAndGoesOn(t *testing.T) {
+	broken := func(int) ([]string, error) { return nil, errors.New("unreachable") }
+	sections := []Section{
+		{Rank: 1, Where: "instance one", Read: broken},
+		{Rank: 0, Where: "instance zero", Read: func(int) ([]string, error) { return []string{"zero", "zero"}, nil }},
+		{Rank: -1, Where: "pod p", Read: broken},
+	}
+	want := []string{
+		"--- rank unknown (pod p) ---", "its log cannot be read: unreachable",
+		"--- rank 1 (instance one) ---", "its log cannot be read: unreachable",
+		"--- rank 0 (instance zero) ---", "zero", "zero",
+	}
+	if lines := Tail(sections, 30); !reflect.DeepEqual(lines, want) {
+		t.Errorf("tail = %q, want %q", lines, want)
 	}
 }

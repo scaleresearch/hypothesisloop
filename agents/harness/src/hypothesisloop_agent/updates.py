@@ -55,7 +55,9 @@ _DRAIN_S = 5
 # A job submitted on a hypothesis another agent's job tests (job.duplicate) wakes it too: two
 # seats on one idea are one seat wasted until it gives one of them another direction. So does a
 # agent the platform added in the place of one that ended (agent.replaced): it starts with
-# no direction but its predecessor's hyperparameters.
+# no direction but its predecessor's hyperparameters. So does an agent whose machine the platform
+# gave up on, every restart spent (agent.stopped): a place the team does not keep is the
+# coordinator's to fill.
 # Both learn at once that their own agent type was edited and they were moved to its new version
 # (agent.instructions): the harness applies it at the turn boundary and tells the agent nothing
 # of it. A coordinator is not woken by its agents' edits (KIND@SUBJECT matches the subject,
@@ -71,7 +73,7 @@ WAKES = {
         platform.EVENT_PLATFORM_EXPERIMENT_BASELINE, platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_PLATFORM_EXPERIMENT_PLAN,
         f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_USER}",
         f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_KEY}", f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_STAFF}",
-        f"{platform.EVENT_AGENT_MESSAGE}={platform.MESSAGE_FROM_OWNER}", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED,
+        f"{platform.EVENT_AGENT_MESSAGE}={platform.MESSAGE_FROM_OWNER}", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED, platform.EVENT_AGENT_STOPPED,
         f"{platform.EVENT_AGENT_INSTRUCTIONS}@{config.COORDINATOR}"),
     "agent": (
         platform.EVENT_EXPERIMENT_STATUS, platform.EVENT_EXPERIMENT_BLOCKED, platform.EVENT_JOB_HELD,

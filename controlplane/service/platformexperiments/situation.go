@@ -387,7 +387,7 @@ func (s *Service) objective(ctx context.Context, pe *domain.PlatformExperiment, 
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
-	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
@@ -401,7 +401,7 @@ func (s *Service) objective(ctx context.Context, pe *domain.PlatformExperiment, 
 		}
 		var standings []standing
 		for _, v := range values {
-			if slices.Contains(competitors, v.AgentID) {
+			if slices.Contains(executors, v.AgentID) {
 				standings = append(standings, standing{agentID: v.AgentID, jobID: v.ExperimentID, value: v.Value, completedAt: completedAt[v.ExperimentID]})
 			}
 		}

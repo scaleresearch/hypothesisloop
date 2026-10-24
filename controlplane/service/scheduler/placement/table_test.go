@@ -127,7 +127,7 @@ func TestFitsWhenIdle(t *testing.T) {
 		"a spread gang, a host too small": {accelerators(map[string]int64{h100: 3}), map[string]map[string]int64{"a": node(8), "b": node(8), "c": node(2)}, gang(3, true), false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := FitsWhenIdle(tc.total, tc.nodes, tc.exp); got != tc.want {
+			if got := FitsWhenIdle(tc.total, tc.nodes, nil, tc.exp); got != tc.want {
 				t.Fatalf("FitsWhenIdle = %v, want %v", got, tc.want)
 			}
 		})

@@ -1,6 +1,10 @@
 package config
 
-import "github.com/scaleresearch/hypothesisloop/controlplane/domain"
+import (
+	"fmt"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+)
 
 // ControlService is what control-service runs with: the settings and the secrets they call for.
 type ControlService struct {
@@ -33,6 +37,9 @@ func LoadControlService() (*ControlService, error) {
 	for _, provider := range domain.ModelProviders {
 		if credential := lookup(modelKeys[provider]); credential != "" {
 			c.ModelCredentials[provider] = credential
+			if catalog, priced := s.Models.Catalogs()[provider]; priced && catalog == nil {
+				return nil, fmt.Errorf("models %s catalog is required while %s is set: the platform prices every call to the provider at it", provider, modelKeys[provider].Name)
+			}
 		}
 	}
 	if s.Sandbox != nil {

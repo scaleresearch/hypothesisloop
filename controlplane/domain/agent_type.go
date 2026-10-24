@@ -38,7 +38,7 @@ type AgentRoleInfo struct {
 	Name        string     `json:"name" doc:"The role's name as it is shown."`
 	Description string     `json:"description" doc:"What agents of the role do, in a sentence or two."`
 	AgentType   string     `json:"agent_type" doc:"The built-in agent type an agent of the role runs as when it names none."`
-	SignupRole  SignupRole `json:"signup_role,omitempty" doc:"The role an agent of it is added with (POST /platform-experiments/{id}/agents), absent for one the platform alone starts."`
+	SignupRole  SignupRole `json:"signup_role,omitempty" doc:"The role an agent of it is signed up with. POST /platform-experiments/{id}/agents adds agents of a role in_team and of baseline. Absent for the coordinator, which is not signed up."`
 	InTeam      bool       `json:"in_team" doc:"Whether the agents list of a platform experiment names agents of the role: an entry of agent_type researcher is of researchers, and an entry of any type of role executor is of executors."`
 	OrgTypes    bool       `json:"org_types" doc:"Whether an org makes agent types of the role (POST /orgs/{id}/agent-types)."`
 }
@@ -46,7 +46,7 @@ type AgentRoleInfo struct {
 // AgentRoleInfos describes every role, in the order of AgentRoles.
 var AgentRoleInfos = []AgentRoleInfo{
 	{AgentRoleExecutor, "Executor", "Implements experiments and runs their jobs, makes sure each is implemented correctly and that what it reports is true. Ranked, cut at stage boundaries, holds a quota and counts toward max_agents. Proposing hypotheses is optional.",
-		DefaultAgentType, SignupRoleCompetitor, true, true},
+		DefaultAgentType, SignupRoleExecutor, true, true},
 	{AgentRoleResearcher, "Researcher", "Keeps the hypothesis graph correct and points the work: reads the literature, proposes ideas, reviews outcomes against their metrics, and merges, retires and relinks hypotheses. Runs no job, pushes nothing, holds no quota, is never ranked or cut and counts toward no max_agents. Runs on its own model, else its type's, else the coordinator's.",
 		ResearcherAgentType, SignupRoleResearcher, true, false},
 	{AgentRoleBaseline, "Baseline", "Measures the experiment's declared control before the run starts, so every executor is ranked against it. Never ranked or cut.",
@@ -54,7 +54,7 @@ var AgentRoleInfos = []AgentRoleInfo{
 	{AgentRoleCoordinator, "Coordinator", "Assembles and steers the team of a platform experiment: one per experiment, not signed up and not ranked.",
 		CoordinatorAgentType, "", false, false},
 	{AgentRolePlanner, "Planner", "Plans a draft: proposes the experiment, its budget and its team, then takes no part once the draft is accepted.",
-		PlannerAgentType, "", false, false},
+		PlannerAgentType, SignupRolePlanner, false, false},
 }
 
 // ParseAgentRole refuses a role that is none of AgentRoles.
@@ -65,34 +65,28 @@ func ParseAgentRole(s string) (AgentRole, error) {
 	return "", fmt.Errorf("role %q must be one of executor, researcher, baseline, coordinator, planner", s)
 }
 
-// RoleOfSignup is the agent role a signup of role r runs as.
-func RoleOfSignup(r SignupRole) AgentRole {
-	switch r {
-	case SignupRoleBaseline:
-		return AgentRoleBaseline
-	case SignupRolePlanner:
-		return AgentRolePlanner
-	case SignupRoleResearcher:
-		return AgentRoleResearcher
-	default:
-		return AgentRoleExecutor
+// Info is what AgentRoleInfos says of role r, the zero AgentRoleInfo for a string that is no role.
+func (r AgentRole) Info() AgentRoleInfo {
+	for _, info := range AgentRoleInfos {
+		if info.Role == r {
+			return info
+		}
 	}
+	return AgentRoleInfo{}
 }
 
-// AgentTypeOfRole is the built-in type an agent of role runs as when it names none.
-func AgentTypeOfRole(role AgentRole) string {
-	switch role {
-	case AgentRoleBaseline:
-		return "baseline"
-	case AgentRolePlanner:
-		return PlannerAgentType
-	case AgentRoleCoordinator:
-		return CoordinatorAgentType
-	case AgentRoleResearcher:
-		return ResearcherAgentType
-	default:
-		return DefaultAgentType
+// RoleOfSignup is the agent role a signup of role r runs as: the one AgentRoleInfos signs up as r,
+// and executor for a reviewer, which runs an executor's agent types.
+func RoleOfSignup(r SignupRole) AgentRole {
+	if r == SignupRoleReviewer {
+		return AgentRoleExecutor
 	}
+	for _, info := range AgentRoleInfos {
+		if info.SignupRole == r {
+			return info.Role
+		}
+	}
+	return ""
 }
 
 // AgentTypeIDPrefix starts the id of an agent type an org creates, followed by a dash. A built-in
@@ -110,14 +104,26 @@ func ValidateBuiltinAgentTypeID(id string) error {
 	return nil
 }
 
-// OrgAgentRoles is the roles an org makes agent types of: a researcher, a coordinator or a planner
-// runs only its built-in type yet.
-var OrgAgentRoles = []AgentRole{AgentRoleExecutor, AgentRoleBaseline}
+// OrgAgentRoles is the roles an org makes agent types of (AgentRoleInfo.OrgTypes): a researcher, a
+// coordinator or a planner runs only its built-in type yet.
+var OrgAgentRoles = func() []AgentRole {
+	var roles []AgentRole
+	for _, info := range AgentRoleInfos {
+		if info.OrgTypes {
+			roles = append(roles, info.Role)
+		}
+	}
+	return roles
+}()
 
 // CheckOrgAgentRole refuses a role an org cannot make an agent type of.
 func CheckOrgAgentRole(role AgentRole) error {
 	if !slices.Contains(OrgAgentRoles, role) {
-		return fmt.Errorf("an org makes agent types of role executor or baseline: a %s runs only its built-in type", role)
+		names := make([]string, len(OrgAgentRoles))
+		for i, r := range OrgAgentRoles {
+			names[i] = string(r)
+		}
+		return fmt.Errorf("an org makes agent types of role %s: a %s runs only its built-in type", strings.Join(names, " or "), role)
 	}
 	return nil
 }
@@ -532,7 +538,7 @@ func (e *LaunchError) Unwrap() error { return e.Err }
 // What it leaves out stays out, and is the type's.
 func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, model string, hyperparameters map[string]any) (AgentLaunchChoice, error) {
 	if agentType == "" {
-		agentType = AgentTypeOfRole(role)
+		agentType = role.Info().AgentType
 	}
 	if _, err := LookupAgentType(catalog, agentType, role); err != nil {
 		return AgentLaunchChoice{}, &LaunchError{Field: "agent_type", Err: err}

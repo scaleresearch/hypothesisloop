@@ -52,7 +52,7 @@ func (s *keepStore) JoinRunning(_ context.Context, _ string, _ *domain.Agent, si
 	if s.joinErr != nil {
 		return s.joinErr
 	}
-	if s.executorErr != nil && signup.Role == domain.SignupRoleCompetitor {
+	if s.executorErr != nil && signup.Role == domain.SignupRoleExecutor {
 		return s.executorErr
 	}
 	s.joined = append(s.joined, signup)
@@ -86,7 +86,7 @@ func TestKeepAgentsReplacesWhoEndedAndNobodyElse(t *testing.T) {
 		},
 		// The cut lowered the pool in its own write: the pool read wants one fewer.
 		"a cut executor": {
-			state:  db.PoolState{Pool: pool.Lowered([]domain.PoolKey{generalist}), MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}},
+			state:  db.PoolState{Pool: domain.AgentPool{{AgentType: "generalist", Model: "anthropic/model-1", Count: 1}, {AgentType: "data-search", Model: "anthropic/model-1", Count: 1}}, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}},
 			endsIn: 10 * time.Hour, sandboxed: true,
 		},
 		"the last minutes of the run": {
@@ -118,7 +118,7 @@ func TestKeepAgentsReplacesWhoEndedAndNobodyElse(t *testing.T) {
 		var replaced []string
 		for _, signup := range store.joined {
 			replaced = append(replaced, signup.Replaces)
-			if !signup.InAgentSandbox || signup.Role != domain.SignupRoleCompetitor || signup.Hyperparameters["area"] != signup.Replaces || signup.QuotaTier != domain.QuotaTierBurstOnly {
+			if !signup.InAgentSandbox || signup.Role != domain.SignupRoleExecutor || signup.Hyperparameters["area"] != signup.Replaces || signup.QuotaTier != domain.QuotaTierBurstOnly {
 				t.Errorf("%s: added %+v, want a sandboxed executor with what the one it replaces had", name, signup)
 			}
 		}
@@ -229,8 +229,8 @@ func TestKeepAgentsFillsTheResearchersPlacesOnceNoExecutorFits(t *testing.T) {
 		if len(store.joined) != 1 || store.joined[0].Role != domain.SignupRoleResearcher || store.joined[0].Replaces != "ag-r" {
 			t.Errorf("%v: joined = %+v, want the researcher ag-r replaced", refused, store.joined)
 		}
-		if store.asked[domain.SignupRoleCompetitor] != 1 {
-			t.Errorf("%v: executor joins asked = %d, want 1: the first refusal ends the executors' places", refused, store.asked[domain.SignupRoleCompetitor])
+		if store.asked[domain.SignupRoleExecutor] != 1 {
+			t.Errorf("%v: executor joins asked = %d, want 1: the first refusal ends the executors' places", refused, store.asked[domain.SignupRoleExecutor])
 		}
 	}
 }

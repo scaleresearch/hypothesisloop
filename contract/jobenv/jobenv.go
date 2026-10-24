@@ -69,8 +69,9 @@ const (
 	TorchLocalRank  = "LOCAL_RANK"
 )
 
-// The network interfaces NCCL and Gloo open their sockets on, which a runtime whose nodes reach
-// one another on an interface of their own sets to it.
+// The network interfaces NCCL and Gloo open their sockets on. Rented compute sets them to the
+// interface of the provider's private network on every node of a job that spans several. On
+// Kubernetes they are unset, and NCCL and Gloo use the pod's interface. A job sets neither.
 const (
 	NCCLSocketInterface = "NCCL_SOCKET_IFNAME"
 	GlooSocketInterface = "GLOO_SOCKET_IFNAME"

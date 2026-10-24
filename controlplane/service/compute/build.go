@@ -95,22 +95,16 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob, job clusterapi.JobSpec,
 	}, nil
 }
 
-// onNetwork is r's spec on network, where it meets the others at masterAddr over the network's
+// inPlace is r's spec in place, where it meets the others at masterAddr over the private network's
 // interface, as a node of a job that spans several on k8s is told.
-func (r rank) onNetwork(job clusterapi.JobSpec, network, masterAddr, iface string) provider.Spec {
+func (r rank) inPlace(job clusterapi.JobSpec, place, masterAddr, iface string) provider.Spec {
 	spec := r.spec
-	spec.Network = network
+	spec.Place = place
 	spec.Env = maps.Clone(r.spec.Env)
-	for _, v := range workloadenv.Gang(job, r.group, r.offset, r.index, masterAddr) {
-		spec.Env[v.Name] = v.Value
+	for _, v := range workloadenv.Gang(job, r.group, r.offset, masterAddr) {
+		spec.Env[v.Name] = v.At(r.index).Value
 	}
 	spec.Env[jobenv.NCCLSocketInterface] = iface
 	spec.Env[jobenv.GlooSocketInterface] = iface
 	return spec
-}
-
-// spreads says whether no two of job's nodes may share a host, which they may not unless the job
-// says otherwise.
-func spreads(job clusterapi.JobSpec) bool {
-	return job.Topology == nil || job.Topology.SpreadAcrossHosts == nil || *job.Topology.SpreadAcrossHosts
 }

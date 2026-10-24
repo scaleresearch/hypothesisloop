@@ -61,13 +61,13 @@ How you work is yours. What the run expects of you:
     from the code it builds on (the baseline's for a root child), after a restart too. Its
     harness, image, `metrics.py` and `.hypothesisloop/job.yaml` stay as they are unless
     the idea is about them. Commit there; `hl job submit` pushes it.
-  - Start from what is known: read what the researcher posted on the objective
+  - Start from what is known: read what researchers, if the team has any, posted on the objective
     (`hl hypothesis get root`), the best published results and the methods behind them. Search
     the web (WebSearch, WebFetch) only for what your implementation needs: a method's details,
     a library's API, a fix for an error.
   - Work a wide portfolio: as many ideas pursued at once as the capacity holds. An open
     hypothesis nobody works on (`hl hypothesis list --status open --untaken`) is yours to take,
-    the researcher's ideas first among them: `hl hypothesis checkout ID` claims it. Nobody
+    researchers' ideas first among them: `hl hypothesis checkout ID` claims it. Nobody
     assigns work; you choose. Proposing your own ideas is optional: register one before its
     code, with what you expect and why, where the board lacks what you would test;
     `hl hypothesis submit --file` registers a batch.
@@ -75,7 +75,7 @@ How you work is yours. What the run expects of you:
     freely. `working` on a hypothesis names the agents already on it; take it too only with a
     different approach. One you take is tested under its own id (`--hypothesis ID`), and its
     summaries are yours to give as on your own, and its verdict once a job of yours on it
-    completed or failed; the idea stays the person's. So does an idea the researcher
+    completed or failed; the idea stays the person's. So does an idea a researcher
     registered stay the researcher's, who gives it no verdict.
   - Your turns are for judging and dispatching ideas and checking what comes back. Each idea
     goes to its own subagent (the Agent tool, run_in_background, `isolation: "worktree"`) that
@@ -151,16 +151,23 @@ How you work is yours. What the run expects of you:
     queued with capacity_unavailable naming the shapes each takes. Its ranks start as their
     machines boot, with no start gate, so set the framework's rendezvous timeout to at least the
     cluster's startup time, `startup_seconds` in `hl capacity` (for example
-    `torchrun --rdzv_conf timeout=...`, or `init_process_group(timeout=...)`). The platform
-    sets NCCL_SOCKET_IFNAME and GLOO_SOCKET_IFNAME for the private network, so a job does not.
-    A retry rents new machines on a new network. Its nodes land on
-    hosts of their own (`topology.spread_across_hosts`, on by default), so it needs a cluster
-    with at least as many `hosts` as it has nodes, and is refused exceeds_cluster_capacity where
+    `torchrun --rdzv_conf timeout=...`, or `init_process_group(timeout=...)`). NCCL_SOCKET_IFNAME
+    and GLOO_SOCKET_IFNAME are reserved: rented compute sets them to its private network's
+    interface, and on Kubernetes NCCL and Gloo use the pod's interface, so a job sets neither.
+    A retry rents new machines on a new network. Its nodes share no host's accelerators
+    (`topology.spread_across_hosts`, on by default): on Kubernetes each lands on a host of its
+    own, and on rented compute each is an instance of its own. It needs a cluster with at
+    least as many `hosts` as it has nodes, and is refused exceeds_cluster_capacity where
     none has. To check that a gang's code runs on a cluster with fewer hosts, set
     `topology.spread_across_hosts: false`: its nodes then share hosts and their devices, which
-    says nothing of its speed at scale. `hl job logs` of such a job has a section per rank
-    whose pod or instance still exists, headed by its rank, its group on Kubernetes, and its pod
-    or instance, with rank 0 and the failed ranks last and the first rank to fail at the very end;
+    says nothing of its speed at scale. Its nodes are all in one zone of a cluster
+    (`topology.nodes_within`: `region`, `zone`, the default, or `placement_group` for nodes on
+    one fabric), and it waits while no zone has room for all of them. On rented compute a job's
+    nodes are only as near as the provider's place: a RunPod data center holds a job within a
+    zone or a region, and none within a placement group. One that no zone of any idle cluster
+    holds is refused exceeds_cluster_capacity at submit. `hl job logs` of such a job has a
+    section per rank whose pod or instance still exists, headed by its rank, its group on
+    Kubernetes, and its pod or instance, with rank 0 and the failed ranks last and the first rank to fail at the very end;
     once a rank fails the others' are removed, so it may show the failed rank alone. Span nodes only where the idea needs the scale; independent trials
     are independent jobs.
   - Every wake carries the situation (`hl situation`): time left, the gap to the target, the
@@ -170,11 +177,12 @@ How you work is yours. What the run expects of you:
     a sweep) beside the running ones until `fits_now` or your room is used. A job in flight is
     no reason to end your turn. Size `cpu` to the cores the program keeps busy
     ($HYPOTHESISLOOP_CPUS).
-  - You may submit at most `max_submissions_per_hour` jobs in any hour, and `hl quota` says how
-    many the last hour leaves you (`submissions_left`); past it a submit is refused as
-    rate_limited until the oldest of them is an hour old. Plan seeds and sweeps within it: a few
-    seeds per arm until a difference shows, then more seeds only where the difference decides a
-    verdict or a next step. Brief subagents with how many jobs each may submit.
+  - You may make at most `max_submissions_per_hour` submissions in any hour, each the jobs of
+    one hypothesis on one commit, so its seeds and sweeps count once. `hl quota` says how many
+    the last hour leaves you (`submissions_left`); past it a job of another hypothesis or commit
+    is refused as rate_limited. Run a few seeds per arm until a difference shows, then more seeds
+    only where the difference decides a verdict or a next step. Brief subagents with how many
+    submissions each may make.
   - Compare a trial only with a control measured on the same machine (`ran_on`; machines of one
     type differ up to 2x); with none there, run the control alongside. On a metric the situation
     reads deterministic=true, values compare across machines and need no repeat. A summary notes

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -119,6 +120,15 @@ func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.
 			return
 		}
 		exp.ResolvedJob = resolvedJob
+	}
+	if place, _ := placement.ScaleUpPlace(c.nodeLabels[specCluster], exp); len(place) > 0 {
+		job := exp.EffectiveJob()
+		job.NodeSelector = maps.Clone(job.NodeSelector)
+		if job.NodeSelector == nil {
+			job.NodeSelector = map[string]string{}
+		}
+		maps.Copy(job.NodeSelector, place)
+		exp.ResolvedJob = &job
 	}
 	if err := l.submitJobTo(ctx, exp, specCluster, c.clusterIDs[specCluster], persistedAcceleratorType, true, provenFit); err != nil {
 		l.logger.Log(submitErrorLevel(err), "speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
@@ -256,6 +266,7 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 	slotWait := slotWaitReason(exp, cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster])
 	neverFits := c.whenIdle.neverFitsReason(exp)
 	noArchitecture := noNodeOfArchitectureReason(exp, cluster, c.nodeLabels[cluster])
+	apart := apartReason(exp, cluster, c.nodeAvail[cluster], c.nodeResources[cluster], c.nodeLabels[cluster])
 	reason := ""
 	switch {
 	case len(leaving) > 0:
@@ -272,6 +283,8 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 		reason = slotWait
 	case noArchitecture != "":
 		reason = noArchitecture
+	case apart != "":
+		reason = apart
 	default:
 		fitAtTickStart := domain.Fits(t.gAvailInitial[cluster], fp) &&
 			placement.TopologyFits(c.nodeAvailAtTickStart[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster], exp)

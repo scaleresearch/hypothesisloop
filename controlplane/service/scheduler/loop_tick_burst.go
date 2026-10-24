@@ -92,6 +92,9 @@ func (l *Loop) burstWait(ctx context.Context, t *tickState, exp *domain.Experime
 		reason = noNodeOfArchitectureReason(exp, cluster, c.nodeLabels[cluster])
 	}
 	if reason == "" {
+		reason = apartReason(exp, cluster, c.nodeAvail[cluster], c.nodeResources[cluster], c.nodeLabels[cluster])
+	}
+	if reason == "" {
 		claimed, err := c.resolveCache.loadClaimed(ctx)
 		if err != nil {
 			l.skipExperiment(&t.errs, exp, fmt.Errorf("list the jobs that hold capacity: %w", err))

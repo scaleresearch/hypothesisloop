@@ -45,8 +45,8 @@ type QuotaConfig struct {
 	// waits for the first one's machine to be running before the platform closes it: the time
 	// one machine and every restart of it may take to come up, and never past its end.
 	AgentsDue time.Duration `json:"agents_due,omitempty"`
-	// MaxSubmissionsPerHour caps how many experiments an agent may submit within a single
-	// platform experiment in any SubmissionWindow.
+	// MaxSubmissionsPerHour caps how many submissions an agent may make within a single platform
+	// experiment in any SubmissionWindow, each the jobs of one hypothesis on one commit.
 	MaxSubmissionsPerHour int `json:"max_submissions_per_hour"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap a job's

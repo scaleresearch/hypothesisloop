@@ -86,7 +86,7 @@ const replacedSQL = `EXISTS (SELECT 1 FROM experiment_signups r WHERE r.platform
 
 // teamSQL is whether signup s is of a role the agents of a platform experiment keep: an executor
 // or a researcher.
-const teamSQL = `s.role IN ('` + string(domain.SignupRoleCompetitor) + `', '` + string(domain.SignupRoleResearcher) + `')`
+const teamSQL = `s.role IN ('` + string(domain.SignupRoleExecutor) + `', '` + string(domain.SignupRoleResearcher) + `')`
 
 // agentAtWorkSQL is whether signup s is an agent of the team at work, an executor or a
 // researcher: one that did not finish, was not cut, was not replaced and, run by the platform, did
@@ -98,7 +98,7 @@ const agentAtWorkSQL = teamSQL + ` AND s.finished_at IS NULL AND NOT ` + stopped
 // executorAtWorkSQL is whether signup s is an executor at work (agentAtWorkSQL). Each takes one of
 // the places max_agents counts, and only they do: the one count of the executors a platform
 // experiment has, for a signup and for a change of max_agents alike.
-const executorAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) + `' AND ` + agentAtWorkSQL
+const executorAtWorkSQL = `s.role = '` + string(domain.SignupRoleExecutor) + `' AND ` + agentAtWorkSQL
 
 // endedReasonSQL is why signup s no longer holds a place in the team, empty while it does.
 const endedReasonSQL = `CASE WHEN ` + runCutAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndCut) + `'

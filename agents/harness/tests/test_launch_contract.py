@@ -25,7 +25,7 @@ class LaunchEnvironmentTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {**LAUNCH_ENV, **stale}, clear=True):
             cfg = config.Config()
         self.assertEqual((cfg.agent_id, cfg.platform_experiment_id, cfg.role), ("agent-a", "pe-1", ""))
-        for role in ("", "competitor", "coordinator"):
+        for role in ("", "reviewer", "coordinator"):
             with self.assertRaises(SystemExit):
                 cfg.run_as(role)
         cfg.run_as("planner")
@@ -139,7 +139,7 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(key, env)
 
     def test_each_provider_has_its_proxy_path_and_any_but_anthropic_names_its_model_for_every_call(self):
-        cfg = SimpleNamespace(api_url="https://api.example/", token="t", role="competitor")
+        cfg = SimpleNamespace(api_url="https://api.example/", token="t", role="executor")
         anthropic = cli.model_env(cfg, served(cfg, model="anthropic/claude-x"))
         self.assertEqual(anthropic["ANTHROPIC_BASE_URL"], "https://api.example/model/anthropic")
         self.assertFalse([key for key in anthropic if key.startswith("ANTHROPIC_DEFAULT_") or key == "CLAUDE_CODE_SUBAGENT_MODEL"])
@@ -152,8 +152,8 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(env[key], model_id)
 
     def test_a_changed_provider_takes_a_new_session(self):
-        a = served(SimpleNamespace(role="competitor"), model="anthropic/x")
-        self.assertTrue(a.needs_new_session(served(SimpleNamespace(role="competitor"), model="openrouter/x")))
+        a = served(SimpleNamespace(role="executor"), model="anthropic/x")
+        self.assertTrue(a.needs_new_session(served(SimpleNamespace(role="executor"), model="openrouter/x")))
         self.assertFalse(a.needs_new_session(a))
 
     def test_a_model_reference_is_a_known_provider_and_a_model_id(self):

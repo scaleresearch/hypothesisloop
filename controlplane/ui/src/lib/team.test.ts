@@ -4,7 +4,7 @@ import type { JoinedAgent } from '@/types/api'
 
 function agent(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
-    platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
+    platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'executor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
     in_agentsandbox: true, agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', hyperparameters: null, at_work: true, ended: '', signed_up_at: `2026-01-01T0${joined}:00:00Z`, actions: [], ...more,
   }
 }

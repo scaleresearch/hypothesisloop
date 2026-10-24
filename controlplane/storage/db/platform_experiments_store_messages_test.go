@@ -18,7 +18,7 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "message", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, peID, agentID)
 	before := cursorNow(t, pool)
 
 	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
@@ -101,7 +101,7 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "allowance", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, peID, agentID)
 	allowance := func() domain.MessageAllowance {
 		t.Helper()
 		all, err := pes.MessageAllowance(ctx, peID, domain.Actor{Kind: domain.ActorCoordinator})
@@ -146,7 +146,7 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "to-coordinator", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, peID, agentID)
 	staff := domain.Actor{Kind: domain.ActorStaff}
 	if _, err := pes.SendCoordinatorMessage(ctx, peID, "look at the gap", staff); !errors.Is(err, ErrNoCoordinator) {
 		t.Fatalf("with no sandboxed coordinator: got = %v, want %v", err, ErrNoCoordinator)
@@ -279,7 +279,7 @@ func TestAMessageToEveryAgentSkipsThoseRateLimited(t *testing.T) {
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	t.Cleanup(func() { exec(t, pool, `DELETE FROM experiment_signups WHERE agent_id = $1`, freeAgent) })
 	for _, agent := range []string{limitedAgent, freeAgent} {
-		exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'competitor')`, peID, agent)
+		exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, peID, agent)
 	}
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
 	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
@@ -320,7 +320,7 @@ func TestAMessageToEveryAgentReachesTheExecutorsAndResearchers(t *testing.T) {
 	pes := NewStore(pool, 3)
 	executor, peID, _ := seedRun(t, pool, "team", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	roles := map[string]domain.SignupRole{executor: domain.SignupRoleCompetitor}
+	roles := map[string]domain.SignupRole{executor: domain.SignupRoleExecutor}
 	for _, role := range []domain.SignupRole{domain.SignupRoleResearcher, domain.SignupRoleBaseline, domain.SignupRolePlanner} {
 		agent, _, _ := seedRun(t, pool, "team-"+string(role), true)
 		t.Cleanup(func() { exec(t, pool, `DELETE FROM experiment_signups WHERE agent_id = $1`, agent) })
@@ -338,7 +338,7 @@ func TestAMessageToEveryAgentReachesTheExecutorsAndResearchers(t *testing.T) {
 	for _, m := range sent {
 		got[roles[m.AgentID]]++
 	}
-	if len(sent) != 2 || got[domain.SignupRoleCompetitor] != 1 || got[domain.SignupRoleResearcher] != 1 {
+	if len(sent) != 2 || got[domain.SignupRoleExecutor] != 1 || got[domain.SignupRoleResearcher] != 1 {
 		t.Fatalf("to the team: sent %+v, want the executor and the researcher alone", sent)
 	}
 }

@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -11,65 +10,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
-
-// A database stored before executors and researchers were apart has each researcher type made an
-// executor at the next start, the built-in researcher left as it is, and a proposal that stated
-// its pool as researchers stating it as agents. A second start changes nothing more.
-func TestAStartMovesAnOldDatabaseOntoExecutorsAndResearchers(t *testing.T) {
-	pool := builtDatabase(t)
-	ctx := context.Background()
-	exec := func(sql string, args ...any) {
-		t.Helper()
-		if _, err := pool.pool.Exec(ctx, sql, args...); err != nil {
-			t.Fatalf("%s: %v", sql, err)
-		}
-	}
-	tuner, err := NewStore(pool, 3).Create(ctx, "default", "Tuner", "", domain.AgentRoleExecutor, testPrompt, testTypeSettings(), *testActor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	exec(`UPDATE agent_types SET role = 'researcher' WHERE id IN ($1, 'generalist')`, tuner.ID)
-	proposal := `{"goal_version":1,"experiment":{"name":"n","researchers":[{"agent_type":"generalist","count":2}]},"agents":[{"agent_type":"generalist"}]}`
-	exec(`INSERT INTO platform_experiments (id, project_id, name, budget_accelerator_hours, starts_at, ends_at, default_quota_tier, created_by_kind, proposal)
-VALUES ('pe-old', 'default', 'pe-old', 1, now(), now() + interval '1 hour', 'guaranteed', 'staff', $1)`, proposal)
-
-	for range 2 {
-		if built, err := EnsureSchema(ctx, pool); err != nil || built {
-			t.Fatalf("start: %v, %v", built, err)
-		}
-	}
-
-	roles := map[string]string{}
-	rows, err := pool.pool.Query(ctx, `SELECT id, role FROM agent_types WHERE id IN ($1, 'generalist', 'researcher', 'baseline')`, tuner.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var id, role string
-		if err := rows.Scan(&id, &role); err != nil {
-			t.Fatal(err)
-		}
-		roles[id] = role
-	}
-	if roles[tuner.ID] != "executor" || roles["generalist"] != "executor" || roles["researcher"] != "researcher" || roles["baseline"] != "baseline" {
-		t.Errorf("roles = %v, want the researcher types executors and the built-in researcher and baseline kept", roles)
-	}
-	var stored []byte
-	if err := pool.pool.QueryRow(ctx, `SELECT proposal FROM platform_experiments WHERE id = 'pe-old'`).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
-	var got struct {
-		GoalVersion int                        `json:"goal_version"`
-		Experiment  map[string]json.RawMessage `json:"experiment"`
-		Agents      []map[string]any           `json:"agents"`
-	}
-	if err := json.Unmarshal(stored, &got); err != nil {
-		t.Fatal(err)
-	}
-	if _, old := got.Experiment["researchers"]; old || string(got.Experiment["agents"]) != `[{"count": 2, "agent_type": "generalist"}]` || got.GoalVersion != 1 || len(got.Agents) != 1 {
-		t.Errorf("proposal = %s, want its experiment's pool under agents and the rest kept", stored)
-	}
-}
 
 // A researcher joins a running platform experiment whose executors fill max_agents, holds no quota,
 // and is at work in the pool's count, outside the executors max_agents counts.
@@ -90,7 +30,7 @@ func TestAResearcherTakesNoPlaceOfMaxAgentsAndNoQuota(t *testing.T) {
 		}
 		return id
 	}
-	executor := spawn(domain.SignupRoleCompetitor)
+	executor := spawn(domain.SignupRoleExecutor)
 	early := spawn(domain.SignupRoleResearcher)
 	started, quotas, err := pes.StartPlatformExperimentTx(ctx, pe, time.Hour, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
 		if len(participants) != 1 || participants[0].AgentID != executor {
@@ -119,7 +59,7 @@ func TestAResearcherTakesNoPlaceOfMaxAgentsAndNoQuota(t *testing.T) {
 		t.Errorf("at work = %v %v, want two researchers and one executor", atWork, err)
 	}
 	second, _ := domain.NewID(domain.AgentIDPrefix)
-	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: second, CreatedAt: time.Now().UTC()}, domain.AgentSignup{Actor: testActor, AgentID: second, Role: domain.SignupRoleCompetitor}, late); !errors.Is(err, ErrMaxAgentsReached) {
+	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: second, CreatedAt: time.Now().UTC()}, domain.AgentSignup{Actor: testActor, AgentID: second, Role: domain.SignupRoleExecutor}, late); !errors.Is(err, ErrMaxAgentsReached) {
 		t.Errorf("a second executor past max_agents 1: got = %v, want ErrMaxAgentsReached", err)
 	}
 }
@@ -141,7 +81,7 @@ func TestAResearchersModelIsItsOwnElseItsTypesElseTheCoordinators(t *testing.T) 
 		}
 		return id
 	}
-	own, inherits, executor := spawn(domain.SignupRoleResearcher, "anthropic/own"), spawn(domain.SignupRoleResearcher, ""), spawn(domain.SignupRoleCompetitor, "")
+	own, inherits, executor := spawn(domain.SignupRoleResearcher, "anthropic/own"), spawn(domain.SignupRoleResearcher, ""), spawn(domain.SignupRoleExecutor, "")
 	defaults := domain.ModelDefaults{Agent: "anthropic/agent-default", Coordinator: "anthropic/coordinator-default"}
 	model := func(agentID string) string {
 		t.Helper()

@@ -36,8 +36,9 @@ var (
 // registered and similar lists them.
 //
 // agentID is the agent whose hypothesis it is, empty for one no agent owns, and a researcher's is
-// stored as one no agent owns. actor is the credential registering it. hypothesis.new names
-// agentID as the agent that registered it, a researcher included, so its own watch leaves it out.
+// stored as one no agent owns. actor is the credential registering it, kept on the hypothesis: a
+// researcher's own token records the researcher there. hypothesis.new names agentID as the agent
+// that made the change, as every change does, so the researcher's own watch leaves it out.
 func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor domain.Actor, platformExperimentID, text string, links []domain.LinkSpec, distinctFrom []string) (h *domain.Hypothesis, out []domain.Link, alreadyExisted bool, similar []domain.SimilarHypothesis, err error) {
 	found, err := s.store.PlatformExperimentExists(ctx, platformExperimentID)
 	if err != nil {
@@ -156,7 +157,7 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 		return nil, fmt.Errorf("registry.AddHypothesisLink: %w: %s", ErrHypothesisNotFound, id)
 	}
 	if from.AgentID != "" && from.AgentID != agentID {
-		researcher, err := s.isResearcher(ctx, from.PlatformExperimentID, agentID)
+		researcher, err := s.Curates(ctx, from.PlatformExperimentID, agentID)
 		if err != nil {
 			return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
 		}
@@ -372,13 +373,15 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	if current == nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w: %s", ErrHypothesisNotFound, id)
 	}
-	researcher, err := s.isResearcher(ctx, current.PlatformExperimentID, callerAgentID)
+	researcher, err := s.Curates(ctx, current.PlatformExperimentID, callerAgentID)
 	if err != nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 	}
 	if researcher {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", ErrResearcherGivesNoVerdict)
 	}
+	// Asked before the evidence, so a curated one is refused as curated and not for a job it can no
+	// longer take. The graph's write asks again under its lock.
 	if current.Curated() {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", &graphdb.CuratedError{Hypothesis: current, Refused: "takes no verdict"})
 	}

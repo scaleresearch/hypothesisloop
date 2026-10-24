@@ -92,8 +92,8 @@ var principals = tokens{
 
 func signups() map[string]domain.AgentSignup {
 	return map[string]domain.AgentSignup{
-		"agent-r2": {AgentID: "agent-r2", Name: "Executor 2", Role: domain.SignupRoleCompetitor},
-		"agent-r3": {AgentID: "agent-r3", Name: "Executor 3", Role: domain.SignupRoleCompetitor},
+		"agent-r2": {AgentID: "agent-r2", Name: "Executor 2", Role: domain.SignupRoleExecutor},
+		"agent-r3": {AgentID: "agent-r3", Name: "Executor 3", Role: domain.SignupRoleExecutor},
 		"agent-b1": {AgentID: "agent-b1", Name: "Baseline 1", Role: domain.SignupRoleBaseline},
 		"agent-p1": {AgentID: "agent-p1", Name: "Planner 1", Role: domain.SignupRolePlanner},
 		"agent-s1": {AgentID: "agent-s1", Name: "Researcher 1", Role: domain.SignupRoleResearcher},
@@ -412,7 +412,7 @@ func TestTheProxyServesNoOneElse(t *testing.T) {
 
 func TestAnAgentWhoseNameMakesAnotherAgentsBranchNamesPushesNothing(t *testing.T) {
 	w := newWorld(t)
-	w.store.signups["agent-r3"] = domain.AgentSignup{AgentID: "agent-r3", Name: "executor-2", Role: domain.SignupRoleCompetitor}
+	w.store.signups["agent-r3"] = domain.AgentSignup{AgentID: "agent-r3", Name: "executor-2", Role: domain.SignupRoleExecutor}
 	dir := w.clone("tok-executor-2", "executor-2")
 	w.commitOn(dir, "hl/pe-1/executor-2/x")
 	if out, err := w.git("tok-executor-2", dir, "push", "origin", "hl/pe-1/executor-2/x"); err == nil || !strings.Contains(out, "make the same branch names") {

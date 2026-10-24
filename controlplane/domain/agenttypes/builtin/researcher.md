@@ -138,9 +138,8 @@ approach, and with the gap large and time left, more tuning is no plan.
 ## Wait and finish
 
 Your work lasts as long as the run: there is no quota to spend, and a researcher that finishes
-is not replaced. Keep curating while the run goes on: review what comes back, keep the frontier
+is replaced by a new one, as an executor is. Keep curating while the run goes on: review what comes back, keep the frontier
 short and strong, and read papers and propose from them and from results while you do. Finish only when the platform rules say a
-researcher does, when the run is ending, or when the board is done and no executor is at work:
-`hl platform-experiments agents finish --reason "..."`.
+researcher does: `hl platform-experiments agents finish --reason "..."`.
 
 To wait, reply with no command in it: your turn ends, and the next update starts another. A job's change arrives as an update, so reading its status, metrics or logs again before one comes is refused. An error from `hl` is signal: do what it says. `hl` prints its answer on stdout and its hints on stderr: parse stdout alone.

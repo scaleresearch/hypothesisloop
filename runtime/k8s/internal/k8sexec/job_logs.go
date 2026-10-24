@@ -14,13 +14,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/ranktail"
 )
 
-// FetchLogTail returns the last maxLines lines of experimentID's pod output, read live from the
-// Kubernetes API (never cached, never stored by this executor itself).
-// Returns (nil, nil) rather than an error if the pod doesn't exist yet or has no container
-// started (e.g. still Pending): that's an ordinary transient state for a job that was just
-// admitted, not a failure worth logging every reconcile tick.
-//
-// A distributed job's tail is one section per rank (see gangLogTail).
+// FetchLogTail returns the last maxLines lines of experimentID's pod output, one section per rank
+// for a distributed job. A pod that does not exist yet or has not started a container has no
+// output, which is no error.
 func (c *JobWorkloadClient) FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error) {
 	pods, err := c.experimentPods(ctx, experimentID)
 	if err != nil {
@@ -63,12 +59,8 @@ func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName s
 	defer cancel()
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		// A 400 here means the container hasn't started producing logs yet (e.g. still pulling
-		// the image) -- an ordinary transient state, not a failure worth reporting every tick.
-		// Anything else (403 in particular -- confirmed live: a missing pods/log RBAC rule
-		// fails exactly this way, and silently swallowing it here made a real permissions bug
-		// indistinguishable from "pod not ready yet" until the ClusterRole was fixed) must
-		// propagate so agentloop's Log surfaces it.
+		// A 400 is a container that has written no log yet and a 404 a pod that is gone. Anything
+		// else, such as a 403 from a missing pods/log RBAC rule, is an error.
 		if apierrors.IsBadRequest(err) || apierrors.IsNotFound(err) {
 			return nil, nil
 		}
@@ -90,24 +82,22 @@ func (c *JobWorkloadClient) podTail(ctx context.Context, experimentID, podName s
 
 // gangLogTail is a distributed job's tail: one section per rank, sharing maxLines.
 func (c *JobWorkloadClient) gangLogTail(ctx context.Context, experimentID string, pods []corev1.Pod, maxLines int) ([]string, error) {
-	sections, err := c.rankSections(ctx, experimentID, pods)
-	if err != nil {
-		return nil, fmt.Errorf("k8sexec.FetchLogTail: %s: %w", experimentID, err)
-	}
-	return ranktail.Tail(sections, maxLines)
+	return ranktail.Tail(c.rankSections(ctx, experimentID, pods), maxLines), nil
 }
 
-// rankSections is each pod of a gang as a section of its tail, read through the pod's own logs.
-func (c *JobWorkloadClient) rankSections(ctx context.Context, experimentID string, pods []corev1.Pod) ([]ranktail.Section, error) {
+// rankSections is each pod of a gang as a section of its tail, read through the pod's own logs. A
+// pod whose rank cannot be read shows why under an unknown rank.
+func (c *JobWorkloadClient) rankSections(ctx context.Context, experimentID string, pods []corev1.Pod) []ranktail.Section {
 	sections := make([]ranktail.Section, 0, len(pods))
 	for i := range pods {
 		p := &pods[i]
+		s := ranktail.Section{Where: "pod " + p.Name, Exit: int(terminatedExitCode(p)),
+			Read: func(n int) ([]string, error) { return c.podTail(ctx, experimentID, p.Name, n) }}
 		rank, group, err := podGangRank(p)
 		if err != nil {
-			return nil, err
+			rank, s.Read = -1, func(int) ([]string, error) { return nil, err }
 		}
-		s := ranktail.Section{Rank: rank, Group: group, Where: "pod " + p.Name, Exit: int(terminatedExitCode(p)),
-			Read: func(n int) ([]string, error) { return c.podTail(ctx, experimentID, p.Name, n) }}
+		s.Rank, s.Group = rank, group
 		for _, cs := range p.Status.ContainerStatuses {
 			if t := cs.State.Terminated; s.Exit > 0 && t != nil && int(t.ExitCode) == s.Exit {
 				s.FailedAt = t.FinishedAt.Time
@@ -115,7 +105,7 @@ func (c *JobWorkloadClient) rankSections(ctx context.Context, experimentID strin
 		}
 		sections = append(sections, s)
 	}
-	return sections, nil
+	return sections
 }
 
 // podGangRank is a distributed job's pod's global rank, its completion index plus the offset of

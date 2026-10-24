@@ -453,7 +453,7 @@ researcher (researcher_only). Prints DUP as it is now.`, stderr)
 	if reason != "" {
 		body["reason"] = reason
 	}
-	return curate(c, "/hypotheses/"+url.PathEscape(dup)+"/merge", *agent, body, stdout, stderr)
+	return curate(c, "POST", "/hypotheses/"+url.PathEscape(dup)+"/merge", *agent, body, stdout, stderr)
 }
 
 // HypothesisRetire handles `hl hypothesis retire ID --reason T`.
@@ -481,15 +481,26 @@ with a job queued or running (hypothesis_in_flight), and for anyone but a resear
 	if id, err = apiclient.FullHypothesisID(c, c.Experiment(""), id); err != nil {
 		return command.Fail(stderr, err)
 	}
-	return curate(c, "/hypotheses/"+url.PathEscape(id)+"/retire", *agent, map[string]string{"reason": reason}, stdout, stderr)
+	return curate(c, "POST", "/hypotheses/"+url.PathEscape(id)+"/retire", *agent, map[string]string{"reason": reason}, stdout, stderr)
 }
 
-func curate(c *apiclient.Client, path, agent string, body map[string]string, stdout, stderr io.Writer) int {
-	if owner := c.Agent(agent); owner != "" {
-		body["agent_id"] = owner
+// curate sends a researcher's curation of a hypothesis, as agent when it names one: in the body,
+// or in the query of a DELETE, which has none.
+func curate(c *apiclient.Client, method, path, agent string, body map[string]string, stdout, stderr io.Writer) int {
+	owner := c.Agent(agent)
+	var payload any
+	if method == "DELETE" {
+		if owner != "" {
+			path += "?agent_id=" + url.QueryEscape(owner)
+		}
+	} else {
+		if owner != "" {
+			body["agent_id"] = owner
+		}
+		payload = body
 	}
 	var out json.RawMessage
-	if err := c.Do("POST", path, body, &out); err != nil {
+	if err := c.Do(method, path, payload, &out); err != nil {
 		return command.Fail(stderr, err)
 	}
 	if err := command.PrintLine(stdout, out); err != nil {
@@ -525,18 +536,7 @@ remaining outgoing links.`, stderr)
 			return command.Fail(stderr, err)
 		}
 	}
-	path := "/hypotheses/" + url.PathEscape(from) + "/links/" + url.PathEscape(*typ) + "/" + url.PathEscape(*to)
-	if owner := c.Agent(*agent); owner != "" {
-		path += "?agent_id=" + url.QueryEscape(owner)
-	}
-	var out json.RawMessage
-	if err := c.Do("DELETE", path, nil, &out); err != nil {
-		return command.Fail(stderr, err)
-	}
-	if err := command.PrintLine(stdout, out); err != nil {
-		return command.Fail(stderr, err)
-	}
-	return 0
+	return curate(c, "DELETE", "/hypotheses/"+url.PathEscape(from)+"/links/"+url.PathEscape(*typ)+"/"+url.PathEscape(*to), *agent, nil, stdout, stderr)
 }
 
 func HypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

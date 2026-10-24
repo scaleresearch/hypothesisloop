@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -538,15 +540,47 @@ func TestACloudComputeClusterNameIsOneItsAccountKeyCanBeMadeOf(t *testing.T) {
 	}
 }
 
-// The committed cloud_compute example rents shapes of types the committed catalog prices.
+// The committed cloud_compute example rents shapes of types the committed catalog prices, on
+// each provider it has a section of, chosen as localdev/rented chooses it.
 func TestTheCommittedCloudComputeExampleLoadsWithTheCommittedCatalog(t *testing.T) {
 	example, err := os.ReadFile(filepath.Join("..", "settings", "cloud-compute.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	filled := strings.ReplaceAll(string(example), Placeholder+"ACCOUNT-ID", "1")
-	if err := loadText(t, productionConfig(t)+"\n"+filled); err != nil {
-		t.Errorf("hypothesisloop.yaml with cloud-compute.yaml: %v", err)
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(strings.ReplaceAll(string(example), Placeholder+"ACCOUNT-ID", "1")), &document); err != nil {
+		t.Fatal(err)
+	}
+	entry := document.Content[0].Content[1].Content[0]
+	var providers []string
+	for i := 0; i < len(entry.Content); i += 2 {
+		if entry.Content[i+1].Kind == yaml.MappingNode {
+			providers = append(providers, entry.Content[i].Value)
+		}
+	}
+	if len(providers) < 2 {
+		t.Fatalf("the example has sections of %v, want vast's and runpod's", providers)
+	}
+	whole := entry.Content
+	for _, provider := range providers {
+		entry.Content = nil
+		for i := 0; i < len(whole); i += 2 {
+			key, value := whole[i], *whole[i+1]
+			switch {
+			case key.Value == "provider":
+				value.Value = provider
+			case value.Kind == yaml.MappingNode && key.Value != provider:
+				continue
+			}
+			entry.Content = append(entry.Content, key, &value)
+		}
+		chosen, err := yaml.Marshal(&document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := loadText(t, productionConfig(t)+"\n"+string(chosen)); err != nil {
+			t.Errorf("hypothesisloop.yaml with cloud-compute.yaml on %s: %v", provider, err)
+		}
 	}
 }
 

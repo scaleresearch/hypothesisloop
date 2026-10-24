@@ -148,7 +148,7 @@ export function Team({ pe }: { pe: PlatformExperiment }) {
   const atWork = roster?.filter(a => a.at_work)
   const counts = pe.agents_at_work
   const team = pe.agents ?? []
-  const beyond = counts?.outside_pool ?? 0
+  const beyond = counts?.outside_team ?? 0
   const roleName = (agentType: string) => {
     const role = catalog?.find(t => t.id === agentType)?.role
     return roles?.find(r => r.role === role)?.name

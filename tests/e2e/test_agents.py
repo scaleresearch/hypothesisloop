@@ -56,7 +56,7 @@ def test_agents_join_and_leave_through_the_api_and_act_only_as_themselves(api: A
     listed = api.agents(pe_id)
     assert [a["agent_id"] for a in listed] == [own["agent_id"], named["agent_id"]], listed
     assert all("token" not in a for a in listed), "the roster lists a token"
-    assert api.signup_role(pe_id, own["agent_id"]) == (200, "competitor")
+    assert api.signup_role(pe_id, own["agent_id"]) == (200, "executor")
 
     # An agent adds nobody, names no other agent, and a token for an agent nobody added is refused.
     as_own = api.as_caller(own["token"])
@@ -76,7 +76,7 @@ def test_agents_join_and_leave_through_the_api_and_act_only_as_themselves(api: A
     assert as_own.get(f"/platform-experiments/{pe_id}").status_code == 401, "a removed agent's token still works"
     again = api.post_json(f"/platform-experiments/{pe_id}/agents", {"agent_id": own["agent_id"]})["agents"][0]
     assert again["agent_id"] == own["agent_id"] and again["token"] == own["token"], again
-    assert as_own.signup_role(pe_id, own["agent_id"]) == (200, "competitor")
+    assert as_own.signup_role(pe_id, own["agent_id"]) == (200, "executor")
 
     # Started, nobody is removed.
     api.declare_baseline_and_wait_running(pe_id)
@@ -177,7 +177,7 @@ def test_the_sandboxes_of_one_platform_experiment_are_bounded_whatever_their_rol
     api.created_platform_experiments.append(pe_id)
     try:
         assert bound >= 3, f"max_agentsandboxes = {bound}: no room for an agent beside the coordinator and the baseline's sandbox"
-        # max_agents counts competitors, so reviewers are added until the sandboxes run out. One is
+        # max_agents counts executors, so reviewers are added until the sandboxes run out. One is
         # the coordinator's and one is the baseline agent's the create made.
         for _ in range(bound - 2):
             r = api.post(f"/platform-experiments/{pe_id}/agents", {"in_agentsandbox": True, "role": "reviewer"})

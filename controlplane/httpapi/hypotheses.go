@@ -81,7 +81,7 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 			"of the situation, for two hours or until a job of its shows it. Checking out again renews it. Nothing is refused for " +
 			"another agent on the same hypothesis: the answer names them in working, with a warning. agent_id is the agent's: " +
 			"an agent token's own, named or not; any other caller names an agent it reaches. 403 not_signed_up for an agent " +
-			"outside the hypothesis's platform experiment.",
+			"outside the hypothesis's platform experiment, and 403 researcher_checks_out_nothing for a researcher, which runs no job.",
 	}, a.checkOut)
 	// ---- what hangs off an experiment ----
 
@@ -616,10 +616,10 @@ func (a hypothesesAPI) graph(ctx context.Context, in *struct {
 }
 
 func (a hypothesesAPI) list(ctx context.Context, in *struct {
-	PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment. Omitted, every platform experiment's hypotheses are candidates -- the operator-facing global view."`
+	PlatformExperimentID string                  `query:"platform_experiment_id" doc:"Restrict to one platform experiment. Omitted, every platform experiment's hypotheses the caller reads are candidates."`
 	ProjectID            string                  `query:"project_id" doc:"Only hypotheses of this project's platform experiments."`
 	Agent                string                  `query:"agent_id" doc:"Only hypotheses registered by this agent."`
-	Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive -- the registering agent's own verdict on the claim, not job progress -- or merged or retired, a researcher's curation."`
+	Status               domain.HypothesisStatus `query:"status" doc:"open, confirmed, refuted or inconclusive, the registering agent's verdict on the claim, or merged or retired, a researcher's curation. A job's progress sets none of them."`
 	By                   string                  `query:"by" enum:"people" doc:"people: only the hypotheses a person registered, an API key or staff included."`
 	Search               string                  `query:"q" doc:"Only hypotheses whose text holds this, ignoring case."`
 	Untaken              bool                    `query:"untaken" doc:"true: only the hypotheses no agent works on now: no job of theirs queued or running and no checkout within two hours."`
@@ -943,9 +943,6 @@ func (a hypothesesAPI) retire(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body platformapi.RetireHypothesisRequest
 }) (*struct{ Body *domain.Hypothesis }, error) {
-	if strings.TrimSpace(in.Body.Reason) == "" {
-		return nil, invalid("reason", registry.ErrReasonRequired.Error())
-	}
 	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
 		return nil, err
 	}

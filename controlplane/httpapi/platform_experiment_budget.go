@@ -48,7 +48,7 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
 			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one, " +
-			"and max_submissions_per_hour and submissions_left: the most jobs it may submit in any hour and how many more it may submit now before a submit is refused with rate_limited, where the platform sets a cap. " +
+			"and max_submissions_per_hour and submissions_left: the most submissions it may make in any hour, each the jobs of one hypothesis on one commit, and how many more it may make now before a job of another hypothesis or commit is refused with rate_limited, where the platform sets a cap. " +
 			"503 object_store_unavailable while the object store does not answer. " +
 			"404 planner_has_no_quota for a draft's planner, which submits no job and needs none: the message says where the run's budget comes from instead. " +
 			"404 researcher_has_no_quota for a researcher, which submits no job and needs none. " +

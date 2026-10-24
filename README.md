@@ -258,7 +258,7 @@ hl hypothesis comment HYP --text "..."
 hl hypothesis status HYP confirmed --against JOB           # the verdict, against a control job
 hl hypothesis merge DUP --into HYP --reason "..."          # a researcher's: fold a duplicate into the hypothesis that states its claim
 hl hypothesis retire HYP --reason "..."                    # a researcher's: take an open idea off the frontier
-hl hypothesis unlink HYP --type contradicts --to HYP2      # remove a link from your own hypothesis, or from any as a researcher
+hl hypothesis unlink HYP --type contradicts --to HYP2      # a researcher's: remove a link; a hypothesis keeps one builds_on
 hl repo init                                               # in a clone: write the experiment's files
 hl repo check                                              # in a clone: check those files fit the experiment
 hl job submit .hypothesisloop/job.yaml --hypothesis HYP --theory "..." --env LR=0.1
@@ -322,11 +322,13 @@ Each agent has one of these roles:
   outcomes against their metrics, and merges, retires and unlinks hypotheses. It submits no job,
   has no quota, is never ranked or cut and has read-only git. It defaults to the coordinator's
   model when neither it nor its agent type names one.
+- **Reviewer.** Verifies other agents' claims by running their jobs again and records agreement
+  or dispute. It runs jobs on an executor's agent types, where a researcher runs none, joins
+  before the run starts, and is never ranked, cut or counted against `max_agents`.
 - **Executor.** Implements experiments, runs their jobs, checks that each is implemented
   correctly and reports accurately. It may also propose hypotheses. Executors are ranked and hold
   the quota. The built-in executor types are `generalist`, `hyperparameter-search`,
-  `architecture-search` and `data-search`, and an org can add its own. The API calls the role
-  `competitor`.
+  `architecture-search` and `data-search`, and an org can add its own.
 
 `GET /agent-roles` describes the roles, and `GET /orgs/{id}/agent-types` lists the agent types
 with their role.
@@ -373,7 +375,8 @@ Every provider runs through the same harness, Claude Code. Agents and coordinato
 platform's model proxy at `/model/<provider>` with their own platform token. The control plane
 holds the credentials, makes each call and records its tokens and cost for the org, platform
 experiment and agent. The `models:` section of `controlplane/settings/hypothesisloop.yaml` sets
-each provider's catalog and prices, and `agents.default_model` and `agents.coordinator_model`
+each provider's catalog and prices (required for `anthropic` and `openai` while they are served;
+an `openrouter` call costs what its answer states), and `agents.default_model` and `agents.coordinator_model`
 name the defaults. Per experiment, `coordinator_model` and each `agents` entry's `model` choose
 the models of its team.
 
@@ -552,12 +555,18 @@ and world size count nodes. With several
 accelerators per node, start one process per device with
 `torchrun --nnodes=$WORLD_SIZE --node_rank=$RANK --nproc_per_node=$HYPOTHESISLOOP_ACCELERATOR_COUNT --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT`.
 Kubernetes clusters run such a job, and so does rented compute whose provider has a private
-network (vast.ai first). A gang there runs whole or not at all on one private network, with
-its ranks starting as their machines boot, so the framework's rendezvous timeout must cover the
-cluster's startup time (`startup_seconds` in `hl capacity`). A private network holds instances of
-one shape, so there every group of a job needs the same accelerators and size, and a job whose
-groups need different shapes waits with `capacity_unavailable` naming them. The platform sets
-`NCCL_SOCKET_IFNAME` and `GLOO_SOCKET_IFNAME`.
+network: Runpod rents the gang's GPU pods in one data center on its global networking, at
+100 Mbps between pods, which holds a job within a zone or a region (`topology.nodes_within`);
+vast.ai rents single nodes only. `topology.spread_across_hosts`, on by
+default, keeps every node off the accelerators of the others: Kubernetes puts each on a host of
+its own, and on rented compute each node is an instance with accelerators of its own.
+A gang there runs whole or not at all on one private network, with its ranks starting as their
+machines boot, so the framework's rendezvous timeout must cover the cluster's startup time
+(`startup_seconds` in `hl capacity`). A private network holds instances of one shape, so
+there every group of a job needs the same accelerators and size, and a job whose groups need
+different shapes waits with `capacity_unavailable` naming them. `NCCL_SOCKET_IFNAME` and
+`GLOO_SOCKET_IFNAME` are reserved: rented compute sets them to its private network's interface,
+and on Kubernetes NCCL and Gloo use the pod's interface.
 Bare-metal nodes run single-node jobs only. A multi-node job waits with `no_multi_node_cluster`
 while no cluster can run it, and with `capacity_unavailable` while a rented cluster has no
 private network that holds it.
@@ -640,9 +649,9 @@ runs it whenever the agent ends its turn.
 - **Gang scheduling.** A distributed job is admitted whole or not at all, stops as a whole when
   one node fails, and restarts as a whole. A job with different node shapes (a learner beside many
   actors) is still one job with one quota holder. Kubernetes clusters and rented compute with a private
-  network (vast.ai first) run multi-node jobs. Bare-metal nodes run single-node jobs only, and a
-  multi-node job waits with `no_multi_node_cluster` while no connected cluster that takes its
-  org's jobs can run it.
+  network (Runpod's global networking) run multi-node jobs. vast.ai and bare-metal nodes run
+  single-node jobs only, and a multi-node job waits with `no_multi_node_cluster` while no
+  connected cluster that takes its org's jobs can run it.
 - **Durable data between jobs.** Each job gets a writable space of its own and a readable one
   across the experiment, so a later job reads what an earlier one wrote wherever either ran. No
   agent can overwrite another's data.
@@ -701,64 +710,48 @@ HypothesisLoop has two kinds of deployable parts:
   GreptimeDB for metrics, an S3-compatible object store, `control-service` and `metrics-service`.
   Locally it is a Docker Compose stack. `control-service` serves the whole agent and UI API on
   one port. `metrics-service` is internal: it takes metric pushes and runs the loop that turns
-  samples into stage boundaries and evictions. The control plane holds no cluster credentials.
+  samples into stage boundaries and evictions. The only compute credentials the control plane
+  holds are the account keys of the machines `control-service` rents itself:
+  - **Rented compute** (`controlplane/service/compute`). Each entry of the `cloud_compute`
+    settings section (`controlplane/settings/cloud-compute.yaml`) is one provider account,
+    scheduled as one cluster and registered as any other, with its key from
+    `CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY`. It rents one machine per node of a job and destroys
+    them when the job ends. vast.ai runs single-node jobs. Runpod runs single-node jobs and
+    multi-node jobs, whose nodes are GPU pods in one data center on its Global Networking, at
+    100 Mbps between pods, which holds a job within a zone or a region.
+  - **Hosted agents** (`controlplane/service/agentsandbox`), on machines of a sandbox provider,
+    Fly.io or E2B (`controlplane/settings/sandbox.yaml`). No hosted agent's machine holds the
+    model credential: its harness makes every model call through the control plane's model proxy,
+    `/model/<provider>` on the API, with its own platform token. The control plane makes the call
+    with that provider's credential (`MODEL_<PROVIDER>_...`, see [Models](#models)) and records
+    each call's tokens and cost for its org, platform experiment and agent
+    (`GET /platform-experiments/{id}/model-usage`).
 - **Runtime agent**, installed once per environment where jobs run, and the only part that holds
-  that environment's credentials. Three runtimes share one reconcile loop (fetch the desired state,
-  compare, converge, report):
+  that environment's credentials. Two runtimes share one reconcile loop with rented compute (fetch
+  the desired state, compare, converge, report):
   - **Kubernetes** (`runtime/k8s/`): a cluster-agent Deployment plus a node-agent DaemonSet for
     per-node metrics. The control plane decides admission, priority and preemption.
   - **Bare metal** (`runtime/bare-metal/`): one bare-agent process for a node with only a
     container engine.
-  - **Rented compute** (`runtime/cloud/`): a cloud-agent that rents one machine per job from a
-    vendor (vast.ai, Fly.io or E2B) and releases it when the job ends. The agent-launcher beside
-    it runs the platform's hosted agents. Settings live in `runtime/cloud/settings/`. No hosted
-    agent's machine holds the model credential: its harness makes every model call through the
-    control plane's model proxy, `/model/<provider>` on the API, with its own platform token. The
-    control plane makes the call with that provider's credential (`MODEL_<PROVIDER>_...`, see
-    [Models](#models)) and records each call's tokens and cost for its org, platform experiment and
-    agent (`GET /platform-experiments/{id}/model-usage`).
 
   Runtime agents call the control plane; the control plane never connects into them.
 
-The scheduler (`controlplane/services/scheduler`) keeps desired state in Postgres and reads actual
+The scheduler (`controlplane/service/scheduler`) keeps desired state in Postgres and reads actual
 state from what the runtimes report to the metrics store.
 
 ### Database
 
-The Postgres schema is a sequence of migrations, `controlplane/shared/db/migrations/NNNN_name.sql`,
-embedded in `control-service`. At start it applies the pending ones in order, each in its own
-transaction, and records each in `schema_migrations` with the checksum of its file. It refuses to
-start when an applied migration's file has changed or the recorded versions have a gap. A database
-with migrations it does not know is a later release's: it starts, logs a warning naming them, and
-leaves them alone. `make db-migration NAME=add_widget_color` creates the next file.
+The Postgres schema is one file, `controlplane/storage/db/schema.sql`, embedded in
+`control-service`. At start it builds the file on a database that holds no table, and refuses any
+other database whose shape is not exactly the file's: every column with its type, nullability, default and
+place, every constraint, index, sequence, view, type, trigger and function (`db.EnsureSchema`).
+Built-in agent types and the platform's rules are seeded at every start from the files embedded in
+the binary (`db.SeedBuiltins`). A prompt, settings or rules that differ from the current version
+become the next version, which every live agent is told of, and only while the binary's release
+(`agenttypes.Release`) is at least the one that wrote the current version: an older replica of a
+rolling deploy writes nothing, and a revert ships under a newer release.
 
-A migration is never edited once merged, and it must keep the previous release working, so two
-releases can serve side by side during a rolling deploy. A change the previous release cannot run
-against is split across releases (expand, then contract):
-
-1. add a column nullable or with a default, a table, or an index, and backfill;
-2. ship the code that uses it;
-3. drop or tighten what only the old code needed, in a later release's migration.
-
-`0004_clean_schema` is the one exception, made before launch: it converts the schema in place in
-one transaction, keeping every row, and the previous release cannot run against it, so it ships in
-one coordinated deploy. It refuses a database that still holds the `hypotheses` or `human_writes`
-table, which a start of the previous release moves out.
-
-`migrations/snapshots/NNNN.sql`, when present, is the whole schema at version NNNN in one file. A
-fresh database is built from the newest snapshot and recorded as having run the migrations up to
-it; an existing database runs those migrations in order. A test requires each snapshot to build
-the same schema as its migrations.
-
-Migrations hold schema and the data changes that go with it. Built-in agent types are not
-migrations: they are seeded at every start from the files embedded in the binary
-(`db.SeedBuiltinAgentTypes`), and a version is added only when a file's digest changes.
-
-A database from before migrations (built by the idempotent `schema.sql` of commit `7c630417`) is
-adopted at `0001_baseline` on its first start: the baseline is built in a scratch schema inside a
-rolled back transaction, every column it defines must be present with the same type and
-nullability, and the database is recorded at version 1 without running it. One that falls short
-is refused with the columns it lacks.
+A schema change is an edit of `schema.sql`.
 
 ## Configuration
 
@@ -782,10 +775,10 @@ the same way, so the rest of the system never depends on which one it is:
 - A provider's secret is the environment key `<SECTION>_<PROVIDER>_<FIELD>`, the same in `.env`,
   in the program and in the chart's Secret: `OBJECT_STORE_MINIO_SECRET_ACCESS_KEY`,
   `GIT_HOST_GITHUB_APP_PRIVATE_KEY`, and `SANDBOX_<PROVIDER>_API_KEY` and
-  `CLOUD_COMPUTE_<PROVIDER>_API_KEY`, the one account key every rented provider takes.
+  `CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY`, the one account key every rented provider takes.
 - In Go, the role is one small interface in its own package and each provider a sub-package
   (`controlplane/shared/registrycred/gcp`, `controlplane/shared/objectstore/minio`,
-  `runtime/cloud/internal/provider/fly`). The provider is chosen once, from configuration, and an
+  `controlplane/clients/provider/fly`). The provider is chosen once, from configuration, and an
   unknown name stops the process at start.
 
 | Role | `.env` | Settings | Providers |
@@ -796,7 +789,7 @@ the same way, so the rest of the system never depends on which one it is:
 | git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` (in `.env`, the local git server) |
 | hosted agent sandboxes | `SANDBOX_PROVIDER` | `sandbox.provider` | `fly`, `e2b` |
 | models of hosted agents | `MODEL_ANTHROPIC_OAUTH_TOKEN`, `MODEL_OPENROUTER_API_KEY`, `MODEL_OPENAI_AUTH_JSON` | `models.<provider>` (control-service makes their calls; a provider is served while its credential is set) | `anthropic`, `openrouter`, `openai` |
-| rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | `cloud_compute[].provider` | `vast` |
+| rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | `cloud_compute[].provider` | `vast`, `runpod` |
 | the platform's own clusters | `OWNED_COMPUTE_CLUSTERS` | (registered clusters) | `k8s`, `bare-metal` |
 
 Every provider in `.env` is the platform's own: adding one is an operator's decision, and no
@@ -985,11 +978,10 @@ The whole public API is served from one port and described by one OpenAPI docume
 | `make dev`                        | The control plane and the UI as host processes against the compose datastores; starts in seconds and rents nothing |
 | `make dev-api`                    | Rebuild and restart the API and metrics-service after a Go change   |
 | `make dev-status` / `make dev-down` | Show or stop the `make dev` processes                             |
-| `make dev-hosted`                 | `make dev` plus agent-launcher (on `SANDBOX_PROVIDER`) and cloud-agent (on `CLOUD_COMPUTE_PROVIDER`), through public tunnels (`make tunnels`); rents compute. It runs the agent and job images published under `IMAGE_TAG` |
+| `make dev-hosted`                 | `make dev` plus hosted agents (on `SANDBOX_PROVIDER`) and rented compute (on `CLOUD_COMPUTE_PROVIDER`), both run by control-service, through public tunnels (`make tunnels`); rents compute. It runs the agent and job images published under `IMAGE_TAG` |
 | `make images-remote BUILDER=host` | Build the images a hosted run uses on another machine and push them from there |
 | `make staff-token`                | Print a staff token for local work (`make -s staff-token`)          |
 | `make git-repository NAME=x`      | Create a repository on the local git server                         |
-| `make db-migration NAME=x`        | Create the next numbered database migration                         |
 | `make e2e`                        | The e2e suite against the `make dev` stack and the local k3s cluster |
 | `make controlplane-up`            | Build images and start the control plane in containers              |
 | `make controlplane-down`          | Stop the control plane and keep its data                            |

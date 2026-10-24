@@ -40,36 +40,26 @@ func Bound(p Provider) Bounded {
 
 type boundedNetworker struct{ networker Networker }
 
-func (b boundedNetworker) Networked(ctx context.Context, spec Spec, atMost int, spread bool) (Supply, error) {
+func (b boundedNetworker) Networked(ctx context.Context, spec Spec, atMost int) (Supply, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	supply, err := b.networker.Networked(ctx, spec, atMost, spread)
+	supply, err := b.networker.Networked(ctx, spec, atMost)
 	return supply, withoutSecrets(err, spec)
 }
 
-func (b boundedNetworker) CreateNetwork(ctx context.Context, name string, specs []Spec, spread bool) error {
+func (b boundedNetworker) Place(ctx context.Context, specs []Spec) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
 	defer cancel()
-	err := b.networker.CreateNetwork(ctx, name, specs, spread)
+	place, err := b.networker.Place(ctx, specs)
 	for _, spec := range specs {
 		err = withoutSecrets(err, spec)
 	}
-	return err
-}
-
-func (b boundedNetworker) Networks(ctx context.Context, prefix string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
-	defer cancel()
-	return b.networker.Networks(ctx, prefix)
-}
-
-func (b boundedNetworker) DeleteNetwork(ctx context.Context, name string) error {
-	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
-	defer cancel()
-	return b.networker.DeleteNetwork(ctx, name)
+	return place, err
 }
 
 func (b boundedNetworker) Interface() string { return b.networker.Interface() }
+
+func (b boundedNetworker) Within() string { return b.networker.Within() }
 
 type boundedWarmer struct{ warmer Warmer }
 

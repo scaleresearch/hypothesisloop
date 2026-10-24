@@ -3,18 +3,18 @@ package modelproxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // OpenAI is OpenAI's models on a ChatGPT subscription, called at URL as the Codex CLI calls them,
@@ -22,8 +22,6 @@ import (
 type OpenAI struct {
 	URL         string
 	Credentials ChatGPTCredentials
-	// Models are the models a call may name, each call priced at its model's price.
-	Models domain.ModelCatalog
 }
 
 // ChatGPTCredentials is the ChatGPT credential, fresh, and made due once the ChatGPT backend
@@ -35,18 +33,6 @@ type ChatGPTCredentials interface {
 
 // maxRefusalBytes bounds the body of a refusal read to translate it.
 const maxRefusalBytes = 1 << 20
-
-func (o *OpenAI) admit(model string) error {
-	if _, ok := o.Models[model]; !ok {
-		return refusal.Refuse(http.StatusForbidden, domain.ReasonModelNotServed,
-			fmt.Sprintf("model %q is not one the platform serves: name one of %s", model, strings.Join(o.Models.Names(), ", ")))
-	}
-	return nil
-}
-
-func (o *OpenAI) cost(model string, u usage) (float64, error) {
-	return o.Models[model].CostUSD(domain.ModelTokens{Input: u.InputTokens, Output: u.OutputTokens, CacheRead: u.CacheReadInputTokens}), nil
-}
 
 type shapeKey struct{}
 
@@ -62,15 +48,12 @@ func (e *anthropicError) Error() string { return e.message }
 // openAIProvider is o as the proxy calls it: each call translated to a Responses call and its
 // answer back.
 func (p *Proxy) openAIProvider(o *OpenAI) (provider, error) {
-	if err := o.Models.Validate(domain.ModelProviderOpenAI); err != nil {
-		return provider{}, err
-	}
 	if o.Credentials == nil {
-		return provider{}, fmt.Errorf("the provider's credential is required")
+		return provider{}, errors.New("the provider's credential is required")
 	}
-	target, err := url.Parse(o.URL)
-	if err != nil || target.Host == "" || (target.Scheme != "https" && target.Scheme != "http") {
-		return provider{}, fmt.Errorf("the upstream is an http(s) address")
+	target, err := upstreamURL(o.URL)
+	if err != nil {
+		return provider{}, err
 	}
 	reverse := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -82,13 +65,13 @@ func (p *Proxy) openAIProvider(o *OpenAI) (provider, error) {
 			if resp.StatusCode == http.StatusUnauthorized {
 				p.expire(o, resp.Request)
 			}
-			translateAnswer(resp)
+			translateAnswer(resp, p.logger)
 			return p.meter(resp)
 		},
 		ErrorHandler: p.failed,
 		ErrorLog:     zap.NewStdLog(p.logger),
 	}
-	return provider{reverse: reverse, admit: o.admit, cost: o.cost, onlyMessages: true, ownModelOnly: true, usageAtEnd: true,
+	return provider{reverse: reverse, onlyMessages: true, ownModelOnly: true, usageAtEnd: true,
 		prepare: func(r *http.Request, model string) (*http.Request, error) {
 			return o.prepare(r, model, p.logger)
 		}}, nil
@@ -138,8 +121,10 @@ func (o *OpenAI) prepare(r *http.Request, model string, logger *zap.Logger) (*ht
 // translateAnswer makes the ChatGPT backend's answer to a Responses call the Anthropic answer of
 // the Messages call it was made for: a stream translated as it passes, a whole message read to
 // its end, or an error.
-func translateAnswer(resp *http.Response) {
+func translateAnswer(resp *http.Response, logger *zap.Logger) {
 	how, _ := resp.Request.Context().Value(shapeKey{}).(shape)
+	// The ChatGPT backend's cookies are the platform's session, none of the caller's.
+	resp.Header.Del("Set-Cookie")
 	resp.Header.Del("Content-Length")
 	resp.Header.Del("Content-Encoding")
 	resp.ContentLength = -1
@@ -148,18 +133,30 @@ func translateAnswer(resp *http.Response) {
 	case resp.StatusCode != http.StatusOK:
 		refused, _ := io.ReadAll(io.LimitReader(upstream, maxRefusalBytes))
 		_ = upstream.Close()
-		status, body := refusedAnswer(resp.StatusCode, refused)
+		now := time.Now()
+		status, body, resetsAt := refusedAnswer(resp.StatusCode, refused, now)
 		resp.StatusCode, resp.Status = status, fmt.Sprintf("%d %s", status, http.StatusText(status))
 		setBody(resp, "application/json", body)
+		if !resetsAt.IsZero() {
+			refusedUntil(resp.Header, resetsAt, now)
+		}
 	case how.stream:
 		resp.Header.Set("Content-Type", "text/event-stream; charset=utf-8")
-		resp.Body = newTranslatedStream(upstream, how)
+		resp.Body = newTranslatedStream(upstream, how, logger)
 	default:
-		status, message := wholeMessage(upstream, how)
+		status, message := wholeMessage(upstream, how, logger)
 		_ = upstream.Close()
 		resp.StatusCode, resp.Status = status, fmt.Sprintf("%d %s", status, http.StatusText(status))
 		setBody(resp, "application/json", message)
 	}
+}
+
+// refusedUntil says on h, as Anthropic's API says it of a Claude subscription, that the model's
+// account refuses calls until resetsAt: Claude Code reports the limit, and the harness waits it out.
+func refusedUntil(h http.Header, resetsAt, now time.Time) {
+	h.Set("Anthropic-Ratelimit-Unified-Status", "rejected")
+	h.Set("Anthropic-Ratelimit-Unified-Reset", strconv.FormatInt(resetsAt.Unix(), 10))
+	h.Set("Retry-After", strconv.Itoa(max(0, int(resetsAt.Sub(now).Seconds()))))
 }
 
 func setBody(resp *http.Response, contentType string, body []byte) {

@@ -7,9 +7,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -66,8 +69,11 @@ func TestAMessagesCallIsTheResponsesCallOfTheSameConversation(t *testing.T) {
 				`{"call_id":"toolu_1","output":"a\nb","type":"function_call_output"},` +
 				`{"content":[{"text":"go on","type":"input_text"}],"role":"user","type":"message"}]`},
 		{"a tool result of a string is the function's output",
-			`{"model":"gpt-6-luna","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done","is_error":true}]}]}`,
+			`{"model":"gpt-6-luna","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"}]}]}`,
 			"input", `[{"call_id":"toolu_1","output":"done","type":"function_call_output"}]`},
+		{"a tool result that is an error says so in the output",
+			`{"model":"gpt-6-luna","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"no such file","is_error":true}]}]}`,
+			"input", `[{"call_id":"toolu_1","output":"Error: no such file","type":"function_call_output"}]`},
 		{"an image a tool showed follows its output as the user's",
 			`{"model":"gpt-6-luna","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}]}]}]}`,
 			"input", `[{"call_id":"toolu_1","output":"","type":"function_call_output"},{"content":[{"image_url":"data:image/png;base64,AAA","type":"input_image"}],"role":"user","type":"message"}]`},
@@ -88,7 +94,7 @@ func TestAMessagesCallIsTheResponsesCallOfTheSameConversation(t *testing.T) {
 		{"one tool is that function", `{"model":"gpt-6-luna","messages":[],"tool_choice":{"type":"tool","name":"Bash"}}`, "tool_choice", `{"name":"Bash","type":"function"}`},
 		{"no parallel tool use is no parallel calls", `{"model":"gpt-6-luna","messages":[],"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`, "parallel_tool_calls", `false`},
 		{"adaptive thinking at an effort is reasoning summarized at it",
-			`{"model":"gpt-6-luna","messages":[],"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}`, "reasoning", `{"effort":"max","summary":"auto"}`},
+			`{"model":"gpt-6-luna","messages":[],"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}`, "reasoning", `{"effort":"xhigh","summary":"auto"}`},
 		{"thinking whose display is omitted is reasoning without a summary",
 			`{"model":"gpt-6-luna","messages":[],"thinking":{"type":"adaptive","display":"omitted"},"output_config":{"effort":"high"}}`, "reasoning", `{"effort":"high"}`},
 		{"thinking keeps what was thought", `{"model":"gpt-6-luna","messages":[],"thinking":{"type":"enabled","budget_tokens":1024}}`, "include", `["reasoning.encrypted_content"]`},
@@ -143,7 +149,7 @@ const (
 // its data with the event's name checked against its type.
 func anthropicEvents(t *testing.T, stream string, how shape) []string {
 	t.Helper()
-	translated, err := io.ReadAll(newTranslatedStream(io.NopCloser(strings.NewReader(stream)), how))
+	translated, err := io.ReadAll(newTranslatedStream(io.NopCloser(strings.NewReader(stream)), how, zap.NewNop()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,6 +276,13 @@ func TestAResponsesStreamIsTheAnthropicStreamOfTheSameAnswer(t *testing.T) {
 				`{"delta":{"text":"o","type":"text_delta"},"index":0,"type":"content_block_delta"}`,
 				`{"index":0,"type":"content_block_stop"}`,
 				`{"error":{"message":"the model's answer ended before it was complete","type":"api_error"},"type":"error"}`}},
+		{"an answer completed without its usage is an error", shape{model: "gpt-6-luna", stream: true}, sse(created,
+			`{"type":"response.completed","response":{"id":"resp_1"}}`),
+			[]string{start, `{"error":{"message":"the model's answer stated no usage","type":"api_error"},"type":"error"}`}},
+		{"an answer completed without its start is an error", shape{model: "gpt-6-luna", stream: true}, sse(completed),
+			[]string{`{"error":{"message":"the model's answer stated no usage","type":"api_error"},"type":"error"}`}},
+		{"an event that is no JSON ends the answer in an error", shape{model: "gpt-6-luna", stream: true}, sse(created) + "data: {not json\n\n" + sse(completed),
+			[]string{start, `{"error":{"message":"the model's answer holds an event that could not be read","type":"api_error"},"type":"error"}`}},
 	} {
 		got := anthropicEvents(t, tc.stream, tc.how)
 		if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
@@ -287,16 +300,20 @@ func TestAnAnswerNotStreamedIsTheWholeMessage(t *testing.T) {
 		`{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"command\":\"ls\"}"}`,
 		`{"type":"response.output_item.done","output_index":2,"item":{"id":"fc_1","type":"function_call","arguments":"{\"command\":\"ls\"}"}}`,
 		completed)
-	status, body := wholeMessage(strings.NewReader(stream), shape{model: "gpt-6-luna", think: true, display: "omitted"})
+	status, body := wholeMessage(strings.NewReader(stream), shape{model: "gpt-6-luna", think: true, display: "omitted"}, zap.NewNop())
 	want := `{"content":[{"signature":"enc-1","thinking":"","type":"thinking"},{"text":"ok","type":"text"},{"id":"call_1","input":{"command":"ls"},"name":"Bash","type":"tool_use"}],` +
 		`"id":"msg_resp_1","model":"gpt-6-luna","role":"assistant","stop_reason":"tool_use","stop_sequence":null,"type":"message",` +
 		`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":600,"input_tokens":400,"output_tokens":50}}`
 	if status != http.StatusOK || string(body) != want {
 		t.Fatalf("status %d, body\n %s\nwant\n %s", status, body, want)
 	}
-	status, body = wholeMessage(strings.NewReader(sse(created, `{"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}`)), shape{})
+	status, body = wholeMessage(strings.NewReader(sse(created, `{"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}`)), shape{}, zap.NewNop())
 	if status != http.StatusInternalServerError || string(body) != `{"error":{"message":"boom","type":"api_error"},"type":"error"}` {
 		t.Fatalf("a failed answer: status %d, body %s", status, body)
+	}
+	status, body = wholeMessage(strings.NewReader(sse(completed)), shape{}, zap.NewNop())
+	if status != http.StatusInternalServerError || string(body) != `{"error":{"message":"the model's answer stated no usage","type":"api_error"},"type":"error"}` {
+		t.Fatalf("an answer that never started: status %d, body %s", status, body)
 	}
 }
 
@@ -313,16 +330,37 @@ func TestARefusalIsAnAnthropicError(t *testing.T) {
 			`{"error":{"message":"prompt is too long: Your input exceeds the context window","type":"invalid_request_error"},"type":"error"}`},
 		{http.StatusBadGateway, ``, `{"error":{"message":"Bad Gateway","type":"api_error"},"type":"error"}`},
 	} {
-		if status, got := refusedAnswer(tc.status, []byte(tc.body)); status != tc.status || string(got) != tc.want {
+		if status, got, _ := refusedAnswer(tc.status, []byte(tc.body), time.Now()); status != tc.status || string(got) != tc.want {
 			t.Errorf("%d %s: %d %s, want %s", tc.status, tc.body, status, got, tc.want)
 		}
 	}
 	// A refusal of the platform's credential is never the caller's to sign in again for.
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
-		got, body := refusedAnswer(status, []byte(`{"error":"invalid token"}`))
+		got, body, _ := refusedAnswer(status, []byte(`{"error":"invalid token"}`), time.Now())
 		if want := `{"error":{"message":"the ChatGPT backend refused the platform's credential: invalid token","type":"api_error"},"type":"error"}`; got != http.StatusBadGateway || string(body) != want {
 			t.Errorf("%d: %d %s, want 502 %s", status, got, body, want)
 		}
+	}
+}
+
+// A ChatGPT subscription out of its usage says when it takes calls again, which reaches Claude Code
+// as Anthropic's API says it of a Claude subscription.
+func TestAUsageLimitSaysWhenTheSubscriptionTakesCallsAgain(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	for body, want := range map[string]time.Time{
+		`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_in_seconds":60}}`: now.Add(time.Minute),
+		`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_at":1800003600}}`: time.Unix(1_800_003_600, 0),
+		`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`:                        {},
+		`{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached","resets_in_seconds":60}}`:               {},
+	} {
+		if _, _, got := refusedAnswer(http.StatusTooManyRequests, []byte(body), now); !got.Equal(want) {
+			t.Errorf("%s: resets at %v, want %v", body, got, want)
+		}
+	}
+	h := http.Header{}
+	refusedUntil(h, now.Add(90*time.Second), now)
+	if h.Get("Anthropic-Ratelimit-Unified-Status") != "rejected" || h.Get("Anthropic-Ratelimit-Unified-Reset") != "1800000090" || h.Get("Retry-After") != "90" {
+		t.Errorf("headers %v", h)
 	}
 }
 
@@ -345,7 +383,7 @@ func (c chatGPTCredentials) Expire(_ context.Context, accessToken string) error 
 	return nil
 }
 
-var openAICatalog = domain.ModelCatalog{"gpt-6-luna": {InputUSDPerMTok: 2, OutputUSDPerMTok: 10, CacheWriteUSDPerMTok: 2, CacheReadUSDPerMTok: 0.5}}
+var openAICatalog = domain.ModelCatalog{"gpt-6-luna": {InputUSDPerMTok: 2, OutputUSDPerMTok: 10, CacheReadUSDPerMTok: 0.5}}
 
 func callOpenAI(t *testing.T, api, body string) *http.Response {
 	t.Helper()
@@ -371,7 +409,7 @@ func openAIAPI(t *testing.T, credentials ChatGPTCredentials, provider http.Handl
 	t.Helper()
 	f := newFixture(t, provider)
 	backend := f.upstream
-	f.api = newAPI(t, Providers{OpenAI: &OpenAI{URL: backend + "/backend-api/codex/responses", Credentials: credentials, Models: openAICatalog}}, f.usage, budgets{}, 8)
+	f.api = newAPI(t, Providers{OpenAI: &OpenAI{URL: backend + "/backend-api/codex/responses", Credentials: credentials}}, f.usage, budgets{}, 8)
 	return f, backend
 }
 
@@ -424,17 +462,43 @@ func TestAnOpenAICallReachesTheChatGPTBackendAsTheCodexCLIMakesItAndIsMeteredAtT
 	}
 }
 
+// An answer that failed after it spent tokens is metered on what it states it spent, streamed or
+// not.
+func TestAFailedOpenAIAnswerIsMeteredOnWhatItSpent(t *testing.T) {
+	failed := `{"type":"response.failed","response":{"id":"resp_1","error":{"code":"server_error","message":"boom"},"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":600},"output_tokens":50}}}`
+	for name, body := range map[string]string{"streamed": toolCall, "whole": strings.Replace(toolCall, `"stream":true`, `"stream":false`, 1)} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := openAIAPI(t, chatGPTCredentials{}, streamed(sse(created,
+				`{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"Bash"}}`, failed)))
+			resp := callOpenAI(t, f.api.URL, body)
+			answer, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if !strings.Contains(string(answer), `"message":"boom"`) {
+				t.Fatalf("status %d: %s, want the error", resp.StatusCode, answer)
+			}
+			call := f.usage.wait(t)
+			if call.InputTokens != 400 || call.CacheReadInputTokens != 600 || call.OutputTokens != 50 {
+				t.Errorf("recorded %+v", call)
+			}
+		})
+	}
+}
+
 func TestAnOpenAIRefusalReachesTheAgentAsAnAnthropicErrorAndIsNotMetered(t *testing.T) {
 	f, _ := openAIAPI(t, chatGPTCredentials{}, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = io.WriteString(w, `{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`)
+		_, _ = io.WriteString(w, `{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_in_seconds":3600}}`)
 	})
 	resp := callOpenAI(t, f.api.URL, toolCall)
 	answer, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests || string(answer) != `{"error":{"message":"The usage limit has been reached","type":"rate_limit_error"},"type":"error"}` {
 		t.Fatalf("status %d: %s", resp.StatusCode, answer)
+	}
+	reset, err := strconv.ParseInt(resp.Header.Get("Anthropic-Ratelimit-Unified-Reset"), 10, 64)
+	if resp.Header.Get("Anthropic-Ratelimit-Unified-Status") != "rejected" || err != nil || time.Until(time.Unix(reset, 0)) < 59*time.Minute || resp.Header.Get("Retry-After") == "" {
+		t.Errorf("headers %v, want the subscription refused for the hour it said", resp.Header)
 	}
 	f.usage.none(t)
 }
@@ -539,4 +603,17 @@ func TestAnOpenAIModelOutsideTheCatalogAndCountingTokensAreRefused(t *testing.T)
 	if resp.StatusCode != http.StatusNotFound || f.upstreamCalls() != 0 {
 		t.Errorf("counting tokens: %d after %d calls, want 404 before any", resp.StatusCode, f.upstreamCalls())
 	}
+}
+
+// An answer the ChatGPT backend completed without its usage reaches the agent as an error, and no
+// call is recorded at the zeros of its start.
+func TestAnOpenAIAnswerCompletedWithoutItsUsageIsAnErrorAndNotRecorded(t *testing.T) {
+	f, _ := openAIAPI(t, chatGPTCredentials{}, streamed(sse(created, `{"type":"response.completed","response":{"id":"resp_1"}}`)))
+	resp := callOpenAI(t, f.api.URL, toolCall)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(body), `"message":"the model's answer stated no usage"`) {
+		t.Fatalf("answer %s, want an error event", body)
+	}
+	f.usage.none(t)
 }

@@ -188,10 +188,10 @@ func (f *rosterStore) GetAgent(_ context.Context, id string) (*domain.Agent, err
 	return f.agents[id], nil
 }
 
-func (f *rosterStore) competitors() int {
+func (f *rosterStore) executors() int {
 	n := 0
 	for _, s := range f.signups {
-		if s.Role == domain.SignupRoleCompetitor && s.FinishedAt == nil && (s.Instance == nil || !s.Instance.Stopped) {
+		if s.Role == domain.SignupRoleExecutor && s.FinishedAt == nil && (s.Instance == nil || !s.Instance.Stopped) {
 			n++
 		}
 	}
@@ -210,7 +210,7 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 	if f.agents[signup.AgentID] == nil || f.agents[signup.AgentID].OrgID != "org-a" {
 		return false, db.ErrAgentOutsideOrg
 	}
-	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
+	if signup.Role == domain.SignupRoleExecutor && f.executors() >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
@@ -225,7 +225,7 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 	if f.pe.Status != domain.PlatformExpOpen {
 		return db.ErrSignupClosed
 	}
-	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
+	if signup.Role == domain.SignupRoleExecutor && f.executors() >= f.pe.MaxAgents {
 		return db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
@@ -240,7 +240,11 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 		return false
 	}
 	if agent.Name == "" {
-		agent.Name = domain.AgentName(signup.Role, taken)
+		name, err := domain.AgentName(signup.Role, taken)
+		if err != nil {
+			return err
+		}
+		agent.Name = name
 	} else if taken(agent.Name) {
 		return db.ErrAgentNameTaken
 	}
@@ -264,7 +268,7 @@ func (f *rosterStore) ListSignupsByRole(_ context.Context, _ string, role domain
 // JoinRunning joins as an open experiment would, while the executors that ended left
 // lateShare unspent.
 func (f *rosterStore) JoinRunning(ctx context.Context, id string, agent *domain.Agent, signup domain.AgentSignup, _ db.LateJoin) error {
-	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleCompetitor {
+	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleExecutor {
 		return db.ErrSignupClosed
 	}
 	if f.lateShare <= 0 {
@@ -380,7 +384,7 @@ func TestSandboxedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *te
 		}
 		want := map[string]any{
 			"in_agentsandbox": true, "agent_type": "hyperparameter-search", "model": "anthropic/model-2",
-			"role": "competitor", "hyperparameters": map[string]any{"batch_size": float64(64)}, "platform_experiment_id": "pe-1",
+			"role": "executor", "hyperparameters": map[string]any{"batch_size": float64(64)}, "platform_experiment_id": "pe-1",
 		}
 		for key, value := range want {
 			if !reflect.DeepEqual(a[key], value) {
@@ -466,7 +470,7 @@ func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNo
 
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		store.pe.Status = status
-		code, again := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"competitor","in_agentsandbox":true}`)
+		code, again := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"executor","in_agentsandbox":true}`)
 		if code != http.StatusCreated {
 			t.Fatalf("%s: repeat status = %d: %v", status, code, again)
 		}
@@ -550,7 +554,7 @@ func TestBaselinesAndReviewersJoinAFullField(t *testing.T) {
 	}
 }
 
-// max_agents bounds competitors only, so without a bound on machines a caller could add sandboxed
+// max_agents bounds executors only, so without a bound on machines a caller could add sandboxed
 // baselines or reviewers a few at a time for as long as it liked.
 func TestSandboxedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 1)
@@ -624,7 +628,7 @@ func TestACoordinatorReplacesAnExecutorWhileTheRunGoesOn(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpRunning, 1)
 	store.lateShare = 1
 	finished := time.Now()
-	store.signups = []domain.AgentSignup{{AgentID: "ended", Role: domain.SignupRoleCompetitor, FinishedAt: &finished}}
+	store.signups = []domain.AgentSignup{{AgentID: "ended", Role: domain.SignupRoleExecutor, FinishedAt: &finished}}
 	r := agentsRouter(t, store, coordinator)
 	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true,"role":"reviewer"}`); code != http.StatusConflict || out["reason"] != "signup_closed" {
 		t.Fatalf("a reviewer: got = %d %v, want = 409 signup_closed", code, out)
@@ -888,7 +892,7 @@ func TestAFinishPastTheCloseIsRefusedAsEverythingElseSentThen(t *testing.T) {
 		domain.PlatformExpClosed: "experiment_closed", domain.PlatformExpOpen: "not_running", domain.PlatformExpRunning: "",
 	} {
 		store := newRosterStore(status, 5)
-		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleExecutor}}
 		r := agentsRouter(t, store, auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", OrgIDs: []string{"org-a"}})
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents/dana/finish", `{"reason":"nothing left"}`)
 		if want == "" {
@@ -914,7 +918,7 @@ func TestAFinishAnswersTheHypothesesTheAgentLeavesOpen(t *testing.T) {
 	dana := auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", OrgIDs: []string{"org-a"}}
 	newStore := func() *rosterStore {
 		store := newRosterStore(domain.PlatformExpRunning, 5)
-		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleExecutor}}
 		store.hypotheses = []*domain.Hypothesis{
 			{ID: "h-open", AgentID: "dana", PlatformExperimentID: "pe-1", Text: "warmup helps", Status: domain.HypothesisOpen},
 			{ID: "h-settled", AgentID: "dana", PlatformExperimentID: "pe-1", Text: "depth helps", Status: domain.HypothesisRefuted},
@@ -1013,8 +1017,8 @@ func TestTheRosterAnswersWhatEachSandboxedAgentIsDoing(t *testing.T) {
 	since := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	running := &domain.AgentInstance{Name: "m-1", AskedAt: &since, SeenAt: &since, Reported: domain.InstanceRunning}
 	store.signups = []domain.AgentSignup{
-		{AgentID: "dana", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: running, Activity: &domain.AgentActivity{Text: "running hl job submit", At: since}},
-		{AgentID: "eli", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: running},
+		{AgentID: "dana", Role: domain.SignupRoleExecutor, InAgentSandbox: true, Instance: running, Activity: &domain.AgentActivity{Text: "running hl job submit", At: since}},
+		{AgentID: "eli", Role: domain.SignupRoleExecutor, InAgentSandbox: true, Instance: running},
 	}
 	code, out := call(t, agentsRouter(t, store, waitingPerson), "GET", "/platform-experiments/pe-1/agents", "")
 	if code != http.StatusOK {

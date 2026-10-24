@@ -115,7 +115,7 @@ func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", Image: testExperimentImage}, nil
 }
 func (poolOnlyStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
-	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentType}, nil
+	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleExecutor, AgentType: domain.DefaultAgentType}, nil
 }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
@@ -270,7 +270,7 @@ func (s unstartedStore) GetAgentSignup(context.Context, string, string) (*domain
 // accepted. Open, a platform experiment takes the one job there is to run before the start, the
 // baseline's, from an agent that was added to measure it, and tells everyone else to wait.
 func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T) {
-	executor := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentType}
+	executor := &domain.AgentSignup{Role: domain.SignupRoleExecutor, AgentType: domain.DefaultAgentType}
 	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}
 	planner := &domain.AgentSignup{Role: domain.SignupRolePlanner, AgentType: domain.PlannerAgentType}
 	caller := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1"})

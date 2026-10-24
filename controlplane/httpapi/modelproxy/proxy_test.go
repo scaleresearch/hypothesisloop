@@ -18,9 +18,11 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/openrouter"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/middleware"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
@@ -82,13 +84,15 @@ func (h sandboxed) ProxiedModel(_ context.Context, pe, agent string) (*domain.Mo
 var defaults = domain.ModelDefaults{Agent: "anthropic/claude-haiku-5-5", Coordinator: "anthropic/claude-opus-5-5"}
 
 // runs is whom the platform runs: agent-a on the platform's default, every other on its own model,
-// agent-or on an OpenRouter model and agent-oai on an openai one.
+// agent-or on an OpenRouter model, agent-gone on one OpenRouter no longer lists and agent-oai on an
+// openai one.
 var runs = sandboxed{
 	"pe-1/agent-a":      {Role: domain.AgentRoleExecutor},
 	"pe-1/":             {Role: domain.AgentRoleCoordinator},
 	"pe-1/agent-cut":    {Role: domain.AgentRoleExecutor},
 	"pe-1/agent-ending": {Role: domain.AgentRoleExecutor},
 	"pe-1/agent-or":     {Role: domain.AgentRoleExecutor, Own: "openrouter/moonshotai/kimi-k2"},
+	"pe-1/agent-gone":   {Role: domain.AgentRoleExecutor, Own: "openrouter/vendor/retired"},
 	"pe-1/agent-oai":    {Role: domain.AgentRoleResearcher, Coordinator: "openai/gpt-6-luna"},
 	"pe-2/agent-b":      {Role: domain.AgentRoleExecutor, Type: "anthropic/claude-opus-5-5"},
 }
@@ -108,10 +112,32 @@ var catalog = domain.ModelCatalog{
 	"claude-opus-5-5":  {InputUSDPerMTok: 4, OutputUSDPerMTok: 20, CacheWriteUSDPerMTok: 8, CacheReadUSDPerMTok: 0.2},
 }
 
+// openRouterModels is OpenRouter's listing, kimi-k2 alone, its calls priced as OpenRouter's are.
+type openRouterModels struct{ *openrouter.Catalog }
+
+func (openRouterModels) Models(context.Context) ([]domain.ServedModel, error) {
+	return []domain.ServedModel{{ID: "moonshotai/kimi-k2", Name: "MoonshotAI: Kimi K2", InputUSDPerMTok: 0.6, OutputUSDPerMTok: 2.5}}, nil
+}
+
+// servedModels is the models of providers the platform serves: the catalogs' and OpenRouter's listing.
+func servedModels(providers Providers) *models.Service {
+	listed := map[string]models.Provider{}
+	if providers.Anthropic != nil {
+		listed[domain.ModelProviderAnthropic] = models.Catalog(catalog)
+	}
+	if providers.OpenRouter != nil {
+		listed[domain.ModelProviderOpenRouter] = openRouterModels{}
+	}
+	if providers.OpenAI != nil {
+		listed[domain.ModelProviderOpenAI] = models.Catalog(openAICatalog)
+	}
+	return models.New(listed, defaults)
+}
+
 // both is Anthropic at upstream and OpenRouter at upstream's /api, as openrouter.URL is.
 func both(upstream string) Providers {
 	return Providers{
-		Anthropic:  &Anthropic{URL: upstream, OAuthToken: credential, Models: catalog},
+		Anthropic:  &Anthropic{URL: upstream, OAuthToken: credential},
 		OpenRouter: &OpenRouter{URL: upstream + "/api", APIKey: openRouterKey},
 	}
 }
@@ -125,8 +151,9 @@ type recorded struct {
 func (r *recorded) RecordModelCall(_ context.Context, call metricsdb.ModelCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, call)
-	close(r.done)
+	if r.calls = append(r.calls, call); len(r.calls) == 1 {
+		close(r.done)
+	}
 	return nil
 }
 
@@ -187,13 +214,13 @@ func newFixture(t *testing.T, provider http.HandlerFunc) *fixture {
 func newAPI(t *testing.T, providers Providers, usage Usage, spent budgets, maxInFlightPerOrg int) *httptest.Server {
 	t.Helper()
 	authenticator, err := auth.NewAuthenticator(config.AuthConfig{}, signingSecret, directory{
-		signedUp: map[string]bool{"pe-1/agent-a": true, "pe-1/agent-self": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-1/agent-or": true, "pe-1/agent-oai": true, "pe-2/agent-b": true},
+		signedUp: map[string]bool{"pe-1/agent-a": true, "pe-1/agent-self": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-1/agent-or": true, "pe-1/agent-gone": true, "pe-1/agent-oai": true, "pe-2/agent-b": true},
 		cutAt:    map[string]time.Time{"pe-1/agent-cut": time.Now().Add(-domain.AgentWindDown - time.Minute), "pe-1/agent-ending": time.Now().Add(-30 * time.Second)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := New(runs, usage, spent, providers, defaults, maxInFlightPerOrg, zap.NewNop())
+	proxy, err := New(runs, usage, spent, servedModels(providers), providers, defaults, maxInFlightPerOrg, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +652,7 @@ func refused(t *testing.T, resp *http.Response) (int, string, string) {
 }
 
 // Claude Code's subagents and small tasks call the models of the catalog; any other model is
-// refused before the provider, counting tokens too.
+// refused before the provider, counting tokens too, as a choice of it is.
 func TestAModelOutsideTheCatalogIsRefusedBeforeTheProvider(t *testing.T) {
 	f := newFixture(t, streamed(messageStart, messageStop))
 	agent := token(t, scope.Agent("pe-1", "agent-a"))
@@ -637,8 +664,8 @@ func TestAModelOutsideTheCatalogIsRefusedBeforeTheProvider(t *testing.T) {
 	}
 	for _, path := range []string{messagesCall, Prefix + "anthropic/v1/messages/count_tokens"} {
 		for _, model := range []string{"claude-fable-5-1", ""} {
-			if status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, path, agent, model)); status != http.StatusForbidden || reason != domain.ReasonModelNotServed {
-				t.Errorf("%s with model %q: %d %s, want 403 %s", path, model, status, reason, domain.ReasonModelNotServed)
+			if status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, path, agent, model)); status != http.StatusUnprocessableEntity || reason != domain.ReasonModelNotServed {
+				t.Errorf("%s with model %q: %d %s, want 422 %s", path, model, status, reason, domain.ReasonModelNotServed)
 			}
 		}
 	}
@@ -802,7 +829,7 @@ func TestACallGoesToTheProviderOfItsCallersModelAlone(t *testing.T) {
 	upstream := httptest.NewServer(streamed(messageStart, messageStop))
 	t.Cleanup(upstream.Close)
 	providers := both(upstream.URL)
-	providers.OpenAI = &OpenAI{URL: upstream.URL, Credentials: chatGPTCredentials{}, Models: openAICatalog}
+	providers.OpenAI = &OpenAI{URL: upstream.URL, Credentials: chatGPTCredentials{}}
 	api := newAPI(t, providers, &recorded{done: make(chan struct{})}, budgets{}, 8)
 	for _, c := range []struct{ name, agent, path, model string }{
 		{"an agent on the default anthropic model to openrouter", "agent-a", openRouterMessagesCall, "moonshotai/kimi-k2"},
@@ -820,14 +847,26 @@ func TestACallGoesToTheProviderOfItsCallersModelAlone(t *testing.T) {
 	}
 }
 
-// An answer that states no cost was still made: its tokens are recorded, at no cost.
-func TestAnOpenRouterAnswerStatingNoCostIsRecordedAtNone(t *testing.T) {
+// An answer that states no cost cannot be priced: no cost is made up for it, and nothing is
+// recorded.
+func TestAnOpenRouterAnswerStatingNoCostIsNotRecordedAtAMadeUpOne(t *testing.T) {
 	f := newFixture(t, streamed(openRouterStart, messageDelta, messageStop))
 	resp := callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, token(t, scope.Agent("pe-1", "agent-or")), "moonshotai/kimi-k2")
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
-	if got := f.usage.wait(t); got.Provider != "openrouter" || got.OutputTokens != 42 || got.CostUSD != 0 {
-		t.Fatalf("recorded %+v", got)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	f.usage.none(t)
+}
+
+// A model OpenRouter no longer lists at a price is refused before the provider, though the caller
+// runs on it.
+func TestAnOpenRouterModelNoLongerListedIsRefusedBeforeTheProvider(t *testing.T) {
+	f := newFixture(t, streamed(openRouterStart, openRouterDelta, messageStop))
+	status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, token(t, scope.Agent("pe-1", "agent-gone")), "vendor/retired"))
+	if status != http.StatusUnprocessableEntity || reason != domain.ReasonModelNotServed || f.upstreamCalls() != 0 {
+		t.Fatalf("got %d %s after %d calls, want 422 %s before any", status, reason, f.upstreamCalls(), domain.ReasonModelNotServed)
 	}
 }
 

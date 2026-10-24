@@ -40,8 +40,6 @@ type offer struct {
 	Reliability  float64 `json:"reliability2"`
 	Verification string  `json:"verification"`
 	Architecture string  `json:"cpu_arch"`
-	// ClusterID is the physical cluster the machine is in, 0 for none.
-	ClusterID int64 `json:"cluster_id"`
 }
 
 // architectures are the values of an offer's cpu_arch. In October 2026 about 28 offers were
@@ -202,8 +200,8 @@ func (h *held) free(offers []offer) []offer {
 }
 
 // candidates returns the offers one Create tries, in the order it tries them: the cheapest offer
-// of each of the offerCandidates cheapest machines query finds that this process does not already
-// hold, shuffled.
+// of each of the offerCandidates cheapest machines that fit the spec and that this process does
+// not already hold, shuffled.
 //
 // Always taking the cheapest offer sent every retry of a job to the same machine, and a machine
 // that cannot start a container stays the cheapest because nobody keeps it. Nothing the vendor
@@ -211,20 +209,24 @@ func (h *held) free(offers []offer) []offer {
 // of 0.998), and the adapter remembers no machine's failures, so the choice is spread over a few
 // machines. A retry is then unlikely to meet the same machine again; it still can, unless the
 // caller names the machine in the spec's AvoidHosts, which the search leaves out.
-func (p *Provider) candidates(ctx context.Context, name string, query map[string]any) ([]offer, error) {
+func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer, error) {
+	query, err := p.offerQuery(spec)
+	if err != nil {
+		return nil, err
+	}
 	found, _, err := p.offers(ctx, query, offerSearchLimit, p.marketFor)
 	if errors.Is(err, errSearchBudget) {
-		return nil, fmt.Errorf("vast: %w %q: %w", provider.ErrNoOffer, name, err)
+		return nil, fmt.Errorf("vast: %w %q: %w", provider.ErrNoOffer, spec.Name, err)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if len(found) == 0 {
-		return nil, fmt.Errorf("vast: %w %q within the configured filters", provider.ErrNoOffer, name)
+		return nil, fmt.Errorf("vast: %w %q within the configured filters", provider.ErrNoOffer, spec.Name)
 	}
 	open := p.held.free(found)
 	if len(open) == 0 {
-		return nil, fmt.Errorf("vast: %w %q: this agent's own instances hold all %d offers within the configured filters", provider.ErrNoOffer, name, len(found))
+		return nil, fmt.Errorf("vast: %w %q: this agent's own instances hold all %d offers within the configured filters", provider.ErrNoOffer, spec.Name, len(found))
 	}
 	chosen := cheapestPerMachine(open, offerCandidates)
 	p.shuffle(chosen)
@@ -359,9 +361,13 @@ func (p *Provider) offers(ctx context.Context, query map[string]any, limit int, 
 	return found, true, nil
 }
 
-// forgetOffers drops the read of query once every offer Create tried was taken, so the next
-// Create searches again.
-func (p *Provider) forgetOffers(query map[string]any) {
+// forgetOffers drops the read of spec's offers once every one Create tried was taken, so the
+// next Create searches again.
+func (p *Provider) forgetOffers(spec provider.Spec) {
+	query, err := p.offerQuery(spec)
+	if err != nil {
+		return
+	}
 	if key, err := searchKey(query); err == nil {
 		p.searches.forget(key)
 	}

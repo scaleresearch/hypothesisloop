@@ -48,7 +48,7 @@ func (e *Executor) FetchLogTail(ctx context.Context, experimentID string, maxLin
 		}
 		sections = append(sections, s)
 	}
-	return ranktail.Tail(sections, maxLines)
+	return ranktail.Tail(sections, maxLines), nil
 }
 
 // PollPhaseDetail explains the ranks of an attempt that have not started or ended badly, and

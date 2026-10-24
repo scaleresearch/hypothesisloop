@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
@@ -49,7 +51,7 @@ type AgentSignup struct {
 	// AtWork is whether the agent is of the team at work, the count the pool holds to and, of an
 	// executor, max_agents, and EndedReason why an agent's place is free: one of the EndedReason
 	// constants.
-	AtWork      bool   `json:"at_work" doc:"Whether it is of the team at work: an executor (role competitor) or a researcher, not finished, not cut, not replaced and, run by the platform, with a machine. The pool of agents holds to it, and max_agents to its executors."`
+	AtWork      bool   `json:"at_work" doc:"Whether it is of the team at work: an executor or a researcher, not finished, not cut, not replaced and, run by the platform, with a machine. The pool of agents holds to it, and max_agents to its executors."`
 	EndedReason string `json:"ended_reason,omitempty" enum:"finished,cut,replaced,stopped" doc:"Why it no longer holds a place in the team: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added an agent in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close."`
 	// Instance is what became of a sandboxed agent's machine, nil for an agent the platform does
 	// not run.
@@ -159,7 +161,7 @@ func TurnOf(state HarnessState) *AgentTurn {
 type AgentHealth struct {
 	PlatformExperimentID string `json:"-"`
 	AgentID              string `json:"agent_id,omitempty" doc:"The agent. Absent for the coordinator."`
-	Role                 string `json:"role" doc:"The agent's role in the run (competitor, baseline, reviewer, planner), or coordinator."`
+	Role                 string `json:"role" doc:"The agent's role in the run (executor, researcher, baseline, reviewer, planner), or coordinator."`
 	// FirstJobSeconds and FirstCompletedSeconds run from when the agent could first submit to its
 	// first job submitted and its first job completed; nil before there is one.
 	FirstJobSeconds       *float64 `json:"first_job_seconds,omitempty" doc:"Seconds from when it could first submit to its first job. Absent before it submitted one."`
@@ -341,6 +343,13 @@ func (s AgentSignup) SharesBudget() bool {
 	return s.Role.SubmitsJobs() && s.Role != SignupRoleBaseline
 }
 
+// WaitsForStart says the agent takes no turn and has no machine asked for while its platform
+// experiment is open: every role but baseline, which measures before the start, and planner,
+// which works on the draft.
+func (s AgentSignup) WaitsForStart() bool {
+	return s.Role != SignupRoleBaseline && s.Role != SignupRolePlanner
+}
+
 // InstanceReleasedSQL is the condition, on the database's clock, under which the machine of a
 // run that ended at endedAt (a column or expression, NULL while the run goes on) is released:
 // AgentWindDown later, when the launcher's desired state stops naming it.
@@ -378,15 +387,17 @@ const MaxHyperparametersBytes = experimentspec.MaxHyperparametersBytes
 const DefaultAgentType = "generalist"
 
 // AgentName is what an agent created without a name is called in a platform experiment: its
-// role and the first number no agent of that experiment carries yet, "Baseline 1" or
-// "Executor 2". taken says whether the experiment already has an agent of that name.
-func AgentName(role SignupRole, taken func(name string) bool) string {
-	label := map[SignupRole]string{
-		SignupRoleCompetitor: "Executor", SignupRoleBaseline: "Baseline", SignupRoleReviewer: "Reviewer", SignupRoleResearcher: "Researcher", SignupRolePlanner: "Planner",
-	}[role]
+// role capitalized and the first number no agent of that experiment carries yet, "Baseline 1" or
+// "Executor 2". taken says whether the experiment already has an agent of that name. A role that
+// is none of SignupRoles is an error.
+func AgentName(role SignupRole, taken func(name string) bool) (string, error) {
+	if !slices.Contains(SignupRoles, role) {
+		return "", fmt.Errorf("agent name: %q is no signup role", role)
+	}
+	label := strings.ToUpper(string(role[:1])) + string(role[1:])
 	for n := 1; ; n++ {
 		if name := fmt.Sprintf("%s %d", label, n); !taken(name) {
-			return name
+			return name, nil
 		}
 	}
 }

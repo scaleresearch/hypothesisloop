@@ -47,7 +47,7 @@ func (f *startStore) ListAgentSignups(context.Context, string) ([]domain.AgentSi
 		signups = append(signups, domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline})
 	}
 	for _, p := range f.participants {
-		signups = append(signups, domain.AgentSignup{AgentID: p.AgentID, Role: domain.SignupRoleCompetitor})
+		signups = append(signups, domain.AgentSignup{AgentID: p.AgentID, Role: domain.SignupRoleExecutor})
 	}
 	return signups, nil
 }
@@ -65,7 +65,7 @@ func (f *startStore) StartPlatformExperimentTx(ctx context.Context, id string, _
 	participants := slices.Clone(f.participants)
 	for i := range participants {
 		if participants[i].Role == "" {
-			participants[i].Role = domain.SignupRoleCompetitor
+			participants[i].Role = domain.SignupRoleExecutor
 		}
 	}
 	quotas, stages, err := quotasFor(participants)

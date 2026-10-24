@@ -26,7 +26,7 @@ func spawnTestAgents(t *testing.T, pes *Store, pe string, signups ...domain.Agen
 		}
 		ids[i], signups[i].AgentID = id, id
 		if signups[i].Role == "" {
-			signups[i].Role = domain.SignupRoleCompetitor
+			signups[i].Role = domain.SignupRoleExecutor
 		}
 		if signups[i].Actor == nil {
 			signups[i].Actor = testActor
@@ -96,7 +96,7 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 	sandboxed, own := byID[ids[0]], byID[ids[1]]
 	if !sandboxed.InAgentSandbox || sandboxed.AgentType != "data-search" || sandboxed.Model != "model-x" ||
 		!reflect.DeepEqual(sandboxed.Hyperparameters, map[string]any{"batch_size": float64(64)}) ||
-		sandboxed.Role != domain.SignupRoleCompetitor || sandboxed.Name != "display-"+ids[0] || sandboxed.PlatformExperimentID != pe {
+		sandboxed.Role != domain.SignupRoleExecutor || sandboxed.Name != "display-"+ids[0] || sandboxed.PlatformExperimentID != pe {
 		t.Errorf("sandboxed signup: got = %+v", sandboxed)
 	}
 	if own.InAgentSandbox || own.Role != domain.SignupRoleBaseline || own.QuotaTier != domain.QuotaTierBurstOnly ||
@@ -136,7 +136,7 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	spawn := func(pe string) error {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, Name: "spawn-rollback-" + id, CreatedAt: time.Now().UTC()}
-		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor})
+		return pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor})
 	}
 
 	full := "pe-" + uuid.New().String()[:8]
@@ -146,11 +146,11 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	}
 	for range 2 {
 		if err := spawn(full); err != nil {
-			t.Fatalf("a competitor into a field of two: got = %v, want = nil", err)
+			t.Fatalf("an executor into a field of two: got = %v, want = nil", err)
 		}
 	}
 	if err := spawn(full); !errors.Is(err, ErrMaxAgentsReached) {
-		t.Fatalf("a third competitor: got = %v, want = ErrMaxAgentsReached", err)
+		t.Fatalf("a third executor: got = %v, want = ErrMaxAgentsReached", err)
 	}
 
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
@@ -437,7 +437,7 @@ func TestARegisteredAgentJoinsOnlyAnExperimentOfItsOwnOrg(t *testing.T) {
 	createTestPEIn(t, pool, peB, defaultProjectOf(t, accounts, orgB).ID)
 	agentOfA := spawnTestAgents(t, pes, peA, domain.AgentSignup{})[0]
 
-	signup := domain.AgentSignup{Actor: testActor, AgentID: agentOfA, Role: domain.SignupRoleCompetitor}
+	signup := domain.AgentSignup{Actor: testActor, AgentID: agentOfA, Role: domain.SignupRoleExecutor}
 	if inserted, err := pes.Signup(ctx, peB, signup); !errors.Is(err, ErrAgentOutsideOrg) || inserted {
 		t.Fatalf("an agent of org A into an experiment of org B: got = %v, %v, want = ErrAgentOutsideOrg", inserted, err)
 	}
@@ -466,7 +466,7 @@ func TestARemovedAgentStaysInItsOrgAndJoinsAgainByItsID(t *testing.T) {
 	if got, found, err := accounts.AgentOrg(ctx, agent); err != nil || !found || got != orgID {
 		t.Fatalf("org of the removed agent: got = %q, %v, %v, want = %q", got, found, err, orgID)
 	}
-	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !inserted {
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleExecutor}); err != nil || !inserted {
 		t.Fatalf("join again: got = %v, %v, want = true, nil", inserted, err)
 	}
 }
@@ -514,23 +514,23 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 		}
 		return agent
 	}
-	first := want(domain.SignupRoleCompetitor, "Executor 1")
+	first := want(domain.SignupRoleExecutor, "Executor 1")
 	want(domain.SignupRoleBaseline, "Baseline 1")
-	want(domain.SignupRoleCompetitor, "Executor 2")
+	want(domain.SignupRoleExecutor, "Executor 2")
 	want(domain.SignupRoleReviewer, "Reviewer 1")
 
 	if err := pes.RemoveAgent(ctx, pe, first.ID); err != nil {
 		t.Fatalf("remove: got = %v, want = nil", err)
 	}
-	want(domain.SignupRoleCompetitor, "Executor 1")
-	want(domain.SignupRoleCompetitor, "Executor 3")
-	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: first.ID, Role: domain.SignupRoleCompetitor}); !errors.Is(err, ErrAgentNameTaken) || inserted {
+	want(domain.SignupRoleExecutor, "Executor 1")
+	want(domain.SignupRoleExecutor, "Executor 3")
+	if inserted, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: first.ID, Role: domain.SignupRoleExecutor}); !errors.Is(err, ErrAgentNameTaken) || inserted {
 		t.Fatalf("the removed Executor 1 joining beside the new one: got = %v, %v, want ErrAgentNameTaken", inserted, err)
 	}
-	if _, err := add(domain.SignupRoleCompetitor, "Baseline 1"); !errors.Is(err, ErrAgentNameTaken) {
+	if _, err := add(domain.SignupRoleExecutor, "Baseline 1"); !errors.Is(err, ErrAgentNameTaken) {
 		t.Fatalf("a stated name another agent carries: got = %v, want ErrAgentNameTaken", err)
 	}
-	if agent, err := add(domain.SignupRoleCompetitor, "ablation"); err != nil || agent.Name != "ablation" {
+	if agent, err := add(domain.SignupRoleExecutor, "ablation"); err != nil || agent.Name != "ablation" {
 		t.Fatalf("a stated name nobody carries: got = %q, %v, want it kept", agent.Name, err)
 	}
 }

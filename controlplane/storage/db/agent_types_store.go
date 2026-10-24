@@ -557,7 +557,7 @@ func archiveTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType,
 // commits, so an archive waits for it and then sees it. ErrUnknownAgentType for any other.
 func agentTypeTx(ctx context.Context, q queryer, platformExpID, typeID string, role domain.AgentRole) (string, error) {
 	if typeID == "" {
-		typeID = domain.AgentTypeOfRole(role)
+		typeID = role.Info().AgentType
 	}
 	var found string
 	err := q.QueryRow(ctx, `

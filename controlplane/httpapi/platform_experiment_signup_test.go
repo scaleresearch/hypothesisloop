@@ -16,7 +16,7 @@ import (
 // Its own signup is what an agent's token reads, so the name is answered there.
 func TestAnAgentReadsItsOwnNameInItsSignup(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpRunning, 5)
-	store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Name: "Executor 1", Role: domain.SignupRoleCompetitor}}
+	store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Name: "Executor 1", Role: domain.SignupRoleExecutor}}
 	dana := auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", ProjectID: "project-a", OrgIDs: []string{"org-a"}}
 
 	r := authtest.Router(authtest.As(dana))

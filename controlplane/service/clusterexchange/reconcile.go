@@ -99,6 +99,12 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 		}
 	}
 
+	for node, labels := range report.NodeLabelsByNode {
+		if err := domain.ValidateSlotLabels(labels); err != nil {
+			return clusterapi.ReconcileAnswer{}, refusal.Invalid(refusal.ReasonInvalidRequest, "node labels of "+node+": "+err.Error()).On("node_labels_by_node")
+		}
+	}
+
 	if report.RAMAvailableBytes < 0 || report.RAMTotalBytes < 0 || report.RAMAvailableBytes > report.RAMTotalBytes ||
 		report.StorageAvailableBytes < 0 || report.StorageTotalBytes < 0 || report.StorageAvailableBytes > report.StorageTotalBytes {
 		return clusterapi.ReconcileAnswer{}, refusal.Invalid(refusal.ReasonInvalidRequest, "invalid memory or storage capacity values").On("ram_available_bytes")

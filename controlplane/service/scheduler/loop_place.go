@@ -193,7 +193,7 @@ func (l *Loop) holdRoom(exp *domain.Experiment, cluster string, fp domain.Footpr
 	if waited := c.start.Sub(*exp.QueuedAt); waited < l.heldJobNotice || waited.Hours() < exp.EstimatedDurationHours {
 		return
 	}
-	if total, ok := c.whenIdle.totals[cluster]; !ok || !placement.FitsWhenIdle(total, c.whenIdle.nodeTotals[cluster], exp) {
+	if total, ok := c.whenIdle.totals[cluster]; !ok || !placement.FitsWhenIdle(total, c.whenIdle.nodeTotals[cluster], c.whenIdle.nodeLabels[cluster], exp) {
 		return
 	}
 	held[cluster] = true
@@ -221,7 +221,8 @@ type installed struct {
 // reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
 // type the job accepts, or runs in an image of an architecture none of their nodes has, or
 // reserves more of the platform's compute than its project may hold and so runs on no platform
-// cluster. A cluster that scales up may yet hold it. A cluster that reports nothing is away or
+// cluster. A cluster that scales up may yet hold it, unless the job is within a placement group,
+// which a node yet to be added is in none of (placement.ScaleUpPlace). A cluster that reports nothing is away or
 // not whole: it is named and not judged, and with none judged the job waits. It says what each
 // cluster judged has.
 func (in installed) neverFitsReason(exp *domain.Experiment) string {
@@ -232,7 +233,9 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	rate, err := domain.AccHPerHour(exp.AcceleratorType, exp.AcceleratorCount)
 	limited = limited && err == nil && domain.ExceedsLimit(rate, limit.Project)
 	var judged []string
-	lacking, overLimit, fewHosts := 0, 0, 0
+	lacking, overLimit, fewHosts, apart := 0, 0, 0, 0
+	withinGroup := exp.EffectiveJob().NodesWithin() == domain.NodesWithinPlacementGroup
+	level := strings.ReplaceAll(string(exp.EffectiveJob().NodesWithin()), "_", " ")
 	otherArchitectures := map[string]bool{}
 	for _, c := range runs {
 		total, reported := in.totals[c.Name]
@@ -244,15 +247,23 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 		case !reported:
 			judged = append(judged, c.Name+" reports nothing now")
 		case spansNodes && !in.multiNode[c.Name]:
-		case in.scalesUp[c.Name]:
+		case in.scalesUp[c.Name] && !withinGroup:
 			return ""
 		case arch != "" && len(has) > 0 && !slices.Contains(has, arch):
 			for _, a := range has {
 				otherArchitectures[a] = true
 			}
 			judged = append(judged, c.Name+" has nodes of "+strings.Join(has, ", ")+" only")
-		case placement.FitsWhenIdle(total, in.nodeTotals[c.Name], exp):
+		case placement.FitsWhenIdle(total, in.nodeTotals[c.Name], in.nodeLabels[c.Name], exp):
 			return ""
+		case placement.FitsWhenIdleOnlyApart(total, in.nodeTotals[c.Name], in.nodeLabels[c.Name], exp):
+			lacking++
+			apart++
+			if withinGroup && !namesPlacementGroups(in.nodeLabels[c.Name]) {
+				judged = append(judged, c.Name+" names no placement groups")
+				break
+			}
+			judged = append(judged, fmt.Sprintf("%s has no %s that holds all %d of its nodes", c.Name, level, exp.Job.Nodes()))
 		default:
 			lacking++
 			if _, short := tooFewHosts(in.nodeTotals[c.Name], exp); short {
@@ -281,11 +292,28 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 		asks += fmt.Sprintf(", each on a host of its own, so %d hosts", exp.Job.Nodes())
 	}
 	advice := "Ask for less"
-	if fewHosts > 0 {
+	switch {
+	case fewHosts > 0:
 		advice = "Ask for fewer or smaller nodes, or set topology.spread_across_hosts: false so its nodes may share a host"
+	case apart > 0:
+		advice = "Ask for fewer or smaller nodes, or set topology.nodes_within to a wider level than " + level
+	}
+	if apart > 0 {
+		asks += ", all in one " + level
 	}
 	return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. %s (hl capacity lists what each cluster has)",
 		domain.NotAdmittedExceedsClusterCapacity, asks, strings.Join(judged, "; "), advice)
+}
+
+// namesPlacementGroups says whether a node of labelsByNode is in a placement group its runtime
+// names (domain.NodePlacementGroupKeyLabel).
+func namesPlacementGroups(labelsByNode map[string]map[string]string) bool {
+	for _, labels := range labelsByNode {
+		if labels[domain.NodePlacementGroupKeyLabel] != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // couldHold narrows candidates to the clusters that hold exp when idle, so a job that fits nowhere
@@ -294,7 +322,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 func (in installed) couldHold(candidates map[string]domain.Footprint, exp *domain.Experiment) map[string]domain.Footprint {
 	kept := make(map[string]domain.Footprint, len(candidates))
 	for cluster, free := range candidates {
-		if total, ok := in.totals[cluster]; !ok || placement.FitsWhenIdle(total, in.nodeTotals[cluster], exp) {
+		if total, ok := in.totals[cluster]; !ok || placement.FitsWhenIdle(total, in.nodeTotals[cluster], in.nodeLabels[cluster], exp) {
 			kept[cluster] = free
 		}
 	}

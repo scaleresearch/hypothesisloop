@@ -57,7 +57,7 @@ func main() {
 	seedBuiltins(store, pcfg.Quota.NewOrgComputeLimit(), logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = metrics.EnsureSchema(metricsCtx, pcfg.Models.Anthropic.Catalog)
+	err = metrics.EnsureSchema(metricsCtx)
 	metricsCancel()
 	if err != nil {
 		logger.Fatal("control-service: metrics store schema", zap.Error(err))

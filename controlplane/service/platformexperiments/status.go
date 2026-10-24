@@ -212,7 +212,7 @@ func baselineClock(due, now time.Time) string {
 func executorLeft(signups []domain.AgentSignup) bool {
 	return slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool {
 		stopped := signup.InAgentSandbox && signup.Instance != nil && signup.Instance.Stopped
-		return signup.Role == domain.SignupRoleCompetitor && signup.Ended == "" && !stopped
+		return signup.Role == domain.SignupRoleExecutor && signup.Ended == "" && !stopped
 	})
 }
 

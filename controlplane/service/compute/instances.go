@@ -32,12 +32,6 @@ func (e *Executor) instanceName(experimentID string, attempt, rank, ranks int, s
 	return fmt.Sprintf("%s%s-a%d-r%dof%d-%s", e.prefix, experimentID, attempt, rank, ranks, slotName(shape, index))
 }
 
-// legacyInstanceName is the name an instance was rented under before a job could span several:
-// it has no rank part and reads as rank 0 of 1, so a deploy keeps the jobs it finds running.
-func (e *Executor) legacyInstanceName(experimentID string, attempt int, shape string, index int) string {
-	return fmt.Sprintf("%s%s-a%d-%s", e.prefix, experimentID, attempt, slotName(shape, index))
-}
-
 // slotName is the node name the control plane knows a slot by.
 func slotName(shape string, index int) string {
 	return fmt.Sprintf("%s-%d", shape, index)
@@ -50,53 +44,22 @@ func (e *Executor) parseInstanceName(name string) (parsed instance, ok bool) {
 		return instance{}, false
 	}
 	parts := strings.Split(rest, "-")
-	if len(parts) < 4 {
-		return instance{}, false
-	}
 	n := len(parts)
+	if n < 5 {
+		return instance{}, false
+	}
 	index, indexErr := strconv.Atoi(parts[n-1])
-	parsed = instance{shape: parts[n-2], index: index, ranks: 1}
-	head := parts[:n-2]
-	_, rankErr := fmt.Sscanf(head[len(head)-1], "r%dof%d", &parsed.rank, &parsed.ranks)
-	legacy := rankErr != nil
-	if !legacy {
-		head = head[:len(head)-1]
-	}
-	if indexErr != nil || len(head) < 2 || parsed.rank < 0 || parsed.rank >= parsed.ranks {
+	parsed = instance{shape: parts[n-2], index: index}
+	_, rankErr := fmt.Sscanf(parts[n-3], "r%dof%d", &parsed.rank, &parsed.ranks)
+	attempt, attemptErr := strconv.Atoi(strings.TrimPrefix(parts[n-4], "a"))
+	if indexErr != nil || rankErr != nil || attemptErr != nil || parsed.rank < 0 || parsed.rank >= parsed.ranks {
 		return instance{}, false
 	}
-	attempt, attemptErr := strconv.Atoi(strings.TrimPrefix(head[len(head)-1], "a"))
-	if attemptErr != nil {
-		return instance{}, false
-	}
-	parsed.experimentID, parsed.attempt = strings.Join(head[:len(head)-1], "-"), attempt
-	built := e.instanceName(parsed.experimentID, parsed.attempt, parsed.rank, parsed.ranks, parsed.shape, parsed.index)
-	if legacy {
-		built = e.legacyInstanceName(parsed.experimentID, parsed.attempt, parsed.shape, parsed.index)
-	}
-	if parsed.experimentID == "" || built != name {
+	parsed.experimentID, parsed.attempt = strings.Join(parts[:n-4], "-"), attempt
+	if parsed.experimentID == "" || e.instanceName(parsed.experimentID, parsed.attempt, parsed.rank, parsed.ranks, parsed.shape, parsed.index) != name {
 		return instance{}, false
 	}
 	return parsed, true
-}
-
-// networkName is hl-net-<namespace>-<experiment id>-a<attempt>: the private network the ranks of
-// one attempt of a job that spans several nodes meet on, new for every attempt as their names are.
-func (e *Executor) networkName(experimentID string, attempt int) string {
-	return fmt.Sprintf("%s%s-a%d", e.networkPrefix, experimentID, attempt)
-}
-
-func (e *Executor) parseNetworkName(name string) (experimentID string, attempt int, ok bool) {
-	rest, found := strings.CutPrefix(name, e.networkPrefix)
-	cut := strings.LastIndex(rest, "-a")
-	if !found || cut <= 0 {
-		return "", 0, false
-	}
-	attempt, err := strconv.Atoi(rest[cut+2:])
-	if err != nil || e.networkName(rest[:cut], attempt) != name {
-		return "", 0, false
-	}
-	return rest[:cut], attempt, true
 }
 
 func (i instance) slot() string { return slotName(i.shape, i.index) }
@@ -178,15 +141,9 @@ func (v *view) of(experimentID string) []instance {
 	return own
 }
 
-// gang returns the ranks of experimentID's highest attempt, lowest rank first: the attempt the
-// control plane is waiting on when a requeue has left an older one behind. Of two instances of
-// one rank, which a vendor's lagging list or a create that failed after it succeeded can leave,
-// it is the one with the lowest id, the one ReapTerminal keeps. A rank that is not rented, or no
-// longer, is missing from it.
-//
-// A status read has no desired state to tell it which slots the job is pinned to. CreateWorkload
-// never rents an attempt while an instance of it stands in another slot, so there is one
-// placement of an attempt to report at a time.
+// gang returns the ranks of experimentID's highest attempt, lowest rank first, the lowest id of
+// each rank's instances, which ReapTerminal keeps. A status read knows no slots, so it relies on
+// CreateWorkload never renting an attempt in two placements.
 func (v *view) gang(experimentID string) []instance {
 	own := v.of(experimentID)
 	newest := -1

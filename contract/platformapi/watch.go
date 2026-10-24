@@ -90,6 +90,10 @@ const (
 	// or lost its machine for good, keeping its platform experiment's team. It is the new
 	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
 	EventAgentReplaced = "agent.replaced"
+	// EventAgentStopped says the platform gave up on an agent's machine, every restart spent, with
+	// the model it ran on and why. It is the agent's own, so no rival is woken by it; whoever steers
+	// the run sees every one.
+	EventAgentStopped = "agent.stopped"
 	// EventAgentIdle says no job of an executor of a running platform experiment ran on
 	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
 	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the

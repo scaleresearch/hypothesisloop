@@ -102,7 +102,8 @@ func main() {
 
 func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.MetricsService, metrics *metricsdb.Store, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap)
+	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).
+		WithModelDefaults(pcfg.Agents.ModelDefaults())
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (service/controller) — the
@@ -121,7 +122,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	// Each pass keeps the agents of every running platform experiment at work as its pool
 	// says, launched as the control service launches the agents it creates.
 	ctrl = ctrl.WithAgentKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{
-		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
+		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 	}))
 
 	// settler durably writes a terminal experiment's final observed usage (see

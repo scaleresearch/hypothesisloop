@@ -28,9 +28,9 @@ func TestAVendorThatEchoesTheRequestNeverPutsASecretInAnError(t *testing.T) {
 
 	_, createErr := bounded.Create(context.Background(), spec)
 	warmErr := bounded.Warmer.StartWarm(context.Background(), "some-id", spec)
-	_, networkedErr := bounded.Networker.Networked(context.Background(), spec, 2, true)
-	networkErr := bounded.Networker.CreateNetwork(context.Background(), "hl-net-a", []provider.Spec{{Name: "other"}, spec}, true)
-	for call, err := range map[string]error{"Create": createErr, "StartWarm": warmErr, "Networked": networkedErr, "CreateNetwork": networkErr} {
+	_, networkedErr := bounded.Networker.Networked(context.Background(), spec, 2)
+	_, placeErr := bounded.Networker.Place(context.Background(), []provider.Spec{{Name: "other"}, spec})
+	for call, err := range map[string]error{"Create": createErr, "StartWarm": warmErr, "Networked": networkedErr, "Place": placeErr} {
 		if err == nil {
 			t.Fatalf("%s: the vendor's refusal was lost", call)
 		}

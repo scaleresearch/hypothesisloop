@@ -60,8 +60,9 @@ func testRouter(t *testing.T) chi.Router {
 	catalog := domain.ModelCatalog{"model": {InputUSDPerMTok: 1, OutputUSDPerMTok: 1, CacheWriteUSDPerMTok: 1, CacheReadUSDPerMTok: 1}}
 	platformExperiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(noRepositories{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
-	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), platformExperiments,
-		modelproxy.Providers{Anthropic: &modelproxy.Anthropic{URL: "https://model.example.invalid", OAuthToken: "credential", Models: catalog}},
+	served := models.New(map[string]models.Provider{domain.ModelProviderAnthropic: models.Catalog(catalog)}, domain.ModelDefaults{Agent: launch.DefaultModel, Coordinator: launch.CoordinatorModel})
+	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), platformExperiments, served,
+		modelproxy.Providers{Anthropic: &modelproxy.Anthropic{URL: "https://model.example.invalid", OAuthToken: "credential"}},
 		domain.ModelDefaults{Agent: launch.DefaultModel, Coordinator: launch.CoordinatorModel}, 1, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +77,7 @@ func testRouter(t *testing.T) chi.Router {
 		Launch:              launch,
 		Watch:               &watch.Handler{},
 		ModelProxy:          modelProxy,
-		Models:              models.New(catalog, nil, domain.ModelDefaults{Agent: launch.DefaultModel, Coordinator: launch.CoordinatorModel}),
+		Models:              served,
 	})
 }
 

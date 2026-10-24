@@ -11,6 +11,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/e2b"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/fly"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/runpod"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/vast"
 )
 
@@ -18,9 +19,10 @@ import (
 // `"name": adapter(pkg.New)`, where pkg.New takes the package's own settings struct, the account's
 // secret and the accelerator types the caller will ask it for.
 var byName = map[string]constructor{
-	"e2b":  adapter(e2b.New),
-	"fly":  adapter(fly.New),
-	"vast": adapter(vast.New),
+	"e2b":    adapter(e2b.New),
+	"fly":    adapter(fly.New),
+	"runpod": adapter(runpod.New),
+	"vast":   adapter(vast.New),
 }
 
 type constructor func(settings yaml.Node, secret string, acceleratorTypes []string, log func(format string, args ...any)) (provider.Provider, error)

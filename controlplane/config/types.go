@@ -31,8 +31,9 @@ func (c *Settings) AcceleratorTypeNames() []string {
 type QuotaConfig struct {
 	Top3BonusFraction float64 `yaml:"top3_bonus_fraction"`
 	BurstFraction     float64 `yaml:"burst_fraction"`
-	// MaxSubmissionsPerHour caps how many experiments an agent may submit per hour
-	// within a single platform experiment. Required and positive.
+	// MaxSubmissionsPerHour caps how many submissions an agent may make per hour within a
+	// single platform experiment, each the jobs of one hypothesis on one commit. Required and
+	// positive.
 	MaxSubmissionsPerHour int `yaml:"max_submissions_per_hour"`
 
 	// MaxAcceleratorCountPerJob/MaxCPUCoresPerJob/MaxRAMGBPerJob/MaxStorageGBPerJob cap how much of
@@ -293,11 +294,13 @@ type AuthConfig struct {
 type AgentsConfig struct {
 	// Image is what every sandboxed agent's machine boots.
 	Image string `yaml:"image"`
-	// DefaultModel is the model reference an agent runs on when it joins without naming one. It
-	// is resolved onto the agent's signup at that moment, so changing it moves new agents only.
+	// DefaultModel is the model reference an agent other than a researcher runs on when neither it
+	// nor its agent type names one. It is resolved whenever the agent's model is read, so a change
+	// moves every such agent.
 	DefaultModel string `yaml:"default_model"`
-	// CoordinatorModel is the model reference a sandboxed coordinator runs on when the create
-	// request names none. It is written onto the platform experiment when it is created.
+	// CoordinatorModel is the model reference a sandboxed coordinator runs on when neither its
+	// platform experiment nor its agent type names one, and a researcher when neither it, its agent
+	// type nor its platform experiment's coordinator_model does. It is resolved as DefaultModel is.
 	CoordinatorModel string `yaml:"coordinator_model"`
 	// BootLimitSeconds is how long an agent sandbox may go unreported after it was asked for, or
 	// stay starting after it was first reported, before it is given up on as an exited one is.
@@ -322,24 +325,25 @@ type AgentsConfig struct {
 // (httpapi/modelproxy), so no agent's machine holds the credential. A provider is served while its
 // credential is set, and a model of any other is refused.
 type ModelsConfig struct {
-	Anthropic AnthropicModelsConfig `yaml:"anthropic"`
-	OpenAI    OpenAIModelsConfig    `yaml:"openai"`
+	// Anthropic is Claude, which the platform calls with a Claude subscription token.
+	Anthropic CatalogModelsConfig `yaml:"anthropic"`
+	// OpenAI is OpenAI's models, which the platform calls with a ChatGPT subscription.
+	OpenAI CatalogModelsConfig `yaml:"openai"`
 	// MaxCallsInFlightPerOrg is how many model calls the platform makes for one org at once.
 	MaxCallsInFlightPerOrg int `yaml:"max_calls_in_flight_per_org"`
 }
 
-// AnthropicModelsConfig is Claude, which the platform calls with a Claude subscription token.
-type AnthropicModelsConfig struct {
-	// Catalog is every model a call to Anthropic may name, with its price. A call naming another
-	// is refused, and each call is priced at it.
+// CatalogModelsConfig is a provider whose models the platform prices itself.
+type CatalogModelsConfig struct {
+	// Catalog is every model a call to the provider may name, with its price, required while the
+	// provider's credential is set. A call naming another is refused, and each call is priced at it.
 	Catalog domain.ModelCatalog `yaml:"catalog"`
 }
 
-// OpenAIModelsConfig is OpenAI's models, which the platform calls with a ChatGPT subscription.
-type OpenAIModelsConfig struct {
-	// Catalog is every model a call to OpenAI may name, with its price, required while the
-	// provider's credential is set. A call naming another is refused, and each call is priced at it.
-	Catalog domain.ModelCatalog `yaml:"catalog"`
+// Catalogs are the catalogs of the providers the platform prices itself, by provider, each nil
+// when the settings state none.
+func (m ModelsConfig) Catalogs() map[string]domain.ModelCatalog {
+	return map[string]domain.ModelCatalog{domain.ModelProviderAnthropic: m.Anthropic.Catalog, domain.ModelProviderOpenAI: m.OpenAI.Catalog}
 }
 
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
@@ -485,6 +489,11 @@ type Settings struct {
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName         map[string]float64           // accelerator name → AccH rate
 	PodResourcesByName map[string]map[string]string // accelerator name → pod_resources, where it has any
+}
+
+// ModelDefaults is the platform's model for an agent and for a coordinator that names none.
+func (a AgentsConfig) ModelDefaults() domain.ModelDefaults {
+	return domain.ModelDefaults{Agent: a.DefaultModel, Coordinator: a.CoordinatorModel}
 }
 
 // NewOrgComputeLimit is the platform compute limit an org is created with.

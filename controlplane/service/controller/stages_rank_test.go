@@ -131,7 +131,7 @@ func TestStageReleasesSumToBudget(t *testing.T) {
 type rolesStagesStore struct {
 	StagesStore
 	quotaAgents []string
-	competitors []string
+	executors   []string
 	cut         []string
 	completedBy []string
 	inFlightBy  []string
@@ -173,10 +173,10 @@ func (f *rolesStagesStore) AgentJobsByAgent(context.Context, string) (map[string
 }
 
 func (f *rolesStagesStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
-	if role != domain.SignupRoleCompetitor {
+	if role != domain.SignupRoleExecutor {
 		return nil, fmt.Errorf("unexpected role read: %s", role)
 	}
-	return f.competitors, nil
+	return f.executors, nil
 }
 
 // bestPerAgent is the per-agent standing the ladder cuts on, so a cut can be computed against
@@ -204,12 +204,12 @@ func rankedPE(evictPct float64) (*domain.PlatformExperiment, domain.Stage) {
 	return pe, domain.Stage{LengthPct: 100, EvictPct: evictPct}
 }
 
-// A baseline or a reviewer holds quota and runs jobs exactly like a competitor, so the only thing
+// A baseline or a reviewer holds quota and runs jobs exactly like an executor, so the only thing
 // keeping it out of every ranking derived from the ladder is that it is not a survivor.
-func TestCurrentSurvivorsExcludesAgentsSignedUpInANonCompetitorRole(t *testing.T) {
+func TestCurrentSurvivorsExcludesAgentsSignedUpInANonExecutorRole(t *testing.T) {
 	store := &rolesStagesStore{
 		quotaAgents: []string{"a", "b", "baseline", "reviewer"},
-		competitors: []string{"a", "b"},
+		executors:   []string{"a", "b"},
 	}
 	got, err := rolesController(store, nil).currentSurvivors(context.Background(), &domain.PlatformExperiment{ID: "pe-roles"})
 	if err != nil {
@@ -218,20 +218,20 @@ func TestCurrentSurvivorsExcludesAgentsSignedUpInANonCompetitorRole(t *testing.T
 	assertCut(t, got, "a", "b")
 }
 
-// A cut at a boundary must be taken from the competitors alone: a non-competitor is never
+// A cut at a boundary must be taken from the executors alone: a non-executor is never
 // eliminated, and its presence must not enlarge the field the evict percentage is applied to.
-func TestCutWithFiveCompetitorsAndTwoNonCompetitorsCutsOnlyFromTheFive(t *testing.T) {
-	// The two non-competitors sit at the very bottom on the metric — exactly where a cut would
+func TestCutWithFiveExecutorsAndTwoNonExecutorsCutsOnlyFromTheFive(t *testing.T) {
+	// The two non-executors sit at the very bottom on the metric, exactly where a cut would
 	// take them if roles were ignored.
 	observed := bestPerAgent(map[string]float64{
 		"c1": 50, "c2": 40, "c3": 30, "c4": 20, "c5": 10, "baseline": 1, "reviewer": 2,
 	})
 	store := &rolesStagesStore{
 		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5", "baseline", "reviewer"},
-		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
+		executors:   []string{"c1", "c2", "c3", "c4", "c5"},
 		completedBy: []string{"c1", "c2", "c3", "c4", "c5", "baseline", "reviewer"},
 	}
-	pe, stage := rankedPE(30) // 30% of 5 competitors floors to 1; of all 7 it would floor to 2.
+	pe, stage := rankedPE(30) // 30% of 5 executors floors to 1; of all 7 it would floor to 2.
 	kept, cut, err := rolesController(store, observed).computeCut(context.Background(), pe, stage)
 	if err != nil {
 		t.Fatalf("computeCut err = %v, want nil", err)
@@ -240,12 +240,12 @@ func TestCutWithFiveCompetitorsAndTwoNonCompetitorsCutsOnlyFromTheFive(t *testin
 	assertCut(t, kept, "c1", "c2", "c3", "c4")
 }
 
-// minSurvivorsForCut counts the field actually being compared. Letting non-competitors pad the
+// minSurvivorsForCut counts the field actually being compared. Letting non-executors pad the
 // roster past the guardrail would start eliminating agents from a field too small to compare.
-func TestBoundaryWithFourCompetitorsAndThreeNonCompetitorsCutsNobody(t *testing.T) {
+func TestBoundaryWithFourExecutorsAndThreeNonExecutorsCutsNobody(t *testing.T) {
 	store := &rolesStagesStore{
 		quotaAgents: []string{"c1", "c2", "c3", "c4", "b1", "b2", "r1"},
-		competitors: []string{"c1", "c2", "c3", "c4"},
+		executors:   []string{"c1", "c2", "c3", "c4"},
 	}
 	pe, stage := rankedPE(50)
 	// No metrics store on purpose: reaching a metric read at all would mean the guardrail counted
@@ -277,7 +277,7 @@ func TestBoundaryWithNoRankingValueWaitsOnlyForWhatCanStillRank(t *testing.T) {
 	}{
 		{
 			name: "every job was stopped short: advance",
-			// A non-competitor's jobs give the survivors nothing to be ranked on or to wait for.
+			// A non-executor's jobs give the survivors nothing to be ranked on or to wait for.
 			completedBy: []string{"baseline"},
 			inFlightBy:  []string{"baseline"},
 		},
@@ -305,7 +305,7 @@ func TestBoundaryWithNoRankingValueWaitsOnlyForWhatCanStillRank(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &rolesStagesStore{
 				quotaAgents: append([]string{"baseline"}, field...),
-				competitors: field,
+				executors:   field,
 				completedBy: tc.completedBy,
 				inFlightBy:  tc.inFlightBy,
 			}
@@ -334,7 +334,7 @@ func TestBoundaryWithARankingValueCutsWhileOtherJobsAreInFlight(t *testing.T) {
 	observed := bestPerAgent(map[string]float64{"c1": 50, "c2": 40})
 	store := &rolesStagesStore{
 		quotaAgents: []string{"c1", "c2", "c3", "c4", "c5"},
-		competitors: []string{"c1", "c2", "c3", "c4", "c5"},
+		executors:   []string{"c1", "c2", "c3", "c4", "c5"},
 		completedBy: []string{"c1", "c2"},
 		inFlightBy:  []string{"c3", "c4", "c5"},
 	}

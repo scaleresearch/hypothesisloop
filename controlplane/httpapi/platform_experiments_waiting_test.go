@@ -20,7 +20,7 @@ func waitingAgent(id string) auth.Principal {
 // refusal says it itself: quota is granted at the start, and what its reader does until then.
 func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Executor 1", Role: domain.SignupRoleCompetitor}}
+	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Executor 1", Role: domain.SignupRoleExecutor}}
 	r := authtest.Router(authtest.As(waitingAgent("dana")))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	registerPlatformExperimentsAndBudget(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))

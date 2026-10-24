@@ -285,7 +285,7 @@ func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *te
 	agentID, peID, _ := seedRun(t, pool, "cut", true)
 	store := NewStore(pool, 3)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, peID, agentID)
 	before := cursorNow(t, pool)
 
 	if err := store.FinishAgent(ctx, peID, agentID, "quota spent"); err != nil {
@@ -597,7 +597,7 @@ func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 	store := NewStore(pool, 3)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes', 'executor')`, peID, agentID)
 	due, err := dueOf(t, store, peID, 10*time.Minute)
 	if err != nil || len(due) != 1 {
 		t.Fatalf("due %+v, %v, want the one executor", due, err)
@@ -622,7 +622,7 @@ func TestAnExecutorWithAJobRunningIsNotIdle(t *testing.T) {
 	store := NewStore(pool, 3)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '40 minutes' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '40 minutes')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '40 minutes', 'executor')`, peID, agentID)
 	job := func(id, status, created, reported string) {
 		t.Helper()
 		exec(t, pool, `INSERT INTO experiments
@@ -673,7 +673,7 @@ func TestAnExecutorWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *testi
 	agentID, peID, hypothesisID := seedRun(t, pool, "idle", true)
 	store := NewStore(pool, 3)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes', 'executor')`, peID, agentID)
 	announced := func() []domain.Event {
 		t.Helper()
 		return changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{platformapi.EventAgentIdle: true}}, before)

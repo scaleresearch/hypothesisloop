@@ -62,17 +62,18 @@ a leading quote.
                                        # planning.min_baseline_minutes (45) to
                                        # planning.baseline_limit_minutes
   agents:                              # the team, one entry per agent: executors, which run the
-    - agent_type: ...                  # jobs and count toward max_agents, and researchers, which
-      model: ...                       # keep the graph, run no job and count toward nothing.
-      hyperparameters:                 # agent_type is optional: an agent type by id, left out the
-        direction: |                   # built-in executor type; researcher for a researcher. A
+    - agent_type: hyperparameter-search # jobs and count toward max_agents, and researchers, which
+      hyperparameters:                 # keep the graph, run no job and count toward nothing.
+        direction: |                   # agent_type is optional: an agent type by id, left out the
           the approach this one explores: a mechanism, never a list of values to try, since
           its executor makes each claim under it a hypothesis of its own
-    - {}                               # --check with an id that is none lists the valid ones.
-    - agent_type: researcher           # model is optional: a <provider>/<model id> hl models
-                                       # lists, left out the agent type's (a researcher's is the
-                                       # coordinator's). The direction you give an agent goes in
-                                       # hyperparameters, any keys.
+    - agent_type: architecture-search  # built-in executor type, generalist; the others built in are
+    - {}                               # hyperparameter-search, architecture-search and data-search,
+    - agent_type: researcher           # and researcher for a researcher. --check with an id that is
+                                       # none lists the valid ones. model is optional: a
+                                       # <provider>/<model id> hl models lists, left out the agent
+                                       # type's (a researcher's is the coordinator's). The direction
+                                       # you give an agent goes in hyperparameters, any keys.
   metric_reason: |
     why this metric is the goal, in plain words
   measurement: |

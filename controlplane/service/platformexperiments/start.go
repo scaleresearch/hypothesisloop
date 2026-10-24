@@ -194,7 +194,7 @@ func (s *Service) StartIfReady(ctx context.Context, id string) error {
 // maxAgentsReached refuses an executor past max_agents, which counts the executors at work and
 // nothing else.
 func maxAgentsReached(limit int) error {
-	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many executors (agents of role competitor) are at work. One that finished, was cut, was replaced or lost its machine with no restart left no longer counts, and researchers, agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
+	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many executors are at work. One that finished, was cut, was replaced or lost its machine with no restart left no longer counts, and researchers, agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
 }
 
 func maxAgentSandboxesReached(limit int) string {
@@ -338,7 +338,7 @@ func (s *Service) start(ctx context.Context, pe *domain.PlatformExperiment, now 
 		}
 		executors := 0
 		for _, p := range participants {
-			if p.Role == domain.SignupRoleCompetitor {
+			if p.Role == domain.SignupRoleExecutor {
 				executors++
 			}
 		}

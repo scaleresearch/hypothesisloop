@@ -191,6 +191,16 @@ func TestAModelProviderIsServedWhileItsCredentialIsSet(t *testing.T) {
 	if c, err := LoadControlService(); err != nil || !maps.Equal(c.ModelCredentials, map[string]string{domain.ModelProviderOpenRouter: "an-openrouter-key"}) {
 		t.Errorf("openrouter alone: %v, %v, want it served and anthropic not", c, err)
 	}
+	// A provider not served needs no catalog.
+	start := strings.Index(openRouterDefaults, "  anthropic:\n")
+	end := strings.Index(openRouterDefaults, "  openai:\n")
+	inEnvironment(t, openRouterDefaults[:start]+openRouterDefaults[end:])
+	t.Setenv(ModelOpenRouterAPIKey.Name, "an-openrouter-key")
+	t.Setenv(ModelAnthropicOAuthToken.Name, "")
+	t.Setenv(ModelOpenAIAuthJSON.Name, "")
+	if _, err := LoadControlService(); err != nil {
+		t.Errorf("openrouter alone with no anthropic catalog: %v, want it loaded", err)
+	}
 }
 
 // A provider's secret is <SECTION>_<NAME>_<FIELD>, NAME the section's provider or a cloud_compute

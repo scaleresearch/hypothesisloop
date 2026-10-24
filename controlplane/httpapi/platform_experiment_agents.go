@@ -44,7 +44,7 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "The only way an agent joins, while the experiment is open: the platform starts the run once its baseline is declared, and quota is divided then over the agents present, those of role baseline apart. " +
-			"While it runs, its coordinator or a person adds an executor (role competitor) in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents, or a researcher: an executor is given an even part, with the executors at work, of what all executors left unspent, taken first from what the ones that ended left and then from the executors at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the executor a declared baseline still waited for starts the run in this request. " +
+			"While it runs, its coordinator or a person adds an executor in the place of one that finished, was cut or lost its machine, or in one its owner gained by raising max_agents, or a researcher: an executor is given an even part, with the executors at work, of what all executors left unspent, taken first from what the ones that ended left and then from the executors at work that hold more unspent than that part, in proportion to what they hold above it, so none keeps less than the newcomer and none gives back what it used, and 409 no_share_left when that part would not hold one trial of the baseline (the job again at job_estimated_duration_hours). An agent's token adds no agent then (403). Adding the executor a declared baseline still waited for starts the run in this request. " +
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +
@@ -54,7 +54,7 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 			"agent_type and model are resolved here and stored: the answer shows what the agent runs. " +
 			"in_agentsandbox=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. A coordinator's token is returned none: a person or an API key of the org asks for it. " +
-			"role decides what the agent does (GET /agent-roles): \"competitor\" (default) is an executor, whatever its agent type: it runs jobs, is ranked, cut-eligible and counted against max_agents; \"researcher\" runs the built-in researcher type unless agent_type names it, runs no job (422 researcher_submits_no_job), pushes nothing, holds no quota (404 researcher_has_no_quota), is never ranked or cut, counts toward no max_agents and defaults to the coordinator's model (coordinator_model) when neither model nor its agent type names one; \"baseline\" and " +
+			"role decides what the agent does (GET /agent-roles): \"executor\" (default), whatever its agent type, runs jobs, is ranked, cut-eligible and counted against max_agents; \"researcher\" runs the built-in researcher type unless agent_type names it, runs no job (422 researcher_submits_no_job), pushes nothing, holds no quota (404 researcher_has_no_quota), is never ranked or cut, counts toward no max_agents and defaults to the coordinator's model (coordinator_model) when neither model nor its agent type names one; \"baseline\" and " +
 			"\"reviewer\" are not ranked or cut, though their jobs are billed and gated identically. " +
 			"409 max_agents_reached for an executor past max_agents, which counts the executors at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but executor and researcher once the run started, and for every one once it closed. " +
 			"An agent of role baseline measures the baseline before the start: its machine, when sandboxed, starts at once, it holds a quota from the moment it joins (half the budget, which no executor can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
@@ -127,7 +127,8 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 		return nil, refused(a.logger, "add agent", err)
 	}
 	for i, agent := range out.Body.Agents {
-		// A coordinator does not act as an agent (auth.Access.ActAs), so it is handed no agent's token.
+		// Only a person or an API key of the org is handed a self-run agent's token: a coordinator
+		// does not act as an agent (auth.Access.ActAs).
 		if agent.InAgentSandbox || !caller.HoldsAccount() {
 			continue
 		}

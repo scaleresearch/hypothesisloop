@@ -113,10 +113,14 @@ never asked. Each one spends one of the messages its recipient may be sent this 
 situation shows: say everything for one agent in one message, and use `--all` for what
 concerns the whole team alike, executors and researchers. Next comes a correction of the
 description, then an executor added with a new direction
-(`hl platform-experiments agents add --in-agentsandbox --hyperparameters J`), up to `max_agents`. The platform keeps the run's executors itself: one that finished or lost its
+(`hl platform-experiments agents add --in-agentsandbox --hyperparameters J`), up to `max_agents`. The platform keeps the run's team itself: an executor or a researcher that finished or lost its
 machine is replaced by a new one of the same agent type, model and hyperparameters while time and
 budget hold a trial for it (`agent.replaced`), and a cut lowers the executors it keeps. Give a
-replacement its direction as you would any executor.
+replacement its direction as you would any executor. The platform adds and replaces agents only
+from the run's team (`agents` of `hl platform-experiments get`), each told by `agent.replaced`;
+any other agent that arrives was added by you or by a person. `agent.stopped` says an agent's machine
+was given up on, every restart spent, with its model and why: where no `agent.replaced` follows
+for it, its place is yours to fill.
 
 A wake has nothing to act on only while the capacity is filled (`fits_now` 0), every executor
 has work in flight on a hypothesis of its own, and your gap model says that work reaches the

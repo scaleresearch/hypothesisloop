@@ -17,6 +17,9 @@ const (
 	ReasonResearcherHasNoQuota = "researcher_has_no_quota"
 	// ReasonResearcherSubmitsNoJob refuses a job a researcher submits.
 	ReasonResearcherSubmitsNoJob = "researcher_submits_no_job"
+	// ReasonResearcherChecksOutNothing refuses a checkout of a hypothesis by a researcher, which
+	// runs no job on it.
+	ReasonResearcherChecksOutNothing = "researcher_checks_out_nothing"
 	// ReasonCursorGone refuses a watch or a read of changes from an after this platform holds no
 	// changes past: one it never issued, or one whose changes are pruned. The client reads state
 	// again and watches from head.

@@ -22,6 +22,10 @@ metricsURL: ""
 # true only if this cluster runs a native autoscaler (cluster-autoscaler / Karpenter) that reacts
 # to Pending pods. See autoscaler.md.
 autoscalerEnabled: "false"
+# The key of the node label that names each node's placement group (nodes on one fabric, such as
+# one InfiniBand island), for jobs with topology.nodes_within: placement_group. Empty: this
+# cluster takes no such job.
+placementGroupLabel: ""
 # helm uninstall removes the cluster from the control plane and stops its jobs before the
 # release goes. false leaves the cluster registered, for a release that is coming back.
 detachOnUninstall: true

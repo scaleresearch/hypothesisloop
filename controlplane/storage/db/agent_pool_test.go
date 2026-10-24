@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func spawnExecutor(t *testing.T, pes *Store, pe, agentType string) string {
 	t.Helper()
 	id, _ := domain.NewID(domain.AgentIDPrefix)
 	agent := &domain.Agent{ID: id, Name: "r-" + id, CreatedAt: time.Now().UTC()}
-	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: agentType, Model: "model-1"}); err != nil {
+	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: agentType, Model: "model-1"}); err != nil {
 		t.Fatalf("spawn: got = %v, want = nil", err)
 	}
 	qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)
@@ -79,7 +80,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	before := cursorNow(t, pool)
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatalf("a replacement: got = %v, want = nil", err)
 	}
@@ -112,7 +113,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	// An executor is replaced once.
 	twice, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: twice, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: twice, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
+		domain.AgentSignup{Actor: testActor, AgentID: twice, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err == nil {
 		t.Error("a second replacement of one executor was written")
 	}
@@ -259,7 +260,7 @@ func TestAPlatformExperimentIsCreatedWithItsExecutorsOrNotAtAll(t *testing.T) {
 		var signups []domain.AgentSignup
 		for i := 0; i <= executors; i++ {
 			id, _ := domain.NewID(domain.AgentIDPrefix)
-			role := domain.SignupRoleCompetitor
+			role := domain.SignupRoleExecutor
 			if i == executors {
 				role = domain.SignupRoleBaseline
 			}
@@ -324,10 +325,9 @@ func TestARemovedResearcherLowersItsEntryOfThePool(t *testing.T) {
 	}
 }
 
-// A researcher's work lasts as long as the run: one that finished by itself leaves the agents in
-// the write that finished it and is replaced by nobody, while one whose machine stopped waits to
-// be replaced.
-func TestAResearcherThatFinishedIsNotReplacedAndOneWhoseMachineStoppedIs(t *testing.T) {
+// A researcher's place is kept as an executor's: one that finished and one whose machine stopped
+// both leave the researchers' entry as it was and wait to be replaced.
+func TestAResearcherThatFinishedIsReplacedAsOneWhoseMachineStopped(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	researcher := domain.PoolKey{AgentType: domain.ResearcherAgentType}
@@ -335,7 +335,7 @@ func TestAResearcherThatFinishedIsNotReplacedAndOneWhoseMachineStoppedIs(t *test
 	spawnExecutor(t, pes, pe, "generalist")
 	finished, stopped := spawnResearcher(t, pes, pe), spawnResearcher(t, pes, pe)
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
-	if err := pes.FinishAgent(ctx, pe, finished, "the board is done"); err != nil {
+	if err := pes.FinishAgent(ctx, pe, finished, "my context is spent"); err != nil {
 		t.Fatal(err)
 	}
 	exec(t, pool, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, finished)
@@ -344,11 +344,18 @@ func TestAResearcherThatFinishedIsNotReplacedAndOneWhoseMachineStoppedIs(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Pool[1].Count != 1 || len(state.Ended[researcher]) != 1 || state.Ended[researcher][0].AgentID != stopped {
-		t.Errorf("state = %+v, want the researchers' entry lowered to 1 and the stopped one alone waiting to be replaced", state)
+	var ended []string
+	for _, e := range state.Ended[researcher] {
+		ended = append(ended, e.AgentID)
 	}
-	if places := poolPlaces(state); len(places) != 1 {
-		t.Errorf("places = %+v, want one: the stopped researcher's", places)
+	slices.Sort(ended)
+	want := []string{finished, stopped}
+	slices.Sort(want)
+	if state.Pool[1].Count != 2 || !slices.Equal(ended, want) {
+		t.Errorf("state = %+v, want the researchers' entry kept at 2 and %v waiting to be replaced", state, want)
+	}
+	if places := poolPlaces(state); len(places) != 2 {
+		t.Errorf("places = %+v, want two: both researchers'", places)
 	}
 }
 

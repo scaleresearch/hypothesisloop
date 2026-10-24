@@ -123,12 +123,9 @@ WHERE x.id <> $into MATCH (i)-[:BUILDS_ON *BFS]->(x) RETURN DISTINCT x.id ORDER 
 	return nil
 }
 
-// Retire takes an open hypothesis off the frontier with reason, which is required. Retiring a
-// retired one changes nothing (changed false).
+// Retire takes an open hypothesis off the frontier with reason. Retiring a retired one changes
+// nothing (changed false).
 func (s *Store) Retire(ctx context.Context, id string, actor domain.Actor, reason string) (h *domain.Hypothesis, changed bool, err error) {
-	if strings.TrimSpace(reason) == "" {
-		return nil, false, fmt.Errorf("graphdb.Retire: reason is empty")
-	}
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		changed = false

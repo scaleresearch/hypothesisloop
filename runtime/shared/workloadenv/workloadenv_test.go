@@ -158,12 +158,12 @@ func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
 	}
 }
 
-func gangEnv(vars []Var) ([]string, map[string]string) {
+func gangEnv(vars []GangVar, index int) ([]string, map[string]string) {
 	names := make([]string, 0, len(vars))
 	env := map[string]string{}
 	for _, v := range vars {
 		names = append(names, v.Name)
-		env[v.Name] = v.Value
+		env[v.Name] = v.At(index).Value
 	}
 	return names, env
 }
@@ -171,7 +171,7 @@ func gangEnv(vars []Var) ([]string, map[string]string) {
 // An ungrouped node's rank is its index, and the torch names stand beside the platform's.
 func TestGangTellsAnUngroupedNodeItsRank(t *testing.T) {
 	spec := clusterapi.JobSpec{NumNodes: 3}
-	names, env := gangEnv(Gang(spec, spec.NodeGroups()[0], 0, 2, "master.test"))
+	names, env := gangEnv(Gang(spec, spec.NodeGroups()[0], 0, "master.test"), 2)
 	if want := []string{
 		jobenv.WorldSize, jobenv.MasterAddr, jobenv.MasterPort,
 		jobenv.TorchLocalRank, jobenv.TorchWorldSize, jobenv.TorchMasterAddr, jobenv.TorchMasterPort,
@@ -194,7 +194,7 @@ func TestGangTellsAnUngroupedNodeItsRank(t *testing.T) {
 // world spans every group.
 func TestGangTellsAGroupedNodeItsGroupAndOffsetAndNoRank(t *testing.T) {
 	spec := clusterapi.JobSpec{Groups: []clusterapi.JobGroup{{Name: "learner", Replicas: 1}, {Name: "actor", Replicas: 3}}}
-	names, env := gangEnv(Gang(spec, spec.Groups[1], 1, 2, "master.test"))
+	names, env := gangEnv(Gang(spec, spec.Groups[1], 1, "master.test"), 2)
 	if want := []string{
 		jobenv.WorldSize, jobenv.MasterAddr, jobenv.MasterPort,
 		jobenv.TorchLocalRank, jobenv.TorchWorldSize, jobenv.TorchMasterAddr, jobenv.TorchMasterPort,

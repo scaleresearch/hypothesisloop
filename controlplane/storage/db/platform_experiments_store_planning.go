@@ -168,7 +168,9 @@ func signUpDraftBaseline(ctx context.Context, tx *Write, id string, agent *domai
 		return err
 	}
 	if agent.Name == "" {
-		agent.Name = domain.AgentName(signup.Role, func(name string) bool { _, taken := names[name]; return taken })
+		if agent.Name, err = domain.AgentName(signup.Role, func(name string) bool { _, taken := names[name]; return taken }); err != nil {
+			return err
+		}
 	}
 	if err := tx.QueryRow(ctx, `SELECT `+orgOfSQL("$1"), id).Scan(&agent.OrgID); err != nil {
 		return fmt.Errorf("read the draft's org: %w", err)

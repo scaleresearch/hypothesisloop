@@ -35,7 +35,7 @@ func TestAnExecutorFinishingEarlySaysWhyAndTheTimeAndQuotaItLeavesAreTold(t *tes
 		return svc.FinishAgent(context.Background(), "pe-1", "dana", reason, because, "")
 	}
 
-	store := newStore(domain.SignupRoleCompetitor, 16*time.Minute+30*time.Second, 0.2)
+	store := newStore(domain.SignupRoleExecutor, 16*time.Minute+30*time.Second, 0.2)
 	_, err := finish(store, "nothing beat the control", "")
 	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" || refused.GetStatus() != http.StatusConflict ||
@@ -47,15 +47,15 @@ func TestAnExecutorFinishingEarlySaysWhyAndTheTimeAndQuotaItLeavesAreTold(t *tes
 	if err != nil || !strings.HasPrefix(finished.FinishedReason, "Blocked: every job needs a toolchain the environment cannot build. When it finished, 16 of the run's 60 minutes") {
 		t.Errorf("an early finish that is blocked: got %+v, %v, want finished with why, the reason and what it left", finished, err)
 	}
-	store = newStore(domain.SignupRoleCompetitor, 16*time.Minute+30*time.Second, 0.2)
+	store = newStore(domain.SignupRoleExecutor, 16*time.Minute+30*time.Second, 0.2)
 	finished, err = finish(store, "depth, width and dropout all stayed inside the seed spread", domain.FinishNothingLeft)
 	if err != nil || !strings.HasPrefix(finished.FinishedReason, "Nothing left worth a job: depth, width and dropout all stayed inside the seed spread. When it finished, 16 of the run's 60 minutes") {
 		t.Errorf("an early finish with nothing left worth a job: got %+v, %v, want finished with why, the reason and what it left", finished, err)
 	}
 
 	for name, store := range map[string]*rosterStore{
-		"little time left":  newStore(domain.SignupRoleCompetitor, 5*time.Minute, 0.2),
-		"little quota left": newStore(domain.SignupRoleCompetitor, 30*time.Minute, 2.8),
+		"little time left":  newStore(domain.SignupRoleExecutor, 5*time.Minute, 0.2),
+		"little quota left": newStore(domain.SignupRoleExecutor, 30*time.Minute, 2.8),
 	} {
 		finished, err := finish(store, "nothing beat the control", "")
 		if err != nil || !strings.HasPrefix(finished.FinishedReason, "nothing beat the control. When it finished, ") {
@@ -80,7 +80,7 @@ func TestAnExecutorFinishesWithoutSayingWhyWhenNoJobOfItFitsInTheTimeLeft(t *tes
 		store := newRosterStore(domain.PlatformExpRunning, 5)
 		store.pe.DurationHours, store.pe.EndsAt = 0.5, time.Now().Add(4*time.Minute+30*time.Second)
 		store.pe.StartsAt = store.pe.EndsAt.Add(-30 * time.Minute)
-		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
+		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleExecutor}}
 		store.quota = &domain.AgentQuota{AgentID: "dana", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: 0.2}
 		store.completed = completed
 		svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute)

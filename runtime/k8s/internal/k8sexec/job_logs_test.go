@@ -95,11 +95,7 @@ func sectionRanks(sections []ranktail.Section) []int {
 
 func pickedSections(t *testing.T, pods []corev1.Pod, shown int) ([]ranktail.Section, int) {
 	t.Helper()
-	sections, err := (&JobWorkloadClient{}).rankSections(context.Background(), "gang", pods)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ranktail.Pick(sections, shown)
+	return ranktail.Pick((&JobWorkloadClient{}).rankSections(context.Background(), "gang", pods), shown)
 }
 
 // Every reader of a tail reads its end, so the rank that explains the job comes last: the first
@@ -152,6 +148,20 @@ func TestFetchLogTailOfAGangHasOneSectionPerRank(t *testing.T) {
 	want := []string{"--- rank 1 (pod exp-gang-1) ---", "fake logs", "--- rank 0 (pod exp-gang-0) ---", "fake logs"}
 	if !reflect.DeepEqual(lines, want) {
 		t.Errorf("tail = %q, want %q", lines, want)
+	}
+}
+
+// A pod whose rank cannot be read shows why, and the other ranks still show their output.
+func TestFetchLogTailOfAGangShowsAPodWithoutARank(t *testing.T) {
+	pods := []corev1.Pod{gangPod("exp-gang-1", 1, "", 0, "n1"), gangPod("exp-gang-0", 0, "", 0, "n0")}
+	delete(pods[0].Annotations, batchv1.JobCompletionIndexAnnotation)
+	c := pullTestClient(t, &pods[0], &pods[1])
+	lines, err := c.FetchLogTail(context.Background(), "gang", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 4 || lines[0] != "--- rank unknown (pod exp-gang-1) ---" || !strings.Contains(lines[1], "no completion index") || lines[2] != "--- rank 0 (pod exp-gang-0) ---" {
+		t.Errorf("tail = %q, want the unranked pod's reason, then rank 0's output", lines)
 	}
 }
 

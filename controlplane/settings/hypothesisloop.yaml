@@ -55,13 +55,13 @@ auth:
 #
 #   image      what every sandboxed agent's machine boots. The sandbox provider must be able to
 #              pull it. A change replaces every running agent's machine.
-#   default_model  the model an agent runs on when it joins without naming one, a reference
-#              <provider>/<model id> as every model the platform stores. Written onto the
-#              agent when it joins, so a change moves new agents only. A researcher that names
+#   default_model  the model an agent runs on when neither it nor its agent type names one, a
+#              reference <provider>/<model id> as every model the platform stores. Read whenever
+#              the agent's model is, so a change moves every such agent. A researcher that names
 #              none, of a type that names none, defaults to the coordinator's model instead.
-#   coordinator_model  the model a sandboxed coordinator runs on when its create request names none,
-#              a stronger one than default_model since it supervises the whole run. Written onto
-#              the platform experiment when it is created, so a change moves new ones only.
+#   coordinator_model  the model a sandboxed coordinator runs on when neither its platform
+#              experiment nor its agent type names one, a stronger one than default_model since it
+#              supervises the whole run. Read as default_model is.
 #   boot_limit_seconds  how long an agent sandbox may go unlisted by its provider after it was
 #              asked for, or stay starting after it was first reported, before it is given up on
 #              and a restart is spent: three in any six hours, the fourth stops the agent. A
@@ -112,7 +112,7 @@ agents:
 #              MODEL_ANTHROPIC_OAUTH_TOKEN.
 #     catalog  every model a call to it may name, by the model id a call states, with
 #              Anthropic's price in US dollars per million tokens of each kind. A call naming
-#              another model is refused with 403 model_not_served. Claude Code calls the
+#              another model is refused with 422 model_not_served. Claude Code calls the
 #              models its subagents and its own small tasks run on as well (its opus, sonnet and
 #              haiku), so those are named too, haiku under the name Claude Code states and the
 #              one the provider answers with. cache_write is the one-hour cache's price, twice
@@ -121,8 +121,9 @@ agents:
 #              anthropic models of agents.default_model and coordinator_model are in it.
 #   openrouter  any model OpenRouter serves that takes tools, through Claude Code pointed at
 #              OpenRouter's Anthropic-compatible API, with the API key MODEL_OPENROUTER_API_KEY.
-#              It takes no settings: its models are OpenRouter's listing at the time, and each
-#              call costs what OpenRouter says it did.
+#              It takes no settings: its models are OpenRouter's listing at the time, a call
+#              naming one it no longer lists is refused, and each call costs what OpenRouter's
+#              answer says it did. An answer that says no cost is logged and not recorded.
 #   openai     OpenAI's models on a ChatGPT subscription, through the same Claude Code: the
 #              platform translates each Anthropic Messages call to the Responses call the Codex
 #              CLI makes and its answer back, Claude Code's WebSearch to OpenAI's web search.
@@ -136,8 +137,8 @@ agents:
 #              per million tokens. The subscription is paid flat, so these are OpenAI's API
 #              prices of the same models (developers.openai.com/api/docs/pricing, Standard
 #              tier), what the model budget is spent at. cache_read is the cached input's price;
-#              cache_write is never counted, as OpenAI caches without a charge, and is stated
-#              like the input. A web search the model makes is not counted.
+#              cache_write is not stated, as OpenAI caches without a charge. A web search the
+#              model makes is not counted.
 #   max_calls_in_flight_per_org  how many model calls the platform makes for one org at once,
 #              so that no org takes a provider's whole allowance of the platform's credential.
 #              One more is refused with 429 model_calls_in_flight, which Claude Code waits out
@@ -155,13 +156,13 @@ models:
       claude-haiku-4-5-20251001: {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
   openai:
     catalog:
-      gpt-6.1-sol:   {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
-      gpt-6-sol:     {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.2}
-      gpt-6-astra:   {input_usd_per_mtok: 10,  output_usd_per_mtok: 50,  cache_write_usd_per_mtok: 10,  cache_read_usd_per_mtok: 1}
-      gpt-6-luna:    {input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, cache_write_usd_per_mtok: 0.1, cache_read_usd_per_mtok: 0.01}
-      gpt-5.6-sol:   {input_usd_per_mtok: 4,   output_usd_per_mtok: 20,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.4}
-      gpt-5.6-terra: {input_usd_per_mtok: 2,   output_usd_per_mtok: 12,  cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.2}
-      gpt-5.6-luna:  {input_usd_per_mtok: 0.2, output_usd_per_mtok: 1.2, cache_write_usd_per_mtok: 0.2, cache_read_usd_per_mtok: 0.02}
+      gpt-6.1-sol:   {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_read_usd_per_mtok: 0.1}
+      gpt-6-sol:     {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_read_usd_per_mtok: 0.2}
+      gpt-6-astra:   {input_usd_per_mtok: 10,  output_usd_per_mtok: 50,  cache_read_usd_per_mtok: 1}
+      gpt-6-luna:    {input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, cache_read_usd_per_mtok: 0.01}
+      gpt-5.6-sol:   {input_usd_per_mtok: 4,   output_usd_per_mtok: 20,  cache_read_usd_per_mtok: 0.4}
+      gpt-5.6-terra: {input_usd_per_mtok: 2,   output_usd_per_mtok: 12,  cache_read_usd_per_mtok: 0.2}
+      gpt-5.6-luna:  {input_usd_per_mtok: 0.2, output_usd_per_mtok: 1.2, cache_read_usd_per_mtok: 0.02}
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the description and the size and proposes the
@@ -444,8 +445,9 @@ quota:
   # never on top of it, so a value over 1 only lets the whole share run as burst.
   burst_fraction: 2.0
 
-  # Maximum number of experiments an agent may submit per hour within a single platform
-  # experiment. Prevents queue flooding. Required and positive.
+  # Maximum number of submissions an agent may make per hour within a single platform
+  # experiment, each the jobs of one hypothesis on one commit: its seeds and sweeps count once.
+  # Prevents queue flooding. Required and positive.
   max_submissions_per_hour: 100
 
   # Accelerators-in-flight (SUBMITTED+RUNNING) a platform experiment may hold at once when it

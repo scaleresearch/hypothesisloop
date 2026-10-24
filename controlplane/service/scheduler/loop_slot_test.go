@@ -79,10 +79,12 @@ func (c *slotFixture) offerless(node string) *slotFixture {
 }
 
 // network is what a runtime that rents private networks reports while a job that spans nodes waits
-// for one: on every free slot, how many nodes of its shape one network holds now, and why none.
+// for one: on every slot, that a network's nodes are within a placement group, and on every free
+// one, how many nodes of its shape one network holds now, and why none.
 func (c *slotFixture) network(count int, why string) *slotFixture {
 	c.multiNode = true
 	for node, labels := range c.labels {
+		labels[domain.NodeSlotNetworkWithinLabel] = string(domain.NodesWithinPlacementGroup)
 		if !placement.NodeHasRoom(c.free[node], c.sizes[node]) {
 			continue
 		}

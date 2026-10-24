@@ -29,7 +29,7 @@ func ValidateStages(stages []Stage) error { return experimentspec.ValidateStages
 
 const MinExecutorsForCut = experimentspec.MinExecutorsForCut
 
-// RunStages is the ladder a run of executors competitors is started with. A field no boundary
+// RunStages is the ladder a run of executors is started with. A field no boundary
 // can cut from has one stage, so each executor holds its whole share from the start: staged,
 // the ladder only withheld budget and selected nobody. The one stage keeps the job-length cap of
 // the ladder's last, the stage that follows every cut. The field only shrinks after the start,

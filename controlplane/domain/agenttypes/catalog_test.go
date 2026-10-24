@@ -19,7 +19,7 @@ func TestEveryRoleHasABuiltinDefault(t *testing.T) {
 		t.Fatalf("the default type %q is no built-in executor", domain.DefaultAgentType)
 	}
 	for _, role := range domain.AgentRoles {
-		if _, err := domain.LookupAgentType(agenttypestest.Catalog(), domain.AgentTypeOfRole(role), role); err != nil {
+		if _, err := domain.LookupAgentType(agenttypestest.Catalog(), role.Info().AgentType, role); err != nil {
 			t.Errorf("role %s has no built-in default: %v", role, err)
 		}
 	}

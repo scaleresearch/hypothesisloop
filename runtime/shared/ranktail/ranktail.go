@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -14,7 +15,8 @@ import (
 const SectionLines = 10
 
 // Section is one rank of a gang as its log tail shows it. Where names what ran it, such as
-// "pod P" or "instance I", and Read returns the last n lines it wrote.
+// "pod P" or "instance I", and Read returns the last n lines it wrote. Rank is negative for a node
+// whose rank cannot be read.
 type Section struct {
 	Rank     int
 	Group    string
@@ -29,14 +31,18 @@ func (s Section) Header() string {
 	if s.Group != "" {
 		where = "group " + s.Group + ", " + where
 	}
-	if s.Exit > 0 {
-		return fmt.Sprintf("--- rank %d failed, exit %d (%s) ---", s.Rank, s.Exit, where)
+	rank := "rank " + strconv.Itoa(s.Rank)
+	if s.Rank < 0 {
+		rank = "rank unknown"
 	}
-	return fmt.Sprintf("--- rank %d (%s) ---", s.Rank, where)
+	if s.Exit > 0 {
+		return fmt.Sprintf("--- %s failed, exit %d (%s) ---", rank, s.Exit, where)
+	}
+	return fmt.Sprintf("--- %s (%s) ---", rank, where)
 }
 
 // Tail is a gang's tail: the sections Pick keeps of maxLines, read in its order.
-func Tail(sections []Section, maxLines int) ([]string, error) {
+func Tail(sections []Section, maxLines int) []string {
 	shown, omitted := Pick(sections, max(1, maxLines/SectionLines))
 	return assemble(shown, omitted, maxLines)
 }
@@ -61,7 +67,12 @@ func Pick(sections []Section, shown int) ([]Section, int) {
 		}
 		return failed[i].Rank < failed[j].Rank
 	})
-	sort.Slice(rest, func(i, j int) bool { return rest[i].Rank < rest[j].Rank })
+	sort.Slice(rest, func(i, j int) bool {
+		if (rest[i].Rank == 0) != (rest[j].Rank == 0) {
+			return rest[i].Rank == 0
+		}
+		return rest[i].Rank < rest[j].Rank
+	})
 
 	omitted := max(0, len(failed)+len(rest)-shown)
 	failed = failed[:min(len(failed), shown)]
@@ -74,8 +85,9 @@ func Pick(sections []Section, shown int) ([]Section, int) {
 }
 
 // assemble reads each section's tail in order, each given an equal share of what is left of
-// maxLines, so a short section leaves its unused lines to the ones after it.
-func assemble(sections []Section, omitted, maxLines int) ([]string, error) {
+// maxLines, so a short section leaves its unused lines to the ones after it. A section that cannot
+// be read shows why in place of its lines.
+func assemble(sections []Section, omitted, maxLines int) []string {
 	var lines []string
 	if omitted > 0 {
 		lines = append(lines, fmt.Sprintf("--- %d more ranks not shown ---", omitted))
@@ -84,7 +96,7 @@ func assemble(sections []Section, omitted, maxLines int) ([]string, error) {
 		share := (maxLines - len(lines)) / (len(sections) - i)
 		body, err := s.Read(max(1, share-1))
 		if err != nil {
-			return nil, err
+			body = []string{"its log cannot be read: " + err.Error()}
 		}
 		if len(body) == 0 {
 			continue
@@ -95,5 +107,5 @@ func assemble(sections []Section, omitted, maxLines int) ([]string, error) {
 	if len(lines) > maxLines {
 		lines = lines[len(lines)-maxLines:]
 	}
-	return lines, nil
+	return lines
 }

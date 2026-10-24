@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
@@ -13,7 +14,25 @@ type (
 	JobSpec      = clusterapi.JobSpec
 	JobGroup     = clusterapi.JobGroup
 	TopologySpec = clusterapi.TopologySpec
+	NodesLevel   = clusterapi.NodesLevel
 )
+
+const (
+	NodesWithinRegion          = clusterapi.NodesWithinRegion
+	NodesWithinZone            = clusterapi.NodesWithinZone
+	NodesWithinPlacementGroup  = clusterapi.NodesWithinPlacementGroup
+	NodeRegionLabel            = clusterapi.NodeRegionLabel
+	NodeZoneLabel              = clusterapi.NodeZoneLabel
+	NodePlacementGroupKeyLabel = clusterapi.NodePlacementGroupKeyLabel
+)
+
+// ValidateTopology refuses a nearness level that is none of clusterapi.NodesLevels.
+func ValidateTopology(j JobSpec) error {
+	if j.Topology == nil || j.Topology.NodesWithin == "" || slices.Contains(clusterapi.NodesLevels, j.Topology.NodesWithin) {
+		return nil
+	}
+	return fmt.Errorf("job.topology.nodes_within must be %q, %q or %q, got %q", NodesWithinRegion, NodesWithinZone, NodesWithinPlacementGroup, j.Topology.NodesWithin)
+}
 
 // GroupAcceleratorType is the one accelerator type a grouped job runs on, or "" if no group
 // names one. ValidateGroups has already established that at most one distinct type is named.

@@ -50,7 +50,7 @@ func (s *Service) WriteRefusal(err error) error {
 	case errors.Is(err, ErrVerdictNeedsOwnJob):
 		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonVerdictNeedsOwnJob, err.Error())
 	case errors.Is(err, ErrChecksOutNothing):
-		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonResearcherSubmitsNoJob, err.Error())
+		return refusal.Refuse(http.StatusForbidden, platformapi.ReasonResearcherChecksOutNothing, err.Error())
 	case errors.Is(err, ErrHypothesisInFlight):
 		return refusal.Refuse(http.StatusConflict, platformapi.ReasonHypothesisInFlight, err.Error())
 	case errors.Is(err, graphdb.ErrNotOpen):

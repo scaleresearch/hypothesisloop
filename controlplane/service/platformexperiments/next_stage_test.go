@@ -58,7 +58,7 @@ func (f *stagedStore) GetPlatformExperiment(context.Context, string) (*domain.Pl
 }
 
 func (*stagedStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
-	if role == domain.SignupRoleCompetitor {
+	if role == domain.SignupRoleExecutor {
 		return []string{"a", "b", "cut"}, nil
 	}
 	return nil, nil

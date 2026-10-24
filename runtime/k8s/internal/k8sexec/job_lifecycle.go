@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -697,6 +698,10 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 	// resolveDevicePluginPlacement refuses to place a job there for the same reason.
 	for _, node := range nodes {
 		nodeLabels[node.Name] = node.Labels
+		if c.placementGroupLabel != "" && node.Labels[c.placementGroupLabel] != "" {
+			nodeLabels[node.Name] = maps.Clone(node.Labels)
+			nodeLabels[node.Name][clusterapi.NodePlacementGroupKeyLabel] = c.placementGroupLabel
+		}
 		byDomain := map[string][]corev1.ResourceName{}
 		for resourceName := range node.Status.Allocatable {
 			name := string(resourceName)
@@ -957,7 +962,7 @@ func jobPhase(job *batchv1.Job) clusterapi.JobPhase {
 // to observe which of the acceptable_accelerator_types the k8s scheduler actually chose.
 //
 // node is rank 0's k8s node name, rank 0 of the job's first group for a grouped job (or the
-// first scheduled pod's, if rank 0 isn't up yet) —
+// first scheduled pod's, if rank 0 isn't up yet),
 // piggybacked on this lookup since the only consumer (cluster-agent's status report loop)
 // always wants both together. This is the sole source of job->physical-node attribution in the
 // system; PushStatus forwards it straight into the metrics store (metricsdb.RecordJobStatuses),

@@ -30,7 +30,7 @@ ROLE_PLANNER = "planner"
 ROLE_RESEARCHER = "researcher"
 
 # The kinds of change GET /watch carries (domain.EventKinds), and the line hl watch prints in place of changes no longer held.
-EVENT_KINDS = frozenset({"agent.activity", "agent.cut", "agent.finished", "agent.idle", "agent.instructions", "agent.message", "agent.replaced", "capacity.idle", "comment.new", "experiment.blocked", "experiment.status", "finding.new", "hypothesis.link", "hypothesis.new", "hypothesis.status", "hypothesis.unlink", "job.duplicate", "job.held", "job.underperforming", "platform_experiment.baseline", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.plan", "platform_experiment.proposal", "platform_experiment.removed", "platform_experiment.status", "quota.changed", "stage.boundary"})
+EVENT_KINDS = frozenset({"agent.activity", "agent.cut", "agent.finished", "agent.idle", "agent.instructions", "agent.message", "agent.replaced", "agent.stopped", "capacity.idle", "comment.new", "experiment.blocked", "experiment.status", "finding.new", "hypothesis.link", "hypothesis.new", "hypothesis.status", "hypothesis.unlink", "job.duplicate", "job.held", "job.underperforming", "platform_experiment.baseline", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.plan", "platform_experiment.proposal", "platform_experiment.removed", "platform_experiment.status", "quota.changed", "stage.boundary"})
 EVENT_AGENT_ACTIVITY = "agent.activity"
 EVENT_AGENT_CUT = "agent.cut"
 EVENT_AGENT_FINISHED = "agent.finished"
@@ -38,6 +38,7 @@ EVENT_AGENT_IDLE = "agent.idle"
 EVENT_AGENT_INSTRUCTIONS = "agent.instructions"
 EVENT_AGENT_MESSAGE = "agent.message"
 EVENT_AGENT_REPLACED = "agent.replaced"
+EVENT_AGENT_STOPPED = "agent.stopped"
 EVENT_CAPACITY_IDLE = "capacity.idle"
 EVENT_COMMENT_NEW = "comment.new"
 EVENT_EXPERIMENT_BLOCKED = "experiment.blocked"

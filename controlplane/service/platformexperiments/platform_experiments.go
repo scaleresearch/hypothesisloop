@@ -11,7 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
@@ -55,8 +54,8 @@ type Store interface {
 	// sandboxed coordinator on coordinatorModel unless it is empty, and takes back what the close
 	// wrote: db.ErrNotReopenable, db.ErrPlatformExperimentNotFound.
 	ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error
-	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
-	// implementation's comment for why the compare-and-swap matters here — and agents when
+	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus (the db
+	// implementation's comment says why the compare-and-swap matters here), and agents when
 	// not nil, with max_agents and them held to the agents at work (db.PoolBelowAtWorkError).
 	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, agents domain.AgentPool) error
 	// AgentsAtWork counts the agents at work of a platform experiment by agent type and model.
@@ -156,7 +155,7 @@ type Store interface {
 	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
 	StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
-	// ListSignupsByRole is the ranking-side read: standings are about competitors, never about
+	// ListSignupsByRole is the ranking-side read: standings are about executors, never about
 	// the whole roster.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
@@ -184,7 +183,8 @@ type Store interface {
 	// merges it in from the metrics DB on every read via metricsdb.PopulateUsage(One).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
-	// RecentSubmissions is how many jobs an agent submitted to a platform experiment within window.
+	// RecentSubmissions is how many submissions an agent made to a platform experiment within window,
+	// each the jobs of one hypothesis on one commit.
 	RecentSubmissions(ctx context.Context, agentID, platformExpID string, window time.Duration) (int, error)
 	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
 	AddDesiredQuotaUsageOne(ctx context.Context, quota *domain.AgentQuota) error
@@ -290,29 +290,16 @@ func (s *Service) WithModelDefaults(models domain.ModelDefaults) *Service {
 	return s
 }
 
-// ServedModels refuses a model the platform does not serve. *models.Service satisfies it.
+// ServedModels refuses on its field a model a choice names that the platform does not serve.
+// *models.Service satisfies it.
 type ServedModels interface {
-	Check(ctx context.Context, model string) error
+	CheckChoice(ctx context.Context, field, model string) error
 }
 
 // WithServedModels wires what refuses a model an agent, a pool or a coordinator names.
 func (s *Service) WithServedModels(served ServedModels) *Service {
 	s.served = served
 	return s
-}
-
-// checkModel refuses on field a model a choice names that the platform does not serve. An empty
-// one names none: the agent type's or the platform's default.
-func (s *Service) checkModel(ctx context.Context, field, model string) error {
-	if model == "" {
-		return nil
-	}
-	err := s.served.Check(ctx, model)
-	var refused *refusal.Refusal
-	if errors.As(err, &refused) {
-		return refused.On(field)
-	}
-	return err
 }
 
 // WithRepositories wires the git host the repository pass creates drafts' repositories on.
@@ -404,7 +391,7 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The text every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many executors may be at work at once, counted as a join counts them: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, researchers, agents of role baseline and reviewers never count. Lowered below the executors at work of a running one, it cuts the newest of them: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_executors says how many are signed up. Executors of agents the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its executors left unspent: one trial of the baseline for each."`
+	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many executors may be at work at once, counted as a join counts them: the agents of role executor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, researchers, agents of role baseline and reviewers never count. Lowered below the executors at work of a running one, it cuts the newest of them: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_executors says how many are signed up. Executors of agents the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its executors left unspent: one trial of the baseline for each."`
 	Agents                    *domain.AgentPool          `json:"agents,omitempty" doc:"The team it is to have at work, the whole list as on create: researchers in entries of agent_type researcher, executors in the others, at most max_agents in all. Each entry at least the agents of its agent type and model at work: 409 agents_below_at_work otherwise. Where the platform runs the agents it adds the ones a raised count wants."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`

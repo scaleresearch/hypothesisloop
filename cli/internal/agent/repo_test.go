@@ -68,7 +68,7 @@ const proposed = `{"id":"pe-1","budget_accelerator_hours":2,"max_agents":3,"dura
 // hl repo check sent executors to copy a missing file the baseline writes. It says how the
 // caller's role gets the file.
 func TestRepoCheckSaysHowTheCallersRoleGetsAMissingFile(t *testing.T) {
-	cloneAs(t, emptyExperiment, "competitor")
+	cloneAs(t, emptyExperiment, "executor")
 	if code, out := repo(t, RepoCheck); code != 1 || strings.Contains(out, "experiment template") ||
 		!strings.Contains(out, "job-spec: .hypothesisloop/job.yaml is missing: it comes with the baseline's commit: hl hypothesis checkout ID") {
 		t.Errorf("hl repo check by an executor = %d, want the missing file sent to checkout:\n%s", code, out)

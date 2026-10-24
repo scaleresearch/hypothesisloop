@@ -189,9 +189,6 @@ func TestRetireTakesAnOpenIdeaWithAReason(t *testing.T) {
 		t.Fatalf("UpdateStatus: got = %v, want nil", err)
 	}
 
-	if _, _, err := s.Retire(ctx, idea.ID, researcher, " "); err == nil {
-		t.Errorf("Retire with no reason: got = nil, want an error")
-	}
 	if _, _, err := s.Retire(ctx, settled.ID, researcher, "stale"); !errors.Is(err, ErrNotOpen) {
 		t.Errorf("Retire a settled one: got = %v, want %v", err, ErrNotOpen)
 	}

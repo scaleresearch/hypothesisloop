@@ -94,15 +94,13 @@ func CheckCreate(req CreatePlatformExperimentRequest) error {
 
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. The spec's own rules
-// come first (experimentspec.Spec.Validate), then those of the platform's settings and catalog. It
+// come first (experimentspec.Spec.Validate), then those of the platform's settings. Its agents are
+// checked against the catalog where they are resolved (resolvedPool, proposedPool). It
 // returns req as it is stored, trimmed and with the platform's settings where it leaves a field to
 // them, and refuses with every problem it finds.
-func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
+func (s *Service) validate(req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	problems := specProblems(req.Spec)
 	req.Spec = s.withSettings(req.Spec.Trimmed())
-	if err := domain.AgentPool(req.Agents).Check(catalog); err != nil {
-		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": agents is the team it is to have at work, [{agent_type, model, hyperparameters, count}]").On("agents"))
-	}
 	if err := problems.Add(s.checkLength(req.DurationHours)); err != nil {
 		return req, err
 	}
@@ -161,11 +159,8 @@ func unreachableType(sizedFor domain.AcceleratorType, reachable map[string][]dom
 // the agents req carries signed up in the same write.
 func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	req, err := s.validate(req)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
-	}
-	if req, err = s.validate(req, catalog); err != nil {
 		return nil, err
 	}
 	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
@@ -319,7 +314,7 @@ func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperi
 	if err != nil {
 		return nil, s.refusal("create platform experiment", err)
 	}
-	if err := s.checkModel(ctx, "coordinator_model", create.CoordinatorModel); err != nil {
+	if err := s.served.CheckChoice(ctx, "coordinator_model", create.CoordinatorModel); err != nil {
 		return nil, s.refusal("create platform experiment", err)
 	}
 	create.createdBy = &by

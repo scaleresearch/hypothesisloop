@@ -31,7 +31,7 @@ func TestAgentsAtWorkAreCountedByTheOneRuleForEachAgentAndTheWholePool(t *testin
 	exec(t, pool, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, replaced)
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestAgentsAtWorkAreCountedByTheOneRuleForEachAgentAndTheWholePool(t *testin
 		t.Fatal(err)
 	}
 	counts := domain.AgentPool{{AgentType: "generalist", Model: "model-1", Count: 4}, {AgentType: "data-search", Model: "model-1", Count: 2}}.AtWorkOf(atWork)
-	if counts.Total != 4 || counts.OutsidePool != 1 || counts.Pool[0].AtWork != 2 || counts.Pool[1].AtWork != 1 {
+	if counts.Total != 4 || counts.OutsideTeam != 1 || counts.Pool[0].AtWork != 2 || counts.Pool[1].AtWork != 1 {
 		t.Errorf("counts: got = %+v, want 4 at work, generalist 2, data-search 1, 1 outside the pool", counts)
 	}
 	state2, err := pes.AgentPoolState(ctx, pe)

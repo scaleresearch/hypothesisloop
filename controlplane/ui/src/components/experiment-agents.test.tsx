@@ -35,7 +35,7 @@ const me: Me = {
 }
 
 function signup(id: string, sandboxed: boolean, agentType = ''): JoinedAgent {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: sandboxed, agent_type: agentType, model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'executor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: sandboxed, agent_type: agentType, model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
 }
 
 // As the API answers an agent to the experiment's owner.
@@ -119,7 +119,7 @@ describe('adding agents', () => {
     show()
     await screen.findByRole('button', { name: 'Executor' })
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'generalist', role: 'competitor', model: undefined })
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'generalist', role: 'executor', model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
   })
@@ -131,7 +131,7 @@ describe('adding agents', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      in_agentsandbox: false, agent_type: 'data-search', role: 'competitor', model: 'openrouter/moonshotai/kimi-k2',
+      in_agentsandbox: false, agent_type: 'data-search', role: 'executor', model: 'openrouter/moonshotai/kimi-k2',
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([

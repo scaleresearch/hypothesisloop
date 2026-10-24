@@ -75,7 +75,7 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesi
     figures.push({
       label: 'Executors',
       value: `${executors} of ${pe.max_agents}`,
-      title: 'Executors who joined, of the most that may be at work at once. Researchers, baseline agents and the coordinator are not counted.',
+      title: 'Executors at work, of the most that may be at work at once. Researchers, baseline agents and the coordinator are not counted.',
     })
   }
   return figures

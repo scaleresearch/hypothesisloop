@@ -235,20 +235,23 @@ func (c *Settings) build() error {
 	if c.Agents.IdleNoticeMinutes <= 0 {
 		return fmt.Errorf("agents idle_notice_minutes is required and positive: how long an executor may go with no job in flight before it and the coordinator are told")
 	}
-	if err := c.Models.Anthropic.Catalog.Validate(domain.ModelProviderAnthropic); err != nil {
-		return fmt.Errorf("models anthropic catalog: %w", err)
+	// A provider's catalog is required while the provider is served (LoadControlService).
+	if c.Models.Anthropic.Catalog != nil {
+		if err := c.Models.Anthropic.Catalog.Validate(domain.ModelProviderAnthropic, true); err != nil {
+			return fmt.Errorf("models anthropic catalog: %w", err)
+		}
 	}
 	if c.Models.OpenAI.Catalog != nil {
-		if err := c.Models.OpenAI.Catalog.Validate(domain.ModelProviderOpenAI); err != nil {
+		if err := c.Models.OpenAI.Catalog.Validate(domain.ModelProviderOpenAI, false); err != nil {
 			return fmt.Errorf("models openai catalog: %w", err)
 		}
 	}
+	catalogs := c.Models.Catalogs()
 	for _, d := range []struct{ key, model string }{{"default_model", c.Agents.DefaultModel}, {"coordinator_model", c.Agents.CoordinatorModel}} {
 		ref, err := domain.ParseModelRef(d.model)
 		if err != nil {
 			return fmt.Errorf("agents %s is required, the model an agent or a coordinator runs on when it names none: %w", d.key, err)
 		}
-		catalogs := map[string]domain.ModelCatalog{domain.ModelProviderAnthropic: c.Models.Anthropic.Catalog, domain.ModelProviderOpenAI: c.Models.OpenAI.Catalog}
 		if catalog, priced := catalogs[ref.Provider()]; priced {
 			if _, ok := catalog[ref.ID()]; !ok {
 				return fmt.Errorf("models %s catalog does not name %s, agents %s: an agent on it would be refused every model call", ref.Provider(), ref.ID(), d.key)

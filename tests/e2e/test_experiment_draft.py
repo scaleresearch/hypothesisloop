@@ -165,7 +165,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         # the baseline.
         joined = [a for a in api.agents(pe_id) if a["agent_type"] != "planner"]
         assert all(a["in_agentsandbox"] for a in joined), joined
-        executors = [a for a in joined if a["role"] == "competitor"]
+        executors = [a for a in joined if a["role"] == "executor"]
         assert sorted(a["agent_type"] for a in executors) == ["data-search", "generalist"], executors
         measurers = [a for a in joined if a["role"] == "baseline"]
         assert [a["name"] for a in measurers] == ["Baseline 1"] and len(joined) == 3, joined

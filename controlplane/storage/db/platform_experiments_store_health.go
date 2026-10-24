@@ -24,7 +24,7 @@ SELECT s.platform_experiment_id, s.agent_id, s.role,
          WHERE m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id AND m.sender = 'coordinator')
 FROM experiment_signups s`+signupInstanceJoin+`
 JOIN platform_experiments p ON p.id = s.platform_experiment_id
-CROSS JOIN LATERAL (SELECT CASE WHEN s.role = 'competitor' THEN GREATEST(p.started_at, s.signed_up_at) ELSE s.signed_up_at END AS start) st
+CROSS JOIN LATERAL (SELECT CASE WHEN s.role = 'executor' THEN GREATEST(p.started_at, s.signed_up_at) ELSE s.signed_up_at END AS start) st
 LEFT JOIN experiments e ON e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
 WHERE p.status IN ('open', 'running')
 GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, i.restarts

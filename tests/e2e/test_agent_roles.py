@@ -1,6 +1,6 @@
-"""Signup roles, end to end. A signup is competitor (an executor: runs jobs, ranked,
+"""Signup roles, end to end. A signup is executor (runs jobs, ranked,
 cut-eligible), researcher (steers the work through the hypothesis graph and runs no job), baseline
-(the declared control) or reviewer (re-checks other agents' claims); only competitor is ranked or
+(the declared control) or reviewer (re-checks other agents' claims); only executor is ranked or
 cut. The team of a platform experiment is its agents list, whose entries' agent types give their
 roles. Covers the paths that differ from the default flow:
   - GET /agent-roles lists every role with what its agents do.
@@ -10,12 +10,12 @@ roles. Covers the paths that differ from the default flow:
   - an unrecognized role is refused at signup with reason=unknown_role, never defaulted.
   - baseline/reviewer signups do not consume max_agents, the field being measured.
   - the baseline posts the best ranking-metric value and is still absent from standings; rank 1
-    is the best *competitor*, and the baseline's own metrics stay readable.
-  - the baseline's job is billed exactly like a competitor's -- role changes ranking, never
+    is the best *executor*, and the baseline's own metrics stay readable.
+  - the baseline's job is billed exactly like an executor's; role changes ranking, never
     accounting.
   - a reviewer comments on another agent's hypothesis without ever entering standings.
   - at a real stage boundary, a baseline deliberately holding the worst value in the run is
-    never cut, and every cut agent comes from the competitor field.
+    never cut, and every cut agent comes from the executor field.
 
 The ranking arithmetic itself is pinned by controller/stages_rank_test.go and
 service/platformexperiments/roles_test.go; what only a live run can show is that the role recorded
@@ -73,7 +73,7 @@ def test_unknown_role_refused_and_writes_no_signup(api, pe, run_id):
     stranger = make_agent(api, run_id, "roles-stranger")
 
     r = api.signup(pe_id, stranger, "referee")
-    assert r.status_code == 422, "a typo'd role must be refused, not defaulted to competitor"
+    assert r.status_code == 422, "a typo'd role must be refused, not defaulted to executor"
     assert r.json().get("reason") == "unknown_role"
 
     code, _ = api.signup_role(pe_id, stranger)
@@ -81,16 +81,16 @@ def test_unknown_role_refused_and_writes_no_signup(api, pe, run_id):
 
 
 def test_baseline_and_reviewer_do_not_count_against_max_agents(api, run_id, experiment):
-    competitors = [make_agent(api, run_id, f"roles-cap-comp-{i}") for i in range(5)]
+    executors = [make_agent(api, run_id, f"roles-cap-comp-{i}") for i in range(5)]
     baseline = make_agent(api, run_id, "roles-cap-baseline")
     reviewer = make_agent(api, run_id, "roles-cap-reviewer")
 
-    roster = [(a, "competitor") for a in competitors] + [(baseline, "baseline"), (reviewer, "reviewer")]
-    # max_agents=5 sizes the field being ranked, so it counts competitors only: if baseline or
+    roster = [(a, "executor") for a in executors] + [(baseline, "baseline"), (reviewer, "reviewer")]
+    # max_agents=5 sizes the field being ranked, so it counts executors only: if baseline or
     # reviewer counted against it, one of these two signups would be refused max_agents_reached.
     pe_id = experiment("agent-roles-cap", roster, budget=10.0, max_agents=5, report_interval_seconds=5)
 
-    for agent, want_role in [(baseline, "baseline"), (reviewer, "reviewer"), (competitors[0], "competitor")]:
+    for agent, want_role in [(baseline, "baseline"), (reviewer, "reviewer"), (executors[0], "executor")]:
         code, got_role = api.signup_role(pe_id, agent)
         assert code == 200 and got_role == want_role, (
             f"{agent} reads back as {code}/{got_role}, want 200/{want_role}"
@@ -98,20 +98,20 @@ def test_baseline_and_reviewer_do_not_count_against_max_agents(api, run_id, expe
 
 
 def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run_id, experiment, deadline):
-    competitors = [make_agent(api, run_id, f"roles-rank-comp-{i}") for i in range(5)]
+    executors = [make_agent(api, run_id, f"roles-rank-comp-{i}") for i in range(5)]
     baseline = make_agent(api, run_id, "roles-rank-baseline")
     reviewer = make_agent(api, run_id, "roles-rank-reviewer")
     # quota_tier="guaranteed" explicit: an agent-kind participant's default tier is burst_only
     # (see conftest.py/other exclusive-marker ports for this convention), and every job below
     # submits at the guaranteed tier.
-    roster = [(a, "competitor", "guaranteed") for a in competitors] + [
+    roster = [(a, "executor", "guaranteed") for a in executors] + [
         (baseline, "baseline", "guaranteed"), (reviewer, "reviewer", "guaranteed"),
     ]
     pe_id = experiment("agent-roles-rank", roster, budget=10.0, max_agents=5, report_interval_seconds=5)
 
     # A reviewer comments on another agent's hypothesis -- its own job is not required to exist
     # yet for this to be exercised.
-    reviewed_hyp = api.register_hypothesis(pe_id, competitors[0], f"reviewed claim from {competitors[0]}")
+    reviewed_hyp = api.register_hypothesis(pe_id, executors[0], f"reviewed claim from {executors[0]}")
     r = api.post_hypothesis_comment(
         reviewed_hyp["id"], "reviewer re-checked the reported metric against the job's code_ref", agent_id=reviewer
     )
@@ -124,20 +124,20 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     # job of it that names one is refused.
     r = api.post_hypothesis(pe_id, "a claim of the baseline agent's", agent_id=baseline)
     assert (r.status_code, r.json()["reason"]) == (403, "baseline_registers_no_hypothesis"), f"{r.status_code} {r.text}"
-    naming_one = api.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, competitors[0])
+    naming_one = api.submission_body_for_id(f"job-{uuid.uuid4().hex[:8]}", pe_id, executors[0])
     naming_one["metadata"] |= {"agent_id": baseline, "branch": branch(pe_id, baseline, "")}
     r = api.post_experiment_body(naming_one)
     assert (r.status_code, r.json()["reason"]) == (422, "baseline_tests_no_hypothesis"), f"{r.status_code} {r.text}"
 
-    # The baseline and reviewer run HIGH, every competitor runs LOW: rank 1 can then only be a
-    # competitor if role genuinely filters the standings.
+    # The baseline and reviewer run HIGH, every executor runs LOW: rank 1 can then only be a
+    # executor if role genuinely filters the standings.
     baseline_job = api.submit_job(pe_id, baseline, hours=JOB_HOURS, hyp_id="", job_overrides={"env": _env(RUN_SECONDS, HIGH_ANCHOR)})
     on_objective = api.experiment(baseline_job)
     assert on_objective["objective"] is True and "hypothesis_id" not in on_objective, on_objective
     reviewer_job = api.submit_job(pe_id, reviewer, hours=JOB_HOURS, job_overrides={"env": _env(RUN_SECONDS, HIGH_ANCHOR)})
     comp_jobs = [
         api.submit_job(pe_id, a, hours=JOB_HOURS, job_overrides={"env": _env(RUN_SECONDS, LOW_ANCHOR)})
-        for a in competitors
+        for a in executors
     ]
 
     for job in [baseline_job, reviewer_job, *comp_jobs]:
@@ -152,15 +152,15 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     assert baseline_best is not None, "the baseline's val_accuracy must be recorded and readable"
 
     best_comp, best_comp_value = None, None
-    for a, job in zip(competitors, comp_jobs):
+    for a, job in zip(executors, comp_jobs):
         v = api.metric_last(job, "val_accuracy")
         if v is None:
             continue
         if best_comp_value is None or v > best_comp_value:
             best_comp, best_comp_value = a, v
-    assert best_comp is not None, "no competitor reported val_accuracy"
+    assert best_comp is not None, "no executor reported val_accuracy"
     assert baseline_best > best_comp_value, (
-        f"the baseline ({baseline_best}) did not outscore the best competitor ({best_comp_value}) -- "
+        f"the baseline ({baseline_best}) did not outscore the best executor ({best_comp_value}): "
         "the standings assertions below would pass for the wrong reason"
     )
 
@@ -170,16 +170,16 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
 
     assert baseline not in ranked_agents, "the baseline is ranked despite holding the best value in the run"
     assert reviewer not in ranked_agents, "the reviewer is ranked despite reporting a top-of-field value"
-    assert sorted(ranked_agents) == sorted(competitors), (
-        f"standings are {sorted(ranked_agents)}, want exactly the {len(competitors)} competitors"
+    assert sorted(ranked_agents) == sorted(executors), (
+        f"standings are {sorted(ranked_agents)}, want exactly the {len(executors)} executors"
     )
     assert ranked_agents[0] == best_comp, (
-        f"rank 1 is {ranked_agents[0]!r}, want the best competitor {best_comp!r} -- not the higher-scoring baseline"
+        f"rank 1 is {ranked_agents[0]!r}, want the best executor {best_comp!r}, and the higher-scoring baseline is not ranked"
     )
 
     # Billing: identical jobs, so if role touched accounting anywhere these numbers would differ.
     eventually(
-        "the baseline's and a competitor's quota to settle",
+        "the baseline's and an executor's quota to settle",
         lambda: (api.experiment(baseline_job).get("quota_settled_at"), api.experiment(comp_jobs[0]).get("quota_settled_at")),
         accept=lambda v: bool(v[0]) and bool(v[1]),
         deadline=deadline,
@@ -188,27 +188,27 @@ def test_baseline_and_reviewer_excluded_from_standings_billing_and_gate(api, run
     # used_guaranteed_acch is served from that same eventually-consistent store, so it can still
     # lag a beat behind the flag under load -- wait on the actual fields being asserted on.
     baseline_used, comp_used = eventually(
-        "the baseline's and a competitor's used_guaranteed_acch to reflect settlement",
+        "the baseline's and an executor's used_guaranteed_acch to reflect settlement",
         lambda: (
             api.quota_field(pe_id, baseline, "used_guaranteed_acch"),
-            api.quota_field(pe_id, competitors[0], "used_guaranteed_acch"),
+            api.quota_field(pe_id, executors[0], "used_guaranteed_acch"),
         ),
         accept=lambda v: v[0] > 0 and v[1] > 0,
         deadline=deadline,
     )
     assert baseline_used > 0, "the baseline's job was not billed against its guaranteed quota -- a role that runs for free is a hole in the budget"
     assert abs(baseline_used - comp_used) <= 0.01, (
-        f"baseline billed {baseline_used} AccH vs competitor {comp_used} for identical jobs -- "
+        f"baseline billed {baseline_used} AccH vs executor {comp_used} for identical jobs: "
         "role changed accounting, which it must never do"
     )
 
 
 @pytest.mark.timeout(400)
-def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, experiment, deadline):
-    competitors = [make_agent(api, run_id, f"roles-cut-comp-{i}") for i in range(5)]
+def test_baseline_survives_stage_cut_drawn_only_from_executors(api, run_id, experiment, deadline):
+    executors = [make_agent(api, run_id, f"roles-cut-comp-{i}") for i in range(5)]
     baseline = make_agent(api, run_id, "roles-cut-baseline")
-    roster = [(a, "competitor", "guaranteed") for a in competitors] + [(baseline, "baseline", "guaranteed")]
-    # Five competitors is exactly minSurvivorsForCut: the boundary cuts floor(50% x 5) = 2 and
+    roster = [(a, "executor", "guaranteed") for a in executors] + [(baseline, "baseline", "guaranteed")]
+    # Five executors is exactly minSurvivorsForCut: the boundary cuts floor(50% x 5) = 2 and
     # leaves 3, clearing minSurvivorsAfterCut (2). If the baseline counted as a survivor the field
     # would be 6 and the cut 3 -- and the baseline, holding the worst value in the run, would
     # certainly be one of them.
@@ -217,11 +217,11 @@ def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, ex
         report_interval_seconds=REPORT_INTERVAL_SECONDS, stages=STAGES,
     )
 
-    # The baseline's completed job runs on the LOW anchor and every competitor's on a distinct
+    # The baseline's completed job runs on the LOW anchor and every executor's on a distinct
     # HIGH-ish anchor, so the baseline holds the single worst value in the run -- the agent a cut
     # would take first if role were ignored.
-    anchors = {baseline: LOW_ANCHOR, **{a: str(anchor) for a, anchor in zip(competitors, CUT_ANCHORS)}}
-    stages, _ = cross_first_boundary_ranked(api, pe_id, [baseline, *competitors], deadline, baselines=anchors)
+    anchors = {baseline: LOW_ANCHOR, **{a: str(anchor) for a, anchor in zip(executors, CUT_ANCHORS)}}
+    stages, _ = cross_first_boundary_ranked(api, pe_id, [baseline, *executors], deadline, baselines=anchors)
 
     cut_agents = {c["agent_id"] for c in stages["cut_agents"]}
     active_agents = set(stages["active_agents"])
@@ -233,10 +233,10 @@ def test_baseline_survives_stage_cut_drawn_only_from_competitors(api, run_id, ex
     if cut_n == 0:
         # Legitimate only if a tie group straddled the line -- but this scenario's anchors are
         # spaced to avoid ties, so no cut at all means the assertions above proved nothing.
-        pytest.fail("the boundary cut nobody -- the 5-competitor field should have cut floor(50%*5)=2")
+        pytest.fail("the boundary cut nobody, and the 5-executor field should have cut floor(50%*5)=2")
 
-    strays = cut_agents - set(competitors)
-    assert not strays, f"cut agent(s) {strays} are not competitors -- the cut was drawn from the wrong field"
+    strays = cut_agents - set(executors)
+    assert not strays, f"cut agent(s) {strays} are not executors: the cut was drawn from the wrong field"
     assert cut_n == 2, (
         f"cut {cut_n} agents, want exactly floor(50% x 5)=2 -- a larger cut means the baseline was "
         "counted into the field"
@@ -269,7 +269,7 @@ def test_the_roles_are_listed_with_what_their_agents_do(api):
     assert [r["role"] for r in roles] == ["executor", "researcher", "baseline", "coordinator", "planner"], roles
     by_role = {r["role"]: r for r in roles}
     assert all(r["name"] and r["description"] for r in roles), roles
-    assert (by_role["executor"]["signup_role"], by_role["executor"]["in_team"], by_role["executor"]["org_types"]) == ("competitor", True, True)
+    assert (by_role["executor"]["signup_role"], by_role["executor"]["in_team"], by_role["executor"]["org_types"]) == ("executor", True, True)
     researcher = by_role["researcher"]
     assert (researcher["agent_type"], researcher["signup_role"], researcher["in_team"], researcher["org_types"]) == ("researcher", "researcher", True, False), researcher
     types = {t["id"]: t["role"] for t in api.get_json(f"/orgs/{api.org_id}/agent-types")}
@@ -294,7 +294,7 @@ def test_only_executors_count_toward_max_agents(api, run_id):
         assert all((a["role"], a["agent_type"]) == ("researcher", "researcher") for a in researchers), researchers
         r = api.post(f"/platform-experiments/{pe_id}/agents", {})
         assert (r.status_code, r.json().get("reason")) == (409, "max_agents_reached"), f"a second executor: {r.status_code} {r.text}"
-        assert api.signup_role(pe_id, executor["agent_id"]) == (200, "competitor")
+        assert api.signup_role(pe_id, executor["agent_id"]) == (200, "executor")
     finally:
         api.close_platform_experiment(pe_id)
 
@@ -363,7 +363,7 @@ def test_a_team_spec_starts_its_researcher_beside_its_executor_on_the_coordinato
     api.created_platform_experiments.append(pe_id)
     try:
         team = [a for a in api.agents(pe_id) if a["role"] != "baseline"]
-        assert sorted((a["role"], a["agent_type"]) for a in team) == [("competitor", "generalist"), ("researcher", "researcher")], team
+        assert sorted((a["role"], a["agent_type"]) for a in team) == [("executor", "generalist"), ("researcher", "researcher")], team
         assert all(a["in_agentsandbox"] for a in team), team
         researcher = next(a for a in team if a["role"] == "researcher")
         got = api.get_json(f"/platform-experiments/{pe_id}/agents/{researcher['agent_id']}/instructions")

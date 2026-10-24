@@ -42,17 +42,10 @@ export function toTeam(rows: TeamRow[]): { agents: AgentPoolEntry[] } | { proble
   return { agents }
 }
 
-/** How many agents the rows of each type ask for, by the type's id. */
-export function countsByType(rows: TeamRow[]): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const r of rows) out.set(r.agent_type, (out.get(r.agent_type) ?? 0) + (Number(r.count) || 0))
-  return out
-}
-
 /** The executors at work, oldest first: the agents max_agents holds to that the platform says are at work. */
 export function executorsAtWork(roster: JoinedAgent[]): JoinedAgent[] {
   return roster
-    .filter(a => a.at_work && a.role === 'competitor')
+    .filter(a => a.at_work && a.role === 'executor')
     .sort((a, b) => a.signed_up_at.localeCompare(b.signed_up_at) || a.agent_id.localeCompare(b.agent_id))
 }
 

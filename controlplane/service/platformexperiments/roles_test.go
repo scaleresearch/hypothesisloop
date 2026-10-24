@@ -48,7 +48,7 @@ func (f *signupStore) GetPlatformExperiment(ctx context.Context, id string) (*do
 func (f *signupStore) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
 	role := signup.Role
 	f.insertCalled = true
-	if role == domain.SignupRoleCompetitor && f.byRole[role] >= f.pe.MaxAgents {
+	if role == domain.SignupRoleExecutor && f.byRole[role] >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
 	}
 	f.insertedFor = role
@@ -66,34 +66,34 @@ func newSignupTestService(t *testing.T, store Store) *Service {
 
 // max_agents sizes the field being ranked. If a baseline or a reviewer counted against it, adding
 // the control an experiment measures against would silently shrink the competition it exists to
-// measure — one fewer competitor for every non-competitor the coordinator launches.
-func TestMaxAgentsCountsCompetitorsOnly(t *testing.T) {
+// measure: one fewer executor for every non-executor the coordinator launches.
+func TestMaxAgentsCountsExecutorsOnly(t *testing.T) {
 	store := &signupStore{
 		pe:     &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 2},
-		byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 2, domain.SignupRoleBaseline: 0},
+		byRole: map[domain.SignupRole]int{domain.SignupRoleExecutor: 2, domain.SignupRoleBaseline: 0},
 	}
 	svc := newSignupTestService(t, store)
 
 	if err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-baseline", Role: domain.SignupRoleBaseline}); err != nil {
-		t.Fatalf("baseline signup err = %v, want nil — max_agents is full of competitors, which must not block a baseline", err)
+		t.Fatalf("baseline signup err = %v, want nil: max_agents is full of executors, which must not block a baseline", err)
 	}
 	if got, want := store.insertedFor, domain.SignupRoleBaseline; got != want {
 		t.Errorf("inserted role = %v, want %v", got, want)
 	}
 }
 
-// The competitor limit still binds for competitors: roles widen who may join, never how many
+// The executor limit still binds for executors: roles widen who may join, never how many
 // agents are ranked against each other.
-func TestMaxAgentsStillRejectsACompetitorOnceTheFieldIsFull(t *testing.T) {
+func TestMaxAgentsStillRejectsAExecutorOnceTheFieldIsFull(t *testing.T) {
 	store := &signupStore{
 		pe:     &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 2},
-		byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 2},
+		byRole: map[domain.SignupRole]int{domain.SignupRoleExecutor: 2},
 	}
 	svc := newSignupTestService(t, store)
 
-	err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-3", Role: domain.SignupRoleCompetitor})
+	err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-3", Role: domain.SignupRoleExecutor})
 	var refused *refusal.Refusal
-	if !errors.As(err, &refused) || refused.Reason != "max_agents_reached" || !strings.Contains(refused.Message, "executors (agents of role competitor)") || !strings.Contains(refused.Message, "researchers, agents of role baseline") {
+	if !errors.As(err, &refused) || refused.Reason != "max_agents_reached" || !strings.Contains(refused.Message, "executors") || !strings.Contains(refused.Message, "researchers, agents of role baseline") {
 		t.Fatalf("err = %v, want max_agents_reached saying that executors count and researchers and a baseline agent do not", err)
 	}
 }
@@ -102,7 +102,7 @@ func TestMaxAgentsStillRejectsACompetitorOnceTheFieldIsFull(t *testing.T) {
 func TestAResearcherJoinsAFieldFullOfExecutors(t *testing.T) {
 	store := &signupStore{
 		pe:     &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 2},
-		byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 2},
+		byRole: map[domain.SignupRole]int{domain.SignupRoleExecutor: 2},
 	}
 	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-r", Role: domain.SignupRoleResearcher}); err != nil || store.insertedFor != domain.SignupRoleResearcher {
 		t.Fatalf("researcher signup: err = %v, inserted %s, want it signed up", err, store.insertedFor)
@@ -134,7 +134,7 @@ func TestAResearcherHasNoQuota(t *testing.T) {
 	}
 }
 
-// An unrecognized role is rejected rather than defaulted: silently reading a typo as "competitor"
+// An unrecognized role is rejected rather than defaulted: silently reading a typo as "executor"
 // would rank, cut and pay a top-3 bonus to an agent nobody meant to enter in the competition.
 func TestUnknownSignupRoleIsRejectedRatherThanDefaulted(t *testing.T) {
 	if _, err := domain.ParseSignupRole("baselineee"); err == nil {
@@ -145,7 +145,7 @@ func TestUnknownSignupRoleIsRejectedRatherThanDefaulted(t *testing.T) {
 // standingsStore adds the reads a ranking makes on top of signupStore's.
 type standingsStore struct {
 	signupStore
-	competitors []string
+	executors []string
 }
 
 // Every job these tests name completed.
@@ -154,7 +154,7 @@ func (f *standingsStore) CompletedJobIDs(context.Context, string) (map[string]bo
 }
 
 func (f *standingsStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
-	return f.competitors, nil
+	return f.executors, nil
 }
 
 // job-c2 is on the objective of pe-1, as a baseline agent's job is stored.
@@ -173,7 +173,7 @@ func (f *standingsStore) GetExperiment(ctx context.Context, id string) (*domain.
 func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 99, "c1": 50, "c2": 40})
 	defer srv.Close()
-	store := &standingsStore{competitors: []string{"c1", "c2"}}
+	store := &standingsStore{executors: []string{"c1", "c2"}}
 	svc := newSignupTestService(t, store)
 	svc.metrics = metricsdb.New(srv.URL)
 
@@ -188,7 +188,7 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 		t.Fatalf("rank err = %v, want nil", err)
 	}
 	if len(standings) != 2 {
-		t.Fatalf("standings = %v, want the 2 competitors only", standings)
+		t.Fatalf("standings = %v, want the 2 executors only", standings)
 	}
 	if got, want := standings[0].AgentID, "c1"; got != want {
 		t.Errorf("rank 1 = %v, want %v", got, want)
@@ -207,12 +207,12 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 	}
 }
 
-// The standings rank competitors on ranking metrics. A scoreboard also shows the attribute metrics
+// The standings rank executors on ranking metrics. A scoreboard also shows the attribute metrics
 // and the baseline's numbers, and reads them here exactly, not off a downsampled history.
 func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 99, "c1": 50, "c2": 40})
 	defer srv.Close()
-	store := &standingsStore{competitors: []string{"c1", "c2"}}
+	store := &standingsStore{executors: []string{"c1", "c2"}}
 	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
 		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
 		{Key: "loss", Direction: "minimize", Role: domain.MetricRoleAttribute},
@@ -225,7 +225,7 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 		t.Fatalf("Results err = %v, want nil", err)
 	}
 	if len(results.Metrics) != 1 || results.Metrics[0].Metric != "score" || len(results.Metrics[0].Standings) != 2 {
-		t.Errorf("metrics = %+v, want standings of the 2 competitors on score only", results.Metrics)
+		t.Errorf("metrics = %+v, want standings of the 2 executors on score only", results.Metrics)
 	}
 	if len(results.Bests) != 2 || results.Bests[0].Metric != "score" || results.Bests[1].Metric != "loss" {
 		t.Fatalf("bests = %+v, want score then loss", results.Bests)
@@ -243,7 +243,7 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 func TestResultsSetEachStandingAgainstTheDeclaredBaseline(t *testing.T) {
 	srv := bestPerAgentMetricServer(t, map[string]float64{"baseline": 45, "raised": 55, "c1": 50, "c2": 40})
 	defer srv.Close()
-	store := &standingsStore{competitors: []string{"c1", "c2"}}
+	store := &standingsStore{executors: []string{"c1", "c2"}}
 	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), BaselineJobID: "job-baseline", Metrics: []domain.MetricDefinition{
 		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
 	}}
@@ -298,7 +298,7 @@ func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
 	}))
 	defer srv.Close()
 	bound := 1.0
-	store := &standingsStore{competitors: []string{"c1", "c2", "c3"}}
+	store := &standingsStore{executors: []string{"c1", "c2", "c3"}}
 	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
 		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
 		{Key: "other_score", Direction: "maximize", Role: domain.MetricRoleReference},
@@ -315,7 +315,7 @@ func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
 		t.Fatalf("metrics = %+v, want standings on score alone", results.Metrics)
 	}
 	if st := results.Metrics[0].Standings; len(st) != 1 || st[0].AgentID != "c3" {
-		t.Errorf("standings = %+v, want c3 alone, the one competitor that held the gate", st)
+		t.Errorf("standings = %+v, want c3 alone, the one executor that held the gate", st)
 	}
 	want := []ReferenceValue{
 		{"baseline", 99, "job-baseline", nil, "true"},
@@ -390,7 +390,7 @@ func TestAReferenceIsBeatenOnlyByALeaderStrictlyBetterInItsDirection(t *testing.
 }
 
 func (f *standingsStore) ListSignups(ctx context.Context, platformExpID string) ([]string, error) {
-	return f.competitors, nil
+	return f.executors, nil
 }
 
 // An agent whose only job breaks a constraint is not in the standings Results serves, so it must
@@ -400,7 +400,7 @@ func TestCloseDerivesTheTopResultsFromConstraintEligibleAgentsOnly(t *testing.T)
 	// Every metric answers the same values, so c1 leads on score and breaks the bound on memory.
 	srv := bestPerAgentMetricServer(t, map[string]float64{"c1": 90, "c2": 50, "c3": 40})
 	defer srv.Close()
-	store := &standingsStore{competitors: []string{"c1", "c2", "c3"}}
+	store := &standingsStore{executors: []string{"c1", "c2", "c3"}}
 	store.pe = &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour), Metrics: []domain.MetricDefinition{
 		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
 		{Key: "memory", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
@@ -466,7 +466,7 @@ func TestPriorRunsAreRankedAsResultsRanksThemAndReadTogether(t *testing.T) {
 	created := time.Now().UTC().Add(-time.Hour)
 	store := &priorRunsStore{runs: []db.RunToRank{
 		{PE: &domain.PlatformExperiment{ID: "pe-a", Status: domain.PlatformExpClosed, CreatedAt: created, Metrics: []domain.MetricDefinition{{Key: "score", Direction: "maximize"}}},
-			Completed: map[string]bool{"job-base": true, "job-c1": true}, Competitors: map[string]bool{"c1": true}},
+			Completed: map[string]bool{"job-base": true, "job-c1": true}, Executors: map[string]bool{"c1": true}},
 		{PE: &domain.PlatformExperiment{ID: "pe-b", Status: domain.PlatformExpClosed, CreatedAt: created, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}},
 			Completed: map[string]bool{"job-c2": true}},
 		{PE: &domain.PlatformExperiment{ID: "pe-c", Status: domain.PlatformExpClosed, CreatedAt: created}},
@@ -502,8 +502,8 @@ func TestARepeatSignupSucceedsWhateverTheExperimentsStatusOrSize(t *testing.T) {
 		{ID: "pe-1", Status: domain.PlatformExpClosed, MaxAgents: 5},
 		{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 1},
 	} {
-		store := &signupStore{pe: pe, byRole: map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1}, alreadySignedUp: true}
-		if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor}); err != nil {
+		store := &signupStore{pe: pe, byRole: map[domain.SignupRole]int{domain.SignupRoleExecutor: 1}, alreadySignedUp: true}
+		if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleExecutor}); err != nil {
 			t.Fatalf("%s, max_agents %d: repeat signup err = %v, want nil", pe.Status, pe.MaxAgents, err)
 		}
 		if store.insertCalled {
@@ -517,11 +517,11 @@ func TestARepeatSignupSucceedsWhateverTheExperimentsStatusOrSize(t *testing.T) {
 func TestASignupThatLostTheRaceWithItsOwnTwinSucceeds(t *testing.T) {
 	store := &signupStore{
 		pe:           &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
-		byRole:       map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1},
+		byRole:       map[domain.SignupRole]int{domain.SignupRoleExecutor: 1},
 		refuseInsert: true,
 		racedIn:      true,
 	}
-	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor}); err != nil {
+	if err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleExecutor}); err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
 }
@@ -529,7 +529,7 @@ func TestASignupThatLostTheRaceWithItsOwnTwinSucceeds(t *testing.T) {
 // A newcomer still meets the closed and full checks.
 func TestANewcomerIsRefusedOnceTheExperimentStarted(t *testing.T) {
 	store := &signupStore{pe: &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, MaxAgents: 5}}
-	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-2", Role: domain.SignupRoleCompetitor})
+	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-2", Role: domain.SignupRoleExecutor})
 	if refusal.ReasonOf(err) != "signup_closed" {
 		t.Fatalf("err = %v, want signup_closed", err)
 	}
@@ -541,12 +541,12 @@ func TestANewcomerIsRefusedOnceTheExperimentStarted(t *testing.T) {
 func TestASignupThatLostTheRaceWithStartIsReportedClosed(t *testing.T) {
 	store := &signupStore{
 		pe:              &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, MaxAgents: 5},
-		byRole:          map[domain.SignupRole]int{domain.SignupRoleCompetitor: 1},
+		byRole:          map[domain.SignupRole]int{domain.SignupRoleExecutor: 1},
 		refuseInsert:    true,
 		alreadySignedUp: false,
 	}
 
-	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor})
+	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleExecutor})
 	if refusal.ReasonOf(err) != "signup_closed" {
 		t.Fatalf("err = %v, want signup_closed: this agent is not in the experiment and must not be told it is", err)
 	}

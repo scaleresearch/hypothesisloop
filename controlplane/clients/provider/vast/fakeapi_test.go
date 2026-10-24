@@ -1,13 +1,10 @@
 package vast
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -44,7 +41,6 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 
 func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(raw))
 	seen := recorded{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Auth: r.Header.Get("Authorization")}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &seen.Body); err != nil {
@@ -164,71 +160,3 @@ func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 // fixtureStart is when every instance of instanceJSON started: far enough in the future of any
 // test run that none of them counts as slow to start.
 const fixtureStart = "4102444800"
-
-// vendorOverlayName is the overlay names the vendor takes, whatever its message says of digits.
-var vendorOverlayName = regexp.MustCompile(`^[a-z-]+$`)
-
-// fakeOverlays answers the overlay routes as the vendor does, over the overlays it holds.
-type fakeOverlays struct {
-	mu   sync.Mutex
-	next int64
-	held []overlay
-}
-
-// serveOverlays routes the overlay calls to overlays held from the start.
-func (a *fakeAPI) serveOverlays(held ...overlay) *fakeOverlays {
-	o := &fakeOverlays{next: 500, held: held}
-	a.on(http.MethodGet, overlayPath, func(w http.ResponseWriter, _ *http.Request) {
-		o.mu.Lock()
-		defer o.mu.Unlock()
-		listed := []map[string]any{}
-		for _, h := range o.held {
-			listed = append(listed, map[string]any{"overlay_id": h.ID, "name": h.Name, "cluster_id": h.ClusterID, "internal_subnet": "10.0.0.0/24", "instances": []int{}})
-		}
-		encoded, _ := json.Marshal(listed)
-		answer(200, string(encoded))(w, nil)
-	})
-	a.on(http.MethodPost, overlayPath, func(w http.ResponseWriter, r *http.Request) {
-		var asked struct {
-			ClusterID int64  `json:"cluster_id"`
-			Name      string `json:"name"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&asked)
-		if !vendorOverlayName.MatchString(asked.Name) {
-			answer(200, `{"success": false, "msg": "invalid network name: `+asked.Name+`; must only contain lowercase alphanumeric or -"}`)(w, r)
-			return
-		}
-		o.mu.Lock()
-		o.next++
-		o.held = append(o.held, overlay{ID: o.next, Name: asked.Name, ClusterID: asked.ClusterID})
-		o.mu.Unlock()
-		answer(200, `{"success":true,"msg":"Overlay network created"}`)(w, r)
-	})
-	a.on(http.MethodDelete, overlayPath, func(w http.ResponseWriter, r *http.Request) {
-		var asked struct {
-			ID int64 `json:"overlay_id"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&asked)
-		o.mu.Lock()
-		defer o.mu.Unlock()
-		for n, h := range o.held {
-			if h.ID == asked.ID {
-				o.held = slices.Delete(o.held, n, n+1)
-				answer(200, `{"success":true,"msg":"Overlay deleted"}`)(w, r)
-				return
-			}
-		}
-		answer(404, `{"error":"no_such_overlay"}`)(w, r)
-	})
-	return o
-}
-
-func (o *fakeOverlays) names() []string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	var names []string
-	for _, h := range o.held {
-		names = append(names, h.Name)
-	}
-	return names
-}

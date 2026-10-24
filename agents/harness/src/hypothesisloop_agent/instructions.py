@@ -29,7 +29,7 @@ PROVIDERS = ("anthropic", "openrouter", "openai")
 
 def split_model(reference: str) -> tuple[str, str]:
     """The provider and the model id of a model reference, <provider>/<model id>. The model id may
-    hold slashes of its own. This is the only place the format is interpreted."""
+    hold slashes of its own. This is the only place the harness interprets the format."""
     provider, _, model_id = reference.partition("/")
     if provider not in PROVIDERS or not model_id:
         raise SystemExit(f"agent: the model {reference!r} is not <provider>/<model id> with a provider of {', '.join(PROVIDERS)}")

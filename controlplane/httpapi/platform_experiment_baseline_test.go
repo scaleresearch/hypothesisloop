@@ -112,7 +112,7 @@ func TestABaselineIsDeclaredOnAnOpenExperimentAndCheckedAgainstTheJob(t *testing
 		"a job that does not exist": {map[string]any{"baseline_job_id": "job-2"}, nil, "no_baseline"},
 		"no job named":              {map[string]any{"baseline_job_id": ""}, nil, "no_baseline"},
 		"an executor's job": {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) {
-			b.OwnerRole = domain.SignupRoleCompetitor
+			b.OwnerRole = domain.SignupRoleExecutor
 		}, "no_baseline"},
 		"a job of another experiment": {declaration, func(b *platformexperiments.Baseline, _ *domain.PlatformExperiment) {
 			b.Job.PlatformExperimentID = "pe-other"

@@ -63,7 +63,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 	calledModels, servedModels := modelProviders(runCtx, pcfg, store, logger)
 	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent).WithRepositories(gitHost).WithServedModels(servedModels).
-		WithImages(imageRegistry, store, imagedigest.New(pcfg.PlainHTTPRegistries()...)).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
+		WithImages(imageRegistry, store, imagedigest.New(pcfg.PlainHTTPRegistries()...)).WithModelDefaults(pcfg.Agents.ModelDefaults()).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 		SigningSecret: pcfg.SigningSecret, MaxAgentSandboxes: pcfg.Agents.MaxAgentSandboxesPerPlatformExperiment,
@@ -85,7 +85,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	watchHandler := watch.NewHandler(store, graph, store, gate.access, logger)
 	watchHandler.Start(runCtx)
 
-	modelProxy, err := modelproxy.New(store, metrics, peSvc, calledModels, modelDefaults(pcfg), pcfg.Models.MaxCallsInFlightPerOrg, logger)
+	modelProxy, err := modelproxy.New(store, metrics, peSvc, servedModels, calledModels, pcfg.Agents.ModelDefaults(), pcfg.Models.MaxCallsInFlightPerOrg, logger)
 	if err != nil {
 		logger.Fatal("control-service: configure the model proxy", zap.Error(err))
 	}
@@ -101,7 +101,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Launch:              launch,
 		Sharing:             platformexperiments.NewSharing(store, logger),
 		Sessions:            platformexperiments.NewSessions(dataStore),
-		Instructions:        platformexperiments.NewComposer(store, modelDefaults(pcfg), logger),
+		Instructions:        platformexperiments.NewComposer(store, pcfg.Agents.ModelDefaults(), logger),
 		Drafts:              platformexperiments.NewDrafts(store, logger),
 		Accounts: accounts.NewService(db.OrgDefaults{Store: store, NewOrgLimit: pcfg.Quota.NewOrgComputeLimit()}, store, metrics, connectedWithin, pcfg.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			platformClusters(pcfg), accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
@@ -163,23 +163,21 @@ func platformClusters(pcfg *hypothesisloopcfg.ControlService) []string {
 	return names
 }
 
-// modelDefaults is the platform's model for an agent and for a coordinator that names none.
-func modelDefaults(pcfg *hypothesisloopcfg.ControlService) domain.ModelDefaults {
-	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
-}
-
 // modelProviders is the model providers the platform serves, those whose credential is set, as the
 // model proxy calls them and as GET /models lists their models.
 func modelProviders(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, store *db.Store, logger *zap.Logger) (modelproxy.Providers, *models.Service) {
 	var called modelproxy.Providers
-	var anthropic, openAI domain.ModelCatalog
-	var openRouter models.OpenRouter
+	served := map[string]models.Provider{}
+	for provider, catalog := range pcfg.Models.Catalogs() {
+		if _, ok := pcfg.ModelCredentials[provider]; ok {
+			served[provider] = models.Catalog(catalog)
+		}
+	}
 	if token, ok := pcfg.ModelCredentials[domain.ModelProviderAnthropic]; ok {
-		anthropic = pcfg.Models.Anthropic.Catalog
-		called.Anthropic = &modelproxy.Anthropic{URL: modelproxy.AnthropicUpstream, OAuthToken: token, Models: anthropic}
+		called.Anthropic = &modelproxy.Anthropic{URL: modelproxy.AnthropicUpstream, OAuthToken: token}
 	}
 	if key, ok := pcfg.ModelCredentials[domain.ModelProviderOpenRouter]; ok {
-		openRouter = openrouter.New(openrouter.URL)
+		served[domain.ModelProviderOpenRouter] = openrouter.New(openrouter.URL, key, logger)
 		called.OpenRouter = &modelproxy.OpenRouter{URL: openrouter.URL, APIKey: key}
 	}
 	if authJSON, ok := pcfg.ModelCredentials[domain.ModelProviderOpenAI]; ok {
@@ -190,10 +188,9 @@ func modelProviders(ctx context.Context, pcfg *hypothesisloopcfg.ControlService,
 		if err := store.SeedChatGPTCredential(ctx, cred, digest); err != nil {
 			logger.Fatal("control-service: seed the ChatGPT credential", zap.Error(err))
 		}
-		openAI = pcfg.Models.OpenAI.Catalog
-		called.OpenAI = &modelproxy.OpenAI{URL: chatgpt.ResponsesURL, Credentials: chatgpt.NewCredentials(store, chatgpt.TokenURL), Models: openAI}
+		called.OpenAI = &modelproxy.OpenAI{URL: chatgpt.ResponsesURL, Credentials: chatgpt.NewCredentials(store, chatgpt.TokenURL)}
 	}
-	return called, models.New(anthropic, openRouter, modelDefaults(pcfg)).WithOpenAI(openAI)
+	return called, models.New(served, pcfg.Agents.ModelDefaults())
 }
 
 // objectStoreKey is the key id the object store the settings name is reached with, from its

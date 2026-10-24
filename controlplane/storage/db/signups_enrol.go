@@ -47,7 +47,7 @@ var ErrAgentOutsideOrg = errors.New("agent is not of the platform experiment's o
 // completes before the start and is seen by it, or blocks until the start commits and then
 // observes 'running' and refuses. It also serializes signups against each other, which is what
 // makes the max_agents count below exact: a count taken outside this lock let concurrent
-// competitors each see room and all commit.
+// executors each see room and all commit.
 func (s *Store) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
 	inserted, err := s.enrol(ctx, platformExpID, nil, []domain.AgentSignup{signup}, nil)
 	if errors.Is(err, ErrSignupClosed) {
@@ -58,7 +58,7 @@ func (s *Store) Signup(ctx context.Context, platformExpID string, signup domain.
 
 // SpawnAgent creates an agent in the platform experiment's org and signs it up, both or neither.
 // An agent without a name is given one (domain.AgentName), which agent then carries.
-// ErrAgentNameTaken when its name is another agent's in the experiment. ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
+// ErrAgentNameTaken when its name is another agent's in the experiment. ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is an executor
 // with no place left, ErrMaxAgentSandboxesReached when it is one machine too many.
 func (s *Store) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
 	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup}, nil)
@@ -221,7 +221,9 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxA
 	for _, agent := range create {
 		agent.OrgID = orgID
 		if agent.Name == "" {
-			agent.Name = domain.AgentName(roles[agent.ID], func(name string) bool { _, taken := names[name]; return taken })
+			if agent.Name, err = domain.AgentName(roles[agent.ID], func(name string) bool { _, taken := names[name]; return taken }); err != nil {
+				return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
+			}
 		}
 		if err := claim(agent.ID, agent.Name); err != nil {
 			return 0, err
@@ -236,7 +238,7 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 	for _, agent := range create {
 		created[agent.ID] = true
 	}
-	inserted, competitors, sandboxed := 0, false, false
+	inserted, executors, sandboxed := 0, false, false
 	var joined []domain.AgentSignup
 	for _, signup := range signups {
 		if !created[signup.AgentID] {
@@ -288,7 +290,7 @@ RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finis
 				PlatformExperimentID: platformExpID, AgentID: signup.AgentID})
 		}
 		inserted++
-		competitors = competitors || signup.Role == domain.SignupRoleCompetitor
+		executors = executors || signup.Role == domain.SignupRoleExecutor
 		sandboxed = sandboxed || signup.InAgentSandbox
 		if running {
 			if signup.SharesBudget() {
@@ -329,12 +331,12 @@ WHERE s.platform_experiment_id = $1 AND s.in_agentsandbox AND s.finished_at IS N
 	}
 	// max_agents bounds the executors at work at once (executorAtWorkSQL), and nobody of another
 	// role takes a place.
-	if competitors {
+	if executors {
 		var count int
 		if err := tx.QueryRow(ctx, `
 SELECT COUNT(*) FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND `+executorAtWorkSQL, platformExpID).Scan(&count); err != nil {
-			return 0, fmt.Errorf("platform_experiments_store.Signup: count competitors: %w", err)
+			return 0, fmt.Errorf("platform_experiments_store.Signup: count executors: %w", err)
 		}
 		if count > maxAgents {
 			return 0, ErrMaxAgentsReached
@@ -360,7 +362,7 @@ FROM agent_quotas q
 JOIN experiment_signups s ON s.platform_experiment_id = q.platform_experiment_id AND s.agent_id = q.agent_id
 WHERE q.platform_experiment_id = $1 AND s.role = $2 AND s.agent_id <> $3
   AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = q.platform_experiment_id AND c.agent_id = q.agent_id)
-ORDER BY s.signed_up_at, s.agent_id`, platformExpID, string(domain.SignupRoleCompetitor), signup.AgentID)
+ORDER BY s.signed_up_at, s.agent_id`, platformExpID, string(domain.SignupRoleExecutor), signup.AgentID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.JoinRunning: read quotas: %w", err)
 	}

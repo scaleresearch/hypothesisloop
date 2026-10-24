@@ -94,7 +94,7 @@ type createdStore struct {
 	prior []string
 	// messages are the messages sent to its agents.
 	messages []domain.AgentMessage
-	// executors are the agents of role competitor that joined.
+	// executors are the agents of role executor that joined.
 	executors []string
 	// baselines are the agents of role baseline that joined, and left the COMPLETED jobs on the
 	// objective of those of them that finished.
@@ -177,7 +177,7 @@ func (s *createdStore) CompletedJobs(context.Context, string) ([]*domain.Experim
 func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _ time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	participants := make([]db.StartParticipant, len(s.executors))
 	for i, agentID := range s.executors {
-		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
+		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleExecutor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
 	}
 	quotas, _, err := quotasFor(participants)
 	if err != nil {
@@ -194,7 +194,7 @@ func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _
 }
 
 func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
-	if role != domain.SignupRoleCompetitor {
+	if role != domain.SignupRoleExecutor {
 		return nil, nil
 	}
 	return s.executors, nil
@@ -232,7 +232,7 @@ func (s *createdStore) ListSignups(context.Context, string) ([]string, error) { 
 func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
 	signups := make([]domain.AgentSignup, len(s.executors))
 	for i, agentID := range s.executors {
-		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}
+		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleExecutor}
 	}
 	return append(signups, s.baselines...), nil
 }

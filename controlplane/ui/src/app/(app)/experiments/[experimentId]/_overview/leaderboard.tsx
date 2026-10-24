@@ -19,7 +19,7 @@ import type { AgentQuotaView, AgentStanding, ExperimentStats, PlatformExperiment
 
 /**
  * The agents ranked as the server ranks them on the primary ranking metric; an agent without a
- * standing (not a competitor, ineligible, or nothing reported) follows, by id. A row opens on
+ * standing (not an executor, ineligible, or nothing reported) follows, by id. A row opens on
  * the agent's jobs.
  */
 export function Leaderboard({ pe, agentIds, results, quotas, stages, jobsByAgent, hypothesisText, unit }: {

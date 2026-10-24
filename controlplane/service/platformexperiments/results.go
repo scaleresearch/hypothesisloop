@@ -352,7 +352,7 @@ func (s *Service) PriorRuns(ctx context.Context, ids []string) ([]domain.PriorRu
 		prior := domain.PriorRun{ID: pe.ID, Name: pe.Name, Status: pe.Status, ClosedAt: pe.ClosedAt, CloseReason: pe.CloseReason}
 		if primary, ok := domain.PrimaryRankingMetric(pe.Metrics); ok {
 			prior.Metric = primary.Key
-			if standings := order(primary, best[pe.ID], run.Competitors); len(standings) > 0 {
+			if standings := order(primary, best[pe.ID], run.Executors); len(standings) > 0 {
 				prior.Best, prior.BestJobID = &standings[0].Best, standings[0].ExperimentID
 			}
 		}
@@ -372,22 +372,22 @@ func (s *Service) bestPerAgent(ctx context.Context, pe *domain.PlatformExperimen
 	return s.metrics.BestPerAgentOnMetric(ctx, pe, metric, completed)
 }
 
-// rank presents the competitors' bests on one metric as standings: attaches each one's job, sorts
+// rank presents the executors' bests on one metric as standings: attaches each one's job, sorts
 // and assigns ranks. It is the ranking a run is judged by: results and the top-3 recorded at close
 // both read it, from the bests the stage ladder cuts with, so none of them can diverge.
 func (s *Service) rank(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest) ([]AgentStanding, error) {
-	// Only competitors are ranked. The metrics store answers for every agent that reported —
-	// which is the point, a baseline's numbers stay fully readable — so the roles are applied
+	// Only executors are ranked. The metrics store answers for every agent that reported,
+	// which is the point: a baseline's numbers stay fully readable. So the roles are applied
 	// here rather than to the query, and every caller of this function inherits it.
-	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, fmt.Errorf("results: %w", err)
 	}
-	isCompetitor := make(map[string]bool, len(competitors))
-	for _, agentID := range competitors {
-		isCompetitor[agentID] = true
+	isExecutor := make(map[string]bool, len(executors))
+	for _, agentID := range executors {
+		isExecutor[agentID] = true
 	}
-	standings := order(metric, best, isCompetitor)
+	standings := order(metric, best, isExecutor)
 	for i := range standings {
 		st := &standings[i]
 		if st.ExperimentID == "" {
@@ -407,11 +407,11 @@ func (s *Service) rank(ctx context.Context, pe *domain.PlatformExperiment, metri
 	return standings, nil
 }
 
-// order is the competitors' bests on metric as standings, sorted best first and ranked.
-func order(metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, isCompetitor map[string]bool) []AgentStanding {
+// order is the executors' bests on metric as standings, sorted best first and ranked.
+func order(metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, isExecutor map[string]bool) []AgentStanding {
 	standings := make([]AgentStanding, 0, len(best))
 	for agentID, b := range best {
-		if isCompetitor[agentID] {
+		if isExecutor[agentID] {
 			standings = append(standings, AgentStanding{AgentID: agentID, Best: b.Value, Basis: platformapi.BasisRaw, ExperimentID: b.ExperimentID})
 		}
 	}

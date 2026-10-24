@@ -1,16 +1,18 @@
 // Package compute runs each node of a job as one rented instance through a provider.Provider,
 // the nodes of a job that spans several on a private network of the provider's. It names no
-// vendor: everything it knows about an instance or a network is the name it gave it and the
+// vendor: everything it knows about an instance is the name it gave it and the
 // state the provider reports.
 package compute
 
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/acceleratorname"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
@@ -60,12 +62,11 @@ type Config struct {
 // Executor keeps nothing about instances. Every method reads the account, unless the executor
 // came from ForPass, in which case it answers from that pass's one read.
 type Executor struct {
-	clusterID     string
-	prefix        string
-	networkPrefix string
-	apiURL        string
-	shapes        []Shape
-	provider      provider.Provider
+	clusterID string
+	prefix    string
+	apiURL    string
+	shapes    []Shape
+	provider  provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market provider.Market
 	// network is the provider's Networker capability, nil for a vendor that has none.
@@ -109,6 +110,9 @@ func New(cfg Config) (*Executor, error) {
 	if needer, needs := cfg.Provider.(provider.ImageNeeder); needs {
 		imageNeeds = needer.ImageNeeds()
 	}
+	if rented.Networker != nil && !slices.Contains(clusterapi.NodesLevels, clusterapi.NodesLevel(rented.Networker.Within())) {
+		return nil, fmt.Errorf("cloudcompute: the provider's places are within %q, none of %v", rented.Networker.Within(), clusterapi.NodesLevels)
+	}
 	architectures := rented.Architectures()
 	if len(architectures) == 0 {
 		return nil, fmt.Errorf("cloudcompute: the provider rents machines of no architecture")
@@ -121,7 +125,6 @@ func New(cfg Config) (*Executor, error) {
 		imageNeeds:    imageNeeds,
 		clusterID:     cfg.ClusterID,
 		prefix:        cfg.prefix(),
-		networkPrefix: provider.NetworkPrefix(cfg.Namespace),
 		apiURL:        cfg.APIURL,
 		shapes:        append([]Shape(nil), cfg.Shapes...),
 		provider:      rented,

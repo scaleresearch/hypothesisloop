@@ -24,11 +24,14 @@ type Reader struct {
 // Curates says whether agentID is a researcher of platform experiment pe, who may link, merge,
 // retire and unlink any of its hypotheses.
 func (s *Service) Curates(ctx context.Context, pe, agentID string) (bool, error) {
-	researcher, err := s.isResearcher(ctx, pe, agentID)
+	if agentID == "" {
+		return false, nil
+	}
+	signup, err := s.store.GetAgentSignup(ctx, pe, agentID)
 	if err != nil {
 		return false, fmt.Errorf("registry.Curates: %w", err)
 	}
-	return researcher, nil
+	return signup != nil && signup.Role == domain.SignupRoleResearcher, nil
 }
 
 // PlatformExperimentClosed says whether the platform experiment id is closed.

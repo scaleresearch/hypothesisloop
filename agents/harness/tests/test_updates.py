@@ -99,6 +99,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
         self.assertIn("agent.replaced", updates.WAKES["coordinator"])
         self.assertNotIn("agent.replaced", updates.WAKES["agent"])
+        self.assertIn("agent.stopped", updates.WAKES["coordinator"])
         # An executor worked 28 minutes with nothing on the platform and nobody was woken by it.
         # The notice repeats while the stretch lasts: it wakes the agent each time, and the
         # coordinator for the first, the repeats riding along with its next batch.

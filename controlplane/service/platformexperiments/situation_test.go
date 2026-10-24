@@ -172,7 +172,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 	asked, exited := now.Add(-3*time.Hour), now.Add(-2*time.Hour)
 	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-4 * time.Hour),
 		StartedAt: now.Add(-3 * time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 3, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
-	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, baselines: []domain.AgentSignup{{AgentID: "ag-1", Name: "Executor 1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true,
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, baselines: []domain.AgentSignup{{AgentID: "ag-1", Name: "Executor 1", Role: domain.SignupRoleExecutor, InAgentSandbox: true,
 		Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-2", Reported: domain.InstanceRunning, EndReason: "gone", ExitedAt: &exited},
 		Activity: &domain.AgentActivity{Text: "running hl job submit", At: now.Add(-time.Minute)}}}},
 		unsettled: map[string]bool{"pe-ended": true}}
@@ -191,7 +191,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := store.records[pe.ID]
-	if want := `- Executor 1 (competitor): 0 jobs submitted; last activity "running hl job submit" since`; !strings.Contains(record, want) || !strings.Contains(record, "did not finish: at work at the close.") {
+	if want := `- Executor 1 (executor): 0 jobs submitted; last activity "running hl job submit" since`; !strings.Contains(record, want) || !strings.Contains(record, "did not finish: at work at the close.") {
 		t.Fatalf("record %q, want the activity and the run as they stood at the close", record)
 	}
 	if strings.Contains(record, "released") || strings.Contains(record, "gone") || strings.Contains(record, "no activity reported") {
@@ -264,8 +264,8 @@ func situationRun(t *testing.T) (*Service, *situationStore) {
 		Coordinator: &domain.AgentSandboxCoordinator{}, Metrics: []domain.MetricDefinition{{Key: "acc", Direction: "maximize"}}}
 	store := &situationStore{
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, executors: []string{}, baselines: []domain.AgentSignup{
-			{AgentID: "ag-1", Name: "Executor 1", Role: domain.SignupRoleCompetitor, InFlight: &domain.InFlight{Jobs: 2, Queued: 1, Running: 1}},
-			{AgentID: "ag-2", Name: "Executor 2", Role: domain.SignupRoleCompetitor, InFlight: &domain.InFlight{IdleSince: &idleSince}},
+			{AgentID: "ag-1", Name: "Executor 1", Role: domain.SignupRoleExecutor, InFlight: &domain.InFlight{Jobs: 2, Queued: 1, Running: 1}},
+			{AgentID: "ag-2", Name: "Executor 2", Role: domain.SignupRoleExecutor, InFlight: &domain.InFlight{IdleSince: &idleSince}},
 		}}},
 		jobs: map[string]*domain.Experiment{"job-base": {ID: "job-base", AcceleratorType: typeA, AcceleratorCount: 2,
 			Job: domain.JobSpec{AcceleratorType: typeA, AcceleratorCount: 2, CPU: "4"}}},

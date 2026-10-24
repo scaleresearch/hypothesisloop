@@ -124,13 +124,17 @@ const finishEarlyShare = 0.1
 // (typicalJobTime), that does not say why it stops is refused, told what is left.
 func (s *Service) finishReason(ctx context.Context, platformExpID, agentID, reason string, because domain.FinishBecause) (string, error) {
 	if because != "" {
-		reason = because.Label() + ": " + reason
+		label, err := because.Label()
+		if err != nil {
+			return "", fmt.Errorf("platform_experiments.finishReason: %w", err)
+		}
+		reason = label + ": " + reason
 	}
 	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
 	if err != nil {
 		return "", fmt.Errorf("platform_experiments.finishReason: %w", err)
 	}
-	if signup == nil || signup.Role != domain.SignupRoleCompetitor || signup.FinishedAt != nil {
+	if signup == nil || signup.Role != domain.SignupRoleExecutor || signup.FinishedAt != nil {
 		return reason, nil
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)

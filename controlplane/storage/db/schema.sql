@@ -375,7 +375,7 @@ CREATE INDEX idx_platform_experiments_in_progress ON platform_experiments(status
 CREATE TABLE experiment_signups (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT        NOT NULL REFERENCES agents(id),
-    role                   TEXT        NOT NULL DEFAULT 'competitor',
+    role                   TEXT        NOT NULL,
     quota_tier             TEXT        NOT NULL,
     signed_up_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     added_by_kind          TEXT        NOT NULL,
@@ -394,7 +394,7 @@ CREATE TABLE experiment_signups (
     idle_repeat            INTEGER     NOT NULL DEFAULT 0,
 
     PRIMARY KEY (platform_experiment_id, agent_id),
-    CONSTRAINT experiment_signups_role CHECK (role IN ('competitor', 'baseline', 'reviewer', 'researcher', 'planner')),
+    CONSTRAINT experiment_signups_role CHECK (role IN ('executor', 'baseline', 'reviewer', 'researcher', 'planner')),
     CONSTRAINT experiment_signups_quota_tier CHECK (quota_tier IN ('guaranteed', 'burst_only')),
     CONSTRAINT experiment_signups_added_by_kind
         CHECK (added_by_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
@@ -696,7 +696,7 @@ CREATE TABLE changes (
     CONSTRAINT changes_kind CHECK (kind IN (
         'experiment.status', 'experiment.blocked', 'quota.changed', 'stage.boundary',
         'hypothesis.new', 'hypothesis.status', 'hypothesis.link', 'hypothesis.unlink', 'finding.new', 'comment.new',
-        'agent.cut', 'agent.finished', 'agent.replaced', 'agent.idle', 'agent.instructions',
+        'agent.cut', 'agent.finished', 'agent.replaced', 'agent.stopped', 'agent.idle', 'agent.instructions',
         'capacity.idle', 'agent.message', 'agent.activity',
         'platform_experiment.status', 'platform_experiment.description', 'platform_experiment.goal',
         'platform_experiment.proposal', 'platform_experiment.plan',

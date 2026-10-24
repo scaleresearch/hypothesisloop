@@ -16,23 +16,25 @@ var OrgRoles = []OrgRole{OrgRoleOwner, OrgRoleMember}
 // hold the baseline in another) and is fixed at signup: changing it mid-run would retroactively
 // rewrite who a completed cut applied to.
 //
-// Ranking reads it, and whether the agent submits jobs (SubmitsJobs). A non-competitor's jobs are
+// Ranking reads it, and whether the agent submits jobs (SubmitsJobs). A non-executor's jobs are
 // admitted, billed, evicted and settled by identical code, and its metrics are recorded and
 // readable in full.
 type SignupRole string
 
 const (
-	// SignupRoleCompetitor is an executor: it implements experiments and runs their jobs. It is
+	// SignupRoleExecutor is an executor: it implements experiments and runs their jobs. It is
 	// ranked, cut-eligible, takes a quota share and earns the top-3 bonus.
-	SignupRoleCompetitor SignupRole = "competitor"
+	SignupRoleExecutor SignupRole = "executor"
 	// SignupRoleBaseline runs the experiment's declared control. Never ranked, never cut: the
 	// point of a baseline is that its numbers are visible and comparable. It holds a quota from
 	// the moment it joins and is the one role whose job an open platform experiment takes: the
 	// baseline is measured before anyone is ranked against it. It takes no share at the start,
 	// and what it spent is taken from the budget before the shares.
 	SignupRoleBaseline SignupRole = "baseline"
-	// SignupRoleReviewer re-checks other agents' claims and records agreement or dispute. Never
-	// ranked, never cut.
+	// SignupRoleReviewer verifies other agents' claims by running their jobs again, on an
+	// executor's agent types, and records agreement or dispute. A researcher judges the graph and
+	// runs no job; a reviewer runs jobs and pushes its branches. Never ranked, never cut, and
+	// counted by no max_agents.
 	SignupRoleReviewer SignupRole = "reviewer"
 	// SignupRoleResearcher keeps the hypothesis graph correct and points the work: it proposes,
 	// reviews, merges, retires and relinks hypotheses. It runs no job, pushes nothing, holds no
@@ -45,7 +47,7 @@ const (
 )
 
 // SignupRoles is every role of a signup.
-var SignupRoles = []SignupRole{SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer, SignupRoleResearcher, SignupRolePlanner}
+var SignupRoles = []SignupRole{SignupRoleExecutor, SignupRoleBaseline, SignupRoleReviewer, SignupRoleResearcher, SignupRolePlanner}
 
 // SubmitsJobs says an agent of role r submits jobs and pushes its branches: every role but planner
 // and researcher.

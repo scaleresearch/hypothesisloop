@@ -153,7 +153,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	}
 	executors := proposedExecutors(p.Agents)
 	if most := MaxProposedAgents(draft.MaxAgentSandboxes); executors == 0 || len(p.Agents) > most {
-		refuse("invalid_agents", "agents: propose at least one executor and at most %d agents in all (the draft's max_agents), got %d executors of %d", most, executors, len(p.Agents))
+		refuse("invalid_agents", "agents: propose at least one executor and at most %d agents in all, researchers included: the machines the platform runs for the team beside its coordinator and baseline agent. Got %d executors of %d", most, executors, len(p.Agents))
 	}
 	least, limit := max(1, int(s.cfg.MinBaseline.Minutes())), int(s.cfg.BaselineLimit.Minutes())
 	if p.BaselineMinutes < least || p.BaselineMinutes > limit {
@@ -171,7 +171,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 		}
 		experiment.Agents = pool
 		var invalid error
-		experiment, invalid = s.validate(experiment, catalog)
+		experiment, invalid = s.validate(experiment)
 		if err := problems.Add(invalid); err != nil {
 			return experiment, err
 		}
@@ -201,7 +201,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	for i, agent := range p.Agents {
 		if _, err := domain.ResolveAgentLaunch(catalog, domain.PoolRole(agent.AgentType), agent.AgentType, agent.Model, agent.Hyperparameters); err != nil {
 			refuse("invalid_agents", "agents[%d]: %s", i, err)
-		} else if err := problems.Add(s.checkModel(ctx, fmt.Sprintf("agents[%d].model", i), agent.Model)); err != nil {
+		} else if err := problems.Add(s.served.CheckChoice(ctx, fmt.Sprintf("agents[%d].model", i), agent.Model)); err != nil {
 			return experiment, err
 		}
 	}

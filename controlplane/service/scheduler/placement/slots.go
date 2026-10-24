@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -15,7 +16,8 @@ import (
 // capacity is counted: a job on a slot is resolved to the slot's size, and from there a slot is
 // an ordinary node that the job fills. The rules that are a slot's own are which slots a job is
 // sized to (ResolveOntoSlots), that a slot takes only a node of its size (takesWholeSlot), and that
-// the nodes of a job that spans several share one private network (SlotNetwork).
+// the nodes of a job that spans several share one private network (SlotNetwork) as near as the
+// job asks (slotWithin).
 
 // onCores says exp holds cores and no device (domain.CPUType).
 func onCores(exp *domain.Experiment) bool { return exp.AcceleratorType.Kind() == domain.TypeKindCPU }
@@ -42,11 +44,16 @@ func SlotNetwork(labels map[string]string) int {
 	return labelCount(labels, domain.NodeSlotNetworkLabel)
 }
 
+// slotWithin is the nearest level every node on one private network of a slot's runtime is within
+// (domain.NodeSlotNetworkWithinLabel), "" for a runtime with no private network.
+func slotWithin(labels map[string]string) domain.NodesLevel {
+	return domain.NodesLevel(labels[domain.NodeSlotNetworkWithinLabel])
+}
+
+// labelCount reads a count label of a slot, 0 when absent. The cluster exchange refuses a report
+// whose slot count label is no count (domain.ValidateSlotLabels).
 func labelCount(labels map[string]string, key string) int {
-	count, err := strconv.Atoi(labels[key])
-	if err != nil {
-		return 0
-	}
+	count, _ := strconv.Atoi(labels[key])
 	return count
 }
 
@@ -137,6 +144,9 @@ func slotsFor(exp *domain.Experiment, cluster string, sizes, free map[string]map
 		slots []slot
 		free  bool
 	}
+	if misfit := tooFar(exp, cluster, labelsByNode); misfit != "" {
+		return nil, false, misfit
+	}
 	one, misfit := oneShape(exp, cluster, sizes, labelsByNode)
 	if misfit != "" {
 		return nil, false, misfit
@@ -162,7 +172,7 @@ func slotsFor(exp *domain.Experiment, cluster string, sizes, free map[string]map
 		}
 		if len(byShape) == 0 {
 			return nil, false, fmt.Sprintf("%s: no instance shape of cluster %s takes this job: a shape takes a job with exactly its accelerators (%d of %s here, none for a job on CPU) whose cpu, memory and storage fit in it",
-				domain.NotAdmittedCapacityUnavailable, cluster, slotDevices(exp, group), exp.AcceleratorType)
+				domain.NotAdmittedCapacityUnavailable, cluster, clusterapi.SlotDevices(exp.AcceleratorType, group), exp.AcceleratorType)
 		}
 		var options []*option
 		for _, o := range byShape {
@@ -206,6 +216,33 @@ func slotsFor(exp *domain.Experiment, cluster string, sizes, free map[string]map
 		}
 	}
 	return nodes, isFree, ""
+}
+
+// tooFar is the misfit of a job that spans several nodes on a cluster of slots whose private
+// networks join no nodes as near as the job asks (slotWithin), "" for any other.
+func tooFar(exp *domain.Experiment, cluster string, labelsByNode map[string]map[string]string) string {
+	level := exp.Job.NodesWithin()
+	if level == "" {
+		return ""
+	}
+	var within domain.NodesLevel
+	for _, labels := range labelsByNode {
+		if !isSlot(labels) {
+			continue
+		}
+		l := slotWithin(labels)
+		if l.AsNearAs(level) {
+			return ""
+		}
+		if l != "" && (within == "" || l.AsNearAs(within)) {
+			within = l
+		}
+	}
+	if within == "" {
+		return fmt.Sprintf("%s: the slots of cluster %s share no private network, which the nodes of a job that spans several meet on", domain.NotAdmittedCapacityUnavailable, cluster)
+	}
+	return fmt.Sprintf("%s: the nodes of a job on one private network of cluster %s are within one %s of each other, and job.topology.nodes_within asks for one %s",
+		domain.NotAdmittedCapacityUnavailable, cluster, strings.ReplaceAll(string(within), "_", " "), strings.ReplaceAll(string(level), "_", " "))
 }
 
 // oneShape is the shapes every group of a job that spans nodes in several groups could hold, nil
@@ -288,30 +325,10 @@ func TakesSlot(exp *domain.Experiment, labels map[string]string, size map[string
 	return slices.ContainsFunc(exp.Job.NodeGroups(), func(group domain.JobGroup) bool { return takes(exp, group, labels, size) })
 }
 
-// takes says whether a slot of these labels and this size takes a node of group: its accelerators
-// are exactly the group's, of the job's type, it carries the job's node selector and it is at
-// least as large as every quantity the group named. A job on CPU counts its cores and holds no
-// device, so its slot is one with no accelerators.
+// takes says whether a slot of these labels and this size takes a node of group: it carries the
+// job's node selector and runs its image, and clusterapi.SlotTakes holds.
 func takes(exp *domain.Experiment, group domain.JobGroup, labels map[string]string, size map[string]int64) bool {
-	devices := slotDevices(exp, group)
-	if !isSlot(labels) || !RunsOn(labels, exp) || SlotAccelerators(labels) != devices {
-		return false
-	}
-	if devices > 0 && !exp.AcceleratorType.MatchesLabels(labels) {
-		return false
-	}
-	if size[domain.NodeResourceCPUMillicores] <= 0 || size[domain.NodeResourceMemoryBytes] <= 0 || size[domain.NodeResourceStorageBytes] <= 0 {
-		return false
-	}
-	return slotCovers(group.CPU, domain.NodeResourceCPUMillicores, size) && slotCovers(group.Memory, domain.NodeResourceMemoryBytes, size) && slotCovers(group.Storage, domain.NodeResourceStorageBytes, size)
-}
-
-// slotDevices is the accelerators a slot that takes a node of group has.
-func slotDevices(exp *domain.Experiment, group domain.JobGroup) int {
-	if onCores(exp) {
-		return 0
-	}
-	return group.AcceleratorCount
+	return isSlot(labels) && RunsOn(labels, exp) && clusterapi.SlotTakes(exp.AcceleratorType, group, SlotAccelerators(labels), labels, size)
 }
 
 // shapeOf names the shape of a slot: its accelerators and its size. Slots of one shape are alike
@@ -362,12 +379,6 @@ func VacatingSlots(cluster string, sizes, freeAtTickStart map[string]map[string]
 		vacating[node] = sizes[node]
 	}
 	return vacating
-}
-
-// slotCovers reports whether a slot of this size holds the quantity a job named.
-func slotCovers(quantity, name string, size map[string]int64) bool {
-	value, err := QuantityValue(name, quantity)
-	return err == nil && value <= float64(size[name])
 }
 
 // OnSlots returns exp as it would be admitted to a cluster, for a fit check made before the tick

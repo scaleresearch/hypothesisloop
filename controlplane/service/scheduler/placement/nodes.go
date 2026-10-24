@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -30,6 +31,16 @@ func RequiresDistinctHosts(exp *domain.Experiment) bool {
 // distinct currently-schedulable node with enough free devices of the selected accelerator type.
 func TopologyFits(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
 	return Reserve(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, exp)
+}
+
+// FitsOnlyApart says whether exp's nodes fit the free nodes only with some of them outside the
+// place every other is in (JobSpec.NodesWithin).
+func FitsOnlyApart(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
+	if exp.EffectiveJob().NodesWithin() == "" || TopologyFits(byNode, nodeResources, labelsByNode, exp) {
+		return false
+	}
+	_, apart := planPlacement(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, []*domain.Experiment{exp}, true)
+	return apart
 }
 
 func LabelsMatch(actual, required map[string]string) bool {
@@ -69,7 +80,7 @@ func DesiredFits(byNode map[string]map[string]int64, nodeResources map[string]ma
 		jobs = append(jobs, d)
 	}
 	jobs = append(jobs, candidate)
-	plan, ok := planPlacement(byNode, nodeResources, labelsByNode, jobs)
+	plan, ok := planPlacement(byNode, nodeResources, labelsByNode, jobs, false)
 	if !ok {
 		return false
 	}
@@ -86,7 +97,83 @@ func DesiredFits(byNode map[string]map[string]int64, nodeResources map[string]ma
 	case slices.ContainsFunc(slots, func(slot string) bool { return slot != "" }):
 		return false
 	}
+	for _, p := range plan {
+		if p.job != len(jobs)-1 {
+			continue
+		}
+		place, _ := nearness(labelsByNode, p.node, candidate.EffectiveJob().NodesWithin(), labelledLevels(labelsByNode))
+		if len(place) > 0 {
+			selector := maps.Clone(resolved.NodeSelector)
+			if selector == nil {
+				selector = map[string]string{}
+			}
+			maps.Copy(selector, place)
+			resolved.NodeSelector = selector
+		}
+		break
+	}
 	return true
+}
+
+// nearness is the place of node at level and every wider one, as the node labels that name it,
+// which every node of a job within level shares; ok is false for a node no such job may take.
+// A slot as near as level (slotWithin) is in every place of its job's: the runtime rents a job's
+// slots on one private network. A node without the label of a region or zone is in the one region or zone of a cluster none of
+// whose nodes is labelled with one (labelled), and a node with no placement group takes no job
+// within one.
+func nearness(labelsByNode map[string]map[string]string, node string, level domain.NodesLevel, labelled map[string]bool) (place map[string]string, ok bool) {
+	labels := labelsByNode[node]
+	if level == "" {
+		return nil, true
+	}
+	if isSlot(labels) {
+		return nil, slotWithin(labels).AsNearAs(level)
+	}
+	place = map[string]string{}
+	for _, l := range clusterapi.NodesLevels {
+		key := levelLabels[l]
+		if l == domain.NodesWithinPlacementGroup {
+			key = labels[domain.NodePlacementGroupKeyLabel]
+		}
+		switch value := labels[key]; {
+		case key != "" && value != "":
+			place[key] = value
+		case l == domain.NodesWithinPlacementGroup || labelled[key]:
+			return nil, false
+		}
+		if l == level {
+			break
+		}
+	}
+	return place, true
+}
+
+// levelLabels are the node labels that name a node's region and zone.
+var levelLabels = map[domain.NodesLevel]string{
+	domain.NodesWithinRegion: domain.NodeRegionLabel,
+	domain.NodesWithinZone:   domain.NodeZoneLabel,
+}
+
+// labelledLevels says which of levelLabels some node of labelsByNode carries.
+func labelledLevels(labelsByNode map[string]map[string]string) map[string]bool {
+	labelled := map[string]bool{}
+	for _, labels := range labelsByNode {
+		for _, key := range levelLabels {
+			if labels[key] != "" {
+				labelled[key] = true
+			}
+		}
+	}
+	return labelled
+}
+
+// placeKey is place as one comparable string.
+func placeKey(place map[string]string) string {
+	var b strings.Builder
+	for _, key := range slices.Sorted(maps.Keys(place)) {
+		fmt.Fprintf(&b, "%s=%s;", key, place[key])
+	}
+	return b.String()
 }
 
 func CloneNodes(byNode map[string]map[string]int64) map[string]map[string]int64 {
@@ -123,7 +210,7 @@ func CloneNodes(byNode map[string]map[string]int64) map[string]map[string]int64 
 // could use and reported a job with a valid assignment as not fitting. The input maps are
 // modified only when the whole job is placed — a false answer leaves them exactly as they were.
 func Reserve(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
-	plan, ok := planPlacement(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, []*domain.Experiment{exp})
+	plan, ok := planPlacement(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, []*domain.Experiment{exp}, false)
 	if !ok {
 		return false
 	}
@@ -157,8 +244,9 @@ var searchBudget = 50000
 // planPlacement finds nodes for every rank of every job in jobs against the given free capacity,
 // consuming capacity in the maps as it goes (callers pass clones). Distinct-host rules apply per
 // job; ranks of different jobs may share a node. Returns the assignment and whether all ranks
-// were placed. On false the maps are left in an unspecified state.
-func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment) ([]rankAssignment, bool) {
+// were placed. Every node of a job is in one place of its JobSpec.NodesWithin unless apart. On
+// false the maps are left in an unspecified state.
+func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment, apart bool) ([]rankAssignment, bool) {
 	type rank struct {
 		job      int
 		rank     int
@@ -171,6 +259,10 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		nodes   []string // qualifying candidate set for this rank
 	}
 	var ranks []rank
+	// places is, for each job within a level, the place each node it may take is in there
+	// (nearness); nil for a job on one node.
+	places := make([]map[string]string, len(jobs))
+	labelled := labelledLevels(labelsByNode)
 	for i, exp := range jobs {
 		key := AcceleratorKey(exp.AcceleratorType)
 		// Two candidate sets: a node that reported accelerators, and any node the cluster
@@ -181,6 +273,17 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		distinct := RequiresDistinctHosts(exp)
 		shapes := exp.NodeShapes()
 		pinned := exp.EffectiveJob().Slots
+		if level := exp.EffectiveJob().NodesWithin(); level != "" && !apart {
+			places[i] = map[string]string{}
+			for _, node := range slices.Concat(acceleratorNodes, plainNodes) {
+				if place, ok := nearness(labelsByNode, node, level, labelled); ok {
+					places[i][node] = placeKey(place)
+				}
+			}
+			outside := func(node string) bool { _, ok := places[i][node]; return !ok }
+			acceleratorNodes = slices.DeleteFunc(acceleratorNodes, outside)
+			plainNodes = slices.DeleteFunc(plainNodes, outside)
+		}
 		for r, shape := range shapes {
 			nodes := plainNodes
 			if shape.AcceleratorCount > 0 {
@@ -209,12 +312,19 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 	for i := range used {
 		used[i] = make(map[string]bool)
 	}
+	// at is the place a job within a level is held to once one of its ranks is placed, and
+	// placed how many of its ranks are.
+	at := make([]string, len(jobs))
+	placed := make([]int, len(jobs))
 	plan := make([]rankAssignment, len(ranks))
 	budget := searchBudget
 
 	// nodeFits reports whether node can host r right now and the accelerator key it would draw on.
 	nodeFits := func(r rank, node string) (string, bool) {
 		if r.distinct && used[r.job][node] {
+			return "", false
+		}
+		if places[r.job] != nil && placed[r.job] > 0 && places[r.job][node] != at[r.job] {
 			return "", false
 		}
 		nodeKey := ""
@@ -261,6 +371,9 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		}
 		sort.Strings(dimensions)
 		var b strings.Builder
+		if places[r.job] != nil {
+			fmt.Fprintf(&b, "at=%s;", places[r.job][node])
+		}
 		if r.shape.AcceleratorCount > 0 {
 			fmt.Fprintf(&b, "a=%d;", byNode[node][nodeKey]-r.shape.AcceleratorCount)
 		}
@@ -315,10 +428,15 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 			}
 			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
 			used[r.job][c.node] = true
+			if placed[r.job] == 0 && places[r.job] != nil {
+				at[r.job] = places[r.job][c.node]
+			}
+			placed[r.job]++
 			plan[i] = rankAssignment{job: r.job, rank: r.rank, shape: r.shape, node: c.node, key: c.key}
 			if place(i + 1) {
 				return true
 			}
+			placed[r.job]--
 			used[r.job][c.node] = false
 			AddNodeResources(nodeResources[c.node], r.shape.Resources)
 			if r.shape.AcceleratorCount > 0 {

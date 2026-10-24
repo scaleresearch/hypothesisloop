@@ -59,6 +59,11 @@ func (l *Loop) speculativeCandidates(
 		if gang && !multiNodeCapable[cluster] {
 			continue
 		}
+		// The bet holds the job to a place the cluster's nodes are in (submitSpeculative), so the
+		// nodes the autoscaler adds for it are there.
+		if _, ok := placement.ScaleUpPlace(nodeLabels[cluster], exp); !ok {
+			continue
+		}
 		if triedRecently(exp.TriedClusters, clusterID, l.triedClusterTTL, now) {
 			continue
 		}

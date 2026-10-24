@@ -113,6 +113,17 @@ func noNodeOfArchitectureReason(exp *domain.Experiment, cluster string, labelsBy
 		domain.NotAdmittedCapacityUnavailable, cluster, exp.Image, exp.ImageArchitecture, nodes)
 }
 
+// apartReason is the not_admitted_reason of a job the free nodes of cluster hold only with its
+// nodes in more than one place of its JobSpec.NodesWithin, and "" for any other.
+func apartReason(exp *domain.Experiment, cluster string, byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string) string {
+	if cluster == "" || !placement.FitsOnlyApart(byNode, nodeResources, labelsByNode, exp) {
+		return ""
+	}
+	level := strings.ReplaceAll(string(exp.EffectiveJob().NodesWithin()), "_", " ")
+	return fmt.Sprintf("%s: no %s of cluster %s has room for all %d of the job's nodes, which job.topology.nodes_within keeps in one %s",
+		domain.NotAdmittedCapacityUnavailable, level, cluster, exp.Job.Nodes(), level)
+}
+
 func shortOfADevice(shortage domain.Footprint) bool {
 	for key, short := range shortage {
 		if short > 0 && key.Kind == domain.ResourceKindAccelerator && !domain.CPUType.Is(domain.AcceleratorType(key.Name)) {

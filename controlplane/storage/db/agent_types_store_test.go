@@ -307,7 +307,7 @@ func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 	open := "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, open, defaultProjectOf(t, NewStore(pool, 3), orgID).ID)
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], CreatedAt: time.Now()}
-	if err := pes.SpawnAgent(ctx, open, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleCompetitor, AgentType: custom.ID, Model: "m"}); !errors.Is(err, ErrUnknownAgentType) {
+	if err := pes.SpawnAgent(ctx, open, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleExecutor, AgentType: custom.ID, Model: "m"}); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("an agent of an archived type: got = %v, want ErrUnknownAgentType", err)
 	}
 }
@@ -350,18 +350,18 @@ func TestAnAgentRunsAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], CreatedAt: time.Now()}
 		return agent.ID, pes.SpawnAgent(ctx, peID, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, AgentType: agentType, Model: model})
 	}
-	own, err := spawn(domain.SignupRoleCompetitor, custom.ID, "m")
+	own, err := spawn(domain.SignupRoleExecutor, custom.ID, "m")
 	if err != nil {
 		t.Fatalf("an agent of its org's type: got = %v, want = nil", err)
 	}
 	if got := signupOf(t, pes, peID, own); got.AgentType != custom.ID || got.Model != "m" || got.Hyperparameters != nil {
 		t.Errorf("its signup: got = %+v, want %s on m with its type's hyperparameters", got, custom.ID)
 	}
-	follows, err := spawn(domain.SignupRoleCompetitor, custom.ID, "")
+	follows, err := spawn(domain.SignupRoleExecutor, custom.ID, "")
 	if err != nil || signupOf(t, pes, peID, follows).Model != "" {
 		t.Errorf("an agent naming no model: got = %v, want its signup holding none", err)
 	}
-	if _, err := spawn(domain.SignupRoleCompetitor, foreign.ID, ""); !errors.Is(err, ErrUnknownAgentType) {
+	if _, err := spawn(domain.SignupRoleExecutor, foreign.ID, ""); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("another org's type: got = %v, want ErrUnknownAgentType", err)
 	}
 	if _, err := spawn(domain.SignupRoleBaseline, custom.ID, ""); !errors.Is(err, ErrUnknownAgentType) {

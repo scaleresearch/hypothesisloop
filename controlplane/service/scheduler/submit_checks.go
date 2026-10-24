@@ -191,6 +191,8 @@ func (s *Service) bindHypothesis(ctx context.Context, exp *domain.Experiment) er
 			Message: hypothesisNotInExperiment(exp),
 		}
 	}
+	// Asked before the repeats and the quota, so a job on a curated one is told where its claim is
+	// tested now. stillUncurated asks again under the lock.
 	if err := uncurated(hyp); err != nil {
 		return err
 	}

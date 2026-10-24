@@ -53,8 +53,7 @@ func TestASpecIsParsedByTheKeysOfTheCreateBody(t *testing.T) {
 	}
 }
 
-// The team is one list: researchers count toward no max_agents, executors do, and the old name of
-// the list is no key of the file.
+// The team is one list: researchers count toward no max_agents, executors do.
 func TestTheTeamIsTheAgentsListAndMaxAgentsBoundsItsExecutors(t *testing.T) {
 	file, err := Parse([]byte(valid + "agents:\n  - {agent_type: researcher, count: 2}\n  - {agent_type: generalist, count: 6, model: openrouter/qwen/qwen3.7-flash}\n"))
 	if err != nil {
@@ -70,9 +69,6 @@ func TestTheTeamIsTheAgentsListAndMaxAgentsBoundsItsExecutors(t *testing.T) {
 	var problems Problems
 	if err := file.Spec.Validate(); err == nil || !asProblems(err, &problems) || len(problems) != 1 || problems[0].Key != "agents" {
 		t.Errorf("seven executors under max_agents 6: got = %v, want refused on agents", err)
-	}
-	if _, err := Parse([]byte(valid + "researchers:\n  - {count: 1}\n")); err == nil {
-		t.Error("researchers: want refused, the list is agents")
 	}
 }
 

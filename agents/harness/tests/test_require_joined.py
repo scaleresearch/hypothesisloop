@@ -56,7 +56,7 @@ class FakePlatform(BaseHTTPRequestHandler):
             return self._reply(200, body)
         agent_id = self.path.rsplit("/", 1)[-1]
         if agent_id in FakePlatform.joined:
-            return self._reply(200, {"agent_id": agent_id, "role": "competitor", **FakePlatform.signup})
+            return self._reply(200, {"agent_id": agent_id, "role": "executor", **FakePlatform.signup})
         self._reply(FakePlatform.status_for_strangers, {"message": "unauthenticated: agent is not in platform experiment"})
 
     def do_POST(self):

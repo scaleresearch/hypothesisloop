@@ -26,34 +26,6 @@ type instance struct {
 	CPUName      *string `json:"cpu_name"`
 	PricePerHour float64 `json:"dph_total"`
 	Architecture *string `json:"cpu_arch"`
-	// ExtraEnv is the environment the instance was created with, as [key, value] pairs.
-	ExtraEnv [][]any `json:"extra_env"`
-}
-
-// network is the overlay the instance joined at create, empty for none.
-func (i instance) network() string {
-	for _, pair := range i.ExtraEnv {
-		if len(pair) == 0 {
-			continue
-		}
-		key, ok := pair[0].(string)
-		if !ok {
-			continue
-		}
-		if spelt, joined := strings.CutPrefix(key, overlayFlag); joined {
-			network, _ := networkOf(spelt)
-			return network
-		}
-	}
-	return ""
-}
-
-// privateAddress is the name the overlay's other members resolve the instance's container by.
-func (i instance) privateAddress() string {
-	if i.network() == "" {
-		return ""
-	}
-	return "C." + strconv.FormatInt(i.ID, 10)
 }
 
 // host is the machine an instance is on, empty until the vendor names one.
@@ -131,7 +103,6 @@ func (p *Provider) instance(found instance) provider.Instance {
 		StartedAt: startedAt,
 		Host:      found.host(), AcceleratorModel: text(found.GPUName), CPUModel: text(found.CPUName),
 		PricePerHour: found.PricePerHour, Architecture: text(found.Architecture),
-		PrivateAddress: found.privateAddress(),
 	}
 }
 

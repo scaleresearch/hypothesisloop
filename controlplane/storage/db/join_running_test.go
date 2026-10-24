@@ -27,7 +27,7 @@ func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *te
 	spawn := func(name string) string {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, Name: name + "-" + id, CreatedAt: time.Now().UTC()}
-		if err := pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
+		if err := pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor}); err != nil {
 			t.Fatalf("spawn %s: got = %v, want = nil", name, err)
 		}
 		return id
@@ -52,7 +52,7 @@ func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *te
 		agent := &domain.Agent{ID: id, CreatedAt: time.Now().UTC()}
 		return id, pes.JoinRunning(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role}, late)
 	}
-	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
+	if _, err := join(domain.SignupRoleExecutor); !errors.Is(err, ErrMaxAgentsReached) {
 		t.Fatalf("a third executor at work: got = %v, want = ErrMaxAgentsReached", err)
 	}
 	if err := pes.FinishAgent(ctx, pe, ended, "done"); err != nil {
@@ -61,7 +61,7 @@ func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *te
 	if _, err := join(domain.SignupRoleReviewer); !errors.Is(err, ErrSignupClosed) {
 		t.Fatalf("a reviewer: got = %v, want = ErrSignupClosed", err)
 	}
-	newcomer, err := join(domain.SignupRoleCompetitor)
+	newcomer, err := join(domain.SignupRoleExecutor)
 	if err != nil {
 		t.Fatalf("an executor in the place of one that finished: got = %v, want = nil", err)
 	}
@@ -73,7 +73,7 @@ func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *te
 		}
 	}
 	late.Used[newcomer] = 0
-	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
+	if _, err := join(domain.SignupRoleExecutor); !errors.Is(err, ErrMaxAgentsReached) {
 		t.Fatalf("an executor past max_agents at work: got = %v, want = ErrMaxAgentsReached", err)
 	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_agents = 5 WHERE id = $1`, pe); err != nil {
@@ -81,11 +81,11 @@ func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *te
 	}
 	late.Used[ended] = 1.5
 	late.MinShare = 2.5
-	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrNoShareLeft) {
+	if _, err := join(domain.SignupRoleExecutor); !errors.Is(err, ErrNoShareLeft) {
 		t.Fatalf("an even part below one trial: got = %v, want = ErrNoShareLeft", err)
 	}
 	late.MinShare = 2
-	added, err := join(domain.SignupRoleCompetitor)
+	added, err := join(domain.SignupRoleExecutor)
 	if err != nil {
 		t.Fatalf("an executor in a place max_agents gained: got = %v, want = nil", err)
 	}

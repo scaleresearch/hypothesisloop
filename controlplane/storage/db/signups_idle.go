@@ -54,7 +54,7 @@ SELECT platform_experiment_id, agent_id, since,
 FROM idle
 WHERE since <= now() - make_interval(secs => $1)
   AND (idle_noticed_at IS NULL OR idle_noticed_at < GREATEST(since, now() - make_interval(secs => $1)))
-ORDER BY platform_experiment_id, agent_id`, after.Seconds(), string(domain.SignupRoleCompetitor))
+ORDER BY platform_experiment_id, agent_id`, after.Seconds(), string(domain.SignupRoleExecutor))
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.IdleExecutors: %w", err)
 	}

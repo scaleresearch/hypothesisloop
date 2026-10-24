@@ -30,6 +30,7 @@ import { Text } from '@/components/ui/text'
 import { runClock } from '@/lib/format'
 import { phaseOf } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
+import { executorsAtWork } from '@/lib/team'
 import { budgetUnit } from '@/lib/units'
 import { About } from './_overview/about'
 import { overviewFigures } from './_overview/figures'
@@ -71,7 +72,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
     ...(quotas ?? []).map(q => q.agent_id),
     ...Object.keys(jobsByAgent),
   ])).sort()
-  const executorIds = knownAgentIds.filter(agentId => roster?.some(agent => agent.agent_id === agentId && agent.role === 'competitor'))
+  const executorIds = knownAgentIds.filter(agentId => roster?.some(agent => agent.agent_id === agentId && agent.role === 'executor'))
   const primary = results?.metrics[0]
   const hypothesisText = new Map((findings ?? []).map(h => [h.id, h.text]))
   const unit = budgetUnit(pe.budget_kind)
@@ -89,7 +90,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
     pe, phase, plannedOnly, unit, stats,
     hypothesisStats: reads.hypothesisStats,
     verdicts: reads.verdicts,
-    executors: roster?.filter(agent => agent.role === 'competitor').length,
+    executors: roster && executorsAtWork(roster).length,
   })
   const findingsSection = <Findings experimentId={id} findings={findings ?? []} direction={primary?.direction} />
 

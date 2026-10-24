@@ -16,28 +16,28 @@ func TestEachSignupRoleRunsAsItsAgentRole(t *testing.T) {
 		shares      bool
 		name        string
 	}{
-		{SignupRoleCompetitor, AgentRoleExecutor, DefaultAgentType, true, true, "Executor 1"},
+		{SignupRoleExecutor, AgentRoleExecutor, DefaultAgentType, true, true, "Executor 1"},
 		{SignupRoleReviewer, AgentRoleExecutor, DefaultAgentType, true, true, "Reviewer 1"},
 		{SignupRoleResearcher, AgentRoleResearcher, ResearcherAgentType, false, false, "Researcher 1"},
 		{SignupRoleBaseline, AgentRoleBaseline, "baseline", true, false, "Baseline 1"},
 		{SignupRolePlanner, AgentRolePlanner, PlannerAgentType, false, false, "Planner 1"},
 	} {
 		role := RoleOfSignup(c.signup)
-		if role != c.role || AgentTypeOfRole(role) != c.agentType {
-			t.Errorf("%s: role %s of type %s, want %s of %s", c.signup, role, AgentTypeOfRole(role), c.role, c.agentType)
+		if role != c.role || role.Info().AgentType != c.agentType {
+			t.Errorf("%s: role %s of type %s, want %s of %s", c.signup, role, role.Info().AgentType, c.role, c.agentType)
 		}
 		if c.signup.SubmitsJobs() != c.submitsJobs || (AgentSignup{Role: c.signup}).SharesBudget() != c.shares {
 			t.Errorf("%s: submits jobs %v and shares the budget %v, want %v and %v", c.signup, c.signup.SubmitsJobs(), (AgentSignup{Role: c.signup}).SharesBudget(), c.submitsJobs, c.shares)
 		}
-		if got := AgentName(c.signup, func(string) bool { return false }); got != c.name {
-			t.Errorf("%s: named %q, want %q", c.signup, got, c.name)
+		if got, err := AgentName(c.signup, func(string) bool { return false }); err != nil || got != c.name {
+			t.Errorf("%s: named %q, %v, want %q", c.signup, got, err, c.name)
 		}
 	}
 }
 
 func TestAResearcherJoinsARunningPlatformExperimentAsAnExecutorDoes(t *testing.T) {
 	for _, role := range SignupRoles {
-		want := role == SignupRoleCompetitor || role == SignupRoleResearcher
+		want := role == SignupRoleExecutor || role == SignupRoleResearcher
 		if got := TakesSignup(PlatformExpRunning, role); got != want {
 			t.Errorf("%s joins a running platform experiment: %v, want %v", role, got, want)
 		}
@@ -76,8 +76,8 @@ func TestEveryRoleIsDescribedAsTheDomainHasIt(t *testing.T) {
 		if info.Role != AgentRoles[i] || info.Name == "" || info.Description == "" {
 			t.Errorf("roles[%d] = %+v, want %s named and described", i, info, AgentRoles[i])
 		}
-		if info.AgentType != AgentTypeOfRole(info.Role) || info.OrgTypes != slices.Contains(OrgAgentRoles, info.Role) {
-			t.Errorf("%s: type %s and org types %v, want %s and %v", info.Role, info.AgentType, info.OrgTypes, AgentTypeOfRole(info.Role), slices.Contains(OrgAgentRoles, info.Role))
+		if info.AgentType != info.Role.Info().AgentType || info.OrgTypes != slices.Contains(OrgAgentRoles, info.Role) {
+			t.Errorf("%s: type %s and org types %v, want %s and %v", info.Role, info.AgentType, info.OrgTypes, info.Role.Info().AgentType, slices.Contains(OrgAgentRoles, info.Role))
 		}
 		if info.SignupRole != "" && RoleOfSignup(info.SignupRole) != info.Role {
 			t.Errorf("%s: added as %s, which runs as %s", info.Role, info.SignupRole, RoleOfSignup(info.SignupRole))

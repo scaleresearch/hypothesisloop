@@ -63,7 +63,7 @@ func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
 func TestPlatformExperimentsHealthPrintsALinePerAgent(t *testing.T) {
 	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
 		return map[string]any{"platform_experiment_id": "pe-1", "agents": []map[string]any{
-			{"agent_id": "ag-1", "role": "competitor", "first_job_seconds": 42, "jobs_in_flight": 2, "restarts": 3, "coordinator_messages": 1},
+			{"agent_id": "ag-1", "role": "executor", "first_job_seconds": 42, "jobs_in_flight": 2, "restarts": 3, "coordinator_messages": 1},
 			{"role": "coordinator", "jobs_in_flight": 0, "restarts": 1, "coordinator_messages": 0},
 		}}
 	})
@@ -74,7 +74,7 @@ func TestPlatformExperimentsHealthPrintsALinePerAgent(t *testing.T) {
 	if len(*got) != 1 || (*got)[0].Path != "/platform-experiments/pe-1/health" {
 		t.Fatalf("requests %+v, want one to /platform-experiments/pe-1/health", *got)
 	}
-	want := `{"agent_id":"ag-1","coordinator_messages":1,"first_job_seconds":42,"jobs_in_flight":2,"restarts":3,"role":"competitor"}
+	want := `{"agent_id":"ag-1","coordinator_messages":1,"first_job_seconds":42,"jobs_in_flight":2,"restarts":3,"role":"executor"}
 {"coordinator_messages":0,"jobs_in_flight":0,"restarts":1,"role":"coordinator"}
 `
 	if stdout.String() != want {

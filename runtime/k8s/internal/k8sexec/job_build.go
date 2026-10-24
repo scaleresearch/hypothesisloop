@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
@@ -250,11 +249,10 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 				FieldPath: "metadata.annotations['batch.kubernetes.io/job-completion-index']",
 			},
 		}
-		for _, v := range workloadenv.Gang(spec, group, plan.rankOffset, 0, plan.masterAddr) {
-			switch v.Name {
-			case jobenv.Rank, jobenv.TorchRank, jobenv.GroupRank:
+		for _, v := range workloadenv.Gang(spec, group, plan.rankOffset, plan.masterAddr) {
+			if v.Indexed {
 				env = append(env, corev1.EnvVar{Name: v.Name, ValueFrom: rankFieldRef})
-			default:
+			} else {
 				env = append(env, corev1.EnvVar{Name: v.Name, Value: v.Value})
 			}
 		}

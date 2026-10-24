@@ -77,14 +77,9 @@ var namePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 // ValidateName is the rule every Spec.Name meets: lowercase letters, digits and dashes, at most
 // MaxNameLength long. An adapter whose vendor cannot hold such a name as it is (a shorter limit,
 // another alphabet) keeps its own mapping and still returns the name unchanged from List.
-func ValidateName(name string) error { return validateName("instance name", name) }
-
-// ValidateNetworkName is ValidateName for the name of a Networker's network.
-func ValidateNetworkName(name string) error { return validateName("network name", name) }
-
-func validateName(what, name string) error {
+func ValidateName(name string) error {
 	if len(name) > MaxNameLength || !namePattern.MatchString(name) {
-		return fmt.Errorf("%s %q must be 1 to %d characters of a-z, 0-9 and dash", what, name, MaxNameLength)
+		return fmt.Errorf("instance name %q must be 1 to %d characters of a-z, 0-9 and dash", name, MaxNameLength)
 	}
 	return nil
 }
@@ -120,10 +115,10 @@ type Spec struct {
 	// given any.
 	AvoidHosts []string
 
-	// Network is the private network of a Networker the instance is rented in the place of and
-	// joins, empty for none. Create of a spec with one returns once the instance's
-	// PrivateAddress is known (Networker).
-	Network string
+	// Place is where a Networker's Place chose to rent the instance, which joins the vendor's
+	// private network there, empty for none. Create of a spec with one returns once the
+	// instance's PrivateAddress is known (Networker).
+	Place string
 }
 
 // ImageLogin is a login to the registry host Registry.
@@ -156,8 +151,8 @@ type Instance struct {
 	PricePerHour     float64
 	// Architecture is that of the machine's CPU, as image manifests name it.
 	Architecture string
-	// PrivateAddress is the address the other instances of its network reach it at, set for an
-	// instance created on one from the moment its Create returns, and empty for any other.
+	// PrivateAddress is the address the other instances of its place reach it at, set for an
+	// instance created in one from the moment its Create returns, and empty for any other.
 	PrivateAddress string
 }
 

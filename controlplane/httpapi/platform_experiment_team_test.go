@@ -50,7 +50,7 @@ func TestCreateMakesTheResearchersOfItsTeamBesideItsExecutors(t *testing.T) {
 			t.Errorf("signup %+v: want the researcher type for a researcher alone", signup)
 		}
 	}
-	if roles[domain.SignupRoleResearcher] != 2 || roles[domain.SignupRoleCompetitor] != 1 || len(store.team) != 3 {
+	if roles[domain.SignupRoleResearcher] != 2 || roles[domain.SignupRoleExecutor] != 1 || len(store.team) != 3 {
 		t.Errorf("team = %v, want two researchers and one executor", roles)
 	}
 	if code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "max_agents": 1, "agents": []map[string]any{{"count": 2}}})); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_agents" {
@@ -75,7 +75,7 @@ func TestTheAnswerCountsTheAgentsAtWorkPerPoolEntryAndOutsideIt(t *testing.T) {
 	}
 	counts, _ := out["agents_at_work"].(map[string]any)
 	pool, _ := counts["pool"].([]any)
-	if counts["total"] != float64(5) || counts["outside_pool"] != float64(3) || len(pool) != 2 ||
+	if counts["total"] != float64(5) || counts["outside_team"] != float64(3) || len(pool) != 2 ||
 		pool[0].(map[string]any)["at_work"] != float64(2) || pool[1].(map[string]any)["at_work"] != float64(0) {
 		t.Errorf("agents_at_work = %v, want 5 in all, 2 and 0 in the pool entries, 3 outside the pool", counts)
 	}

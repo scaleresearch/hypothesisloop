@@ -160,9 +160,9 @@ func (s *Store) PriorRuns(ctx context.Context, id string) ([]string, error) {
 // RunToRank is a platform experiment as its standings are read: what a listing names it by, its
 // metrics and creation, its COMPLETED jobs and its executors.
 type RunToRank struct {
-	PE          *domain.PlatformExperiment
-	Completed   map[string]bool
-	Competitors map[string]bool
+	PE        *domain.PlatformExperiment
+	Completed map[string]bool
+	Executors map[string]bool
 }
 
 // RunsToRank reads the platform experiments ids, in their order, in one query. One with no row
@@ -174,7 +174,7 @@ SELECT pe.id, pe.name, pe.status, pe.closed_at, pe.close_reason, pe.metrics, pe.
        ARRAY(SELECT s.agent_id FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.role = $2)
 FROM unnest($1::text[]) WITH ORDINALITY AS wanted(id, n)
 JOIN platform_experiments pe ON pe.id = wanted.id
-ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
+ORDER BY wanted.n`, ids, string(domain.SignupRoleExecutor))
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.RunsToRank: %w", err)
 	}
@@ -184,20 +184,20 @@ ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
 		pe := &domain.PlatformExperiment{}
 		var status string
 		var metricsRaw []byte
-		var completed, competitors []string
-		if err := rows.Scan(&pe.ID, &pe.Name, &status, &pe.ClosedAt, &pe.CloseReason, &metricsRaw, &pe.CreatedAt, &completed, &competitors); err != nil {
+		var completed, executors []string
+		if err := rows.Scan(&pe.ID, &pe.Name, &status, &pe.ClosedAt, &pe.CloseReason, &metricsRaw, &pe.CreatedAt, &completed, &executors); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.RunsToRank: scan: %w", err)
 		}
 		if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.RunsToRank: unmarshal metrics of %s: %w", pe.ID, err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
-		run := RunToRank{PE: pe, Completed: make(map[string]bool, len(completed)), Competitors: make(map[string]bool, len(competitors))}
+		run := RunToRank{PE: pe, Completed: make(map[string]bool, len(completed)), Executors: make(map[string]bool, len(executors))}
 		for _, id := range completed {
 			run.Completed[id] = true
 		}
-		for _, id := range competitors {
-			run.Competitors[id] = true
+		for _, id := range executors {
+			run.Executors[id] = true
 		}
 		out = append(out, run)
 	}

@@ -117,12 +117,20 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedNoQuota {
 		t.Fatalf("an agent with no quota = %v, want %s", err, RefusedNoQuota)
 	}
-	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{MaxPerHour: 1, Window: time.Hour}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedRateLimited {
-		t.Fatalf("an agent at its hourly limit = %v, want %s", err, RefusedRateLimited)
+	// An executor's seeds of one trial ran out its hourly limit. The two jobs inserted are of one
+	// hypothesis on one commit, one submission: another job of it passes a limit of 1, and one
+	// of another commit is refused.
+	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{MaxPerHour: 1, Window: time.Hour}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedNoQuota {
+		t.Fatalf("another job of the submission at its hourly limit = %v, want it past the limit to %s", err, RefusedNoQuota)
 	}
-	// The quota read counts what the limit counts: the two jobs inserted, none refused.
-	if recent, err := store.RecentSubmissions(ctx, exp.AgentID, exp.PlatformExperimentID, time.Hour); err != nil || recent != 2 {
-		t.Fatalf("recent submissions = %d, %v, want the 2 jobs inserted", recent, err)
+	otherCommit := burst
+	otherCommit.CodeRef = exp.CodeRef + "-other"
+	if _, err = store.AdmitExperimentTx(ctx, &otherCommit, noUsage, SubmissionRateLimit{MaxPerHour: 1, Window: time.Hour}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedRateLimited {
+		t.Fatalf("a job of another commit at its hourly limit = %v, want %s", err, RefusedRateLimited)
+	}
+	// The quota read counts what the limit counts: the one submission of the two jobs inserted.
+	if recent, err := store.RecentSubmissions(ctx, exp.AgentID, exp.PlatformExperimentID, time.Hour); err != nil || recent != 1 {
+		t.Fatalf("recent submissions = %d, %v, want the 1 submission of the 2 jobs inserted", recent, err)
 	}
 	if recent, err := store.RecentSubmissions(ctx, exp.AgentID, exp.PlatformExperimentID, time.Nanosecond); err != nil || recent != 0 {
 		t.Fatalf("submissions in the last nanosecond = %d, %v, want none", recent, err)

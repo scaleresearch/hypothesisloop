@@ -80,7 +80,7 @@ func actions(pe *domain.PlatformExperiment, caller auth.Principal) []domain.Plat
 	if acceptable(pe) == nil {
 		actions = append(actions, domain.PlatformExpActionAccept)
 	}
-	if domain.TakesSignup(pe.Status, domain.SignupRoleCompetitor) {
+	if domain.TakesSignup(pe.Status, domain.SignupRoleExecutor) {
 		actions = append(actions, domain.PlatformExpActionAddAgent)
 	}
 	return actions

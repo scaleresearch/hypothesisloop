@@ -22,11 +22,11 @@ import (
 // role with no agent, and a first job only for an agent that has one.
 func TestLatestRunHealthReadsEachAgentsLatestValues(t *testing.T) {
 	answers := map[string]string{
-		agentFirstJobSecondsMetric:          `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"42"]}`,
+		agentFirstJobSecondsMetric:          `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"42"]}`,
 		agentFirstCompletedJobSecondsMetric: ``,
-		agentJobsInFlightMetric:             `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"2"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
-		agentRestartsMetric:                 `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"3"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
-		agentCoordinatorMessagesMetric:      `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"4"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
+		agentJobsInFlightMetric:             `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"2"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
+		agentRestartsMetric:                 `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"3"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
+		agentCoordinatorMessagesMetric:      `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"4"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
@@ -43,8 +43,8 @@ func TestLatestRunHealthReadsEachAgentsLatestValues(t *testing.T) {
 	}
 	firstJob := 42.0
 	want := []domain.AgentHealth{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", FirstJobSeconds: &firstJob, JobsInFlight: 2, Restarts: 3, CoordinatorMessages: 4},
 		{PlatformExperimentID: "pe-1", Role: "coordinator", Restarts: 1},
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "executor", FirstJobSeconds: &firstJob, JobsInFlight: 2, Restarts: 3, CoordinatorMessages: 4},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -57,9 +57,9 @@ func TestLatestRunHealthReadsEachAgentsLatestValues(t *testing.T) {
 func TestLatestRunHealthReadsWhetherAnAgentIsRateLimited(t *testing.T) {
 	future, past := time.Now().Add(48*time.Hour).Truncate(time.Second).UTC(), time.Now().Add(-time.Minute).Unix()
 	answers := map[string]string{
-		agentRateLimitUtilizationMetric: `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"0.95"]}`,
-		agentRateLimitRejectedMetric:    `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
-		agentRateLimitResetsAtMetric: fmt.Sprintf(`{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"%d"]},{"metric":{"role":"coordinator"},"value":[1,"%d"]}`,
+		agentRateLimitUtilizationMetric: `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"0.95"]}`,
+		agentRateLimitRejectedMetric:    `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"1"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
+		agentRateLimitResetsAtMetric: fmt.Sprintf(`{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"%d"]},{"metric":{"role":"coordinator"},"value":[1,"%d"]}`,
 			future.Unix(), past),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,8 +73,8 @@ func TestLatestRunHealthReadsWhetherAnAgentIsRateLimited(t *testing.T) {
 	}
 	utilization := 0.95
 	want := []domain.AgentHealth{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", RateLimitUtilization: &utilization, RateLimitedUntil: &future},
 		{PlatformExperimentID: "pe-1", Role: "coordinator"},
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "executor", RateLimitUtilization: &utilization, RateLimitedUntil: &future},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -87,14 +87,14 @@ func TestLatestRunHealthReadsWhetherAnAgentIsRateLimited(t *testing.T) {
 func TestLatestHarnessStateReadsWhatEachHarnessLastSaid(t *testing.T) {
 	future, past := time.Now().Add(48*time.Hour).Truncate(time.Second).UTC(), time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	answers := map[string]string{
-		agentStateReportedAtMetric:      `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1760000100"]},{"metric":{"role":"coordinator"},"value":[1,"1760000200"]}`,
-		agentSubagentsMetric:            `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"3"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
-		agentTurnWaitingMetric:          `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"0"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
-		agentInstructionsDigestMetric:   `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"4886718345"]}`,
-		agentTurnSinceMetric:            `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1760000000"]},{"metric":{"role":"coordinator"},"value":[1,"1760000050"]}`,
-		agentRateLimitUtilizationMetric: `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"0.95"]},{"metric":{"agent_id":"ag-2","role":"competitor"},"value":[1,"0.5"]}`,
-		agentRateLimitRejectedMetric:    `{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"1"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
-		agentRateLimitResetsAtMetric: fmt.Sprintf(`{"metric":{"agent_id":"ag-1","role":"competitor"},"value":[1,"%d"]},{"metric":{"role":"coordinator"},"value":[1,"%d"]}`,
+		agentStateReportedAtMetric:      `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"1760000100"]},{"metric":{"role":"coordinator"},"value":[1,"1760000200"]}`,
+		agentSubagentsMetric:            `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"3"]},{"metric":{"role":"coordinator"},"value":[1,"0"]}`,
+		agentTurnWaitingMetric:          `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"0"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
+		agentInstructionsDigestMetric:   `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"4886718345"]}`,
+		agentTurnSinceMetric:            `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"1760000000"]},{"metric":{"role":"coordinator"},"value":[1,"1760000050"]}`,
+		agentRateLimitUtilizationMetric: `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"0.95"]},{"metric":{"agent_id":"ag-2","role":"executor"},"value":[1,"0.5"]}`,
+		agentRateLimitRejectedMetric:    `{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"1"]},{"metric":{"role":"coordinator"},"value":[1,"1"]}`,
+		agentRateLimitResetsAtMetric: fmt.Sprintf(`{"metric":{"agent_id":"ag-1","role":"executor"},"value":[1,"%d"]},{"metric":{"role":"coordinator"},"value":[1,"%d"]}`,
 			future.Unix(), past.Unix()),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,10 +112,10 @@ func TestLatestHarnessStateReadsWhatEachHarnessLastSaid(t *testing.T) {
 	}
 	utilization := 0.95
 	want := []domain.HarnessState{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1760000000, 0).UTC(), InstructionsDigest: "000123456789",
-			Model: domain.RateLimit{Rejected: true, Utilization: &utilization, ResetsAt: &future}, At: time.Unix(1760000100, 0).UTC()},
 		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Unix(1760000050, 0).UTC(),
 			Model: domain.RateLimit{ResetsAt: &past}, At: time.Unix(1760000200, 0).UTC()},
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "executor", Subagents: 3, TurnSince: time.Unix(1760000000, 0).UTC(), InstructionsDigest: "000123456789",
+			Model: domain.RateLimit{Rejected: true, Utilization: &utilization, ResetsAt: &future}, At: time.Unix(1760000100, 0).UTC()},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -161,7 +161,7 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	defer server.Close()
 	utilization := 0.4
 	err := New(server.URL).RecordHarnessState(context.Background(), time.Now(), []domain.HarnessState{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 2, TurnSince: time.Now(), Model: domain.RateLimit{Utilization: &utilization}},
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "executor", Subagents: 2, TurnSince: time.Now(), Model: domain.RateLimit{Utilization: &utilization}},
 		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Now(), InstructionsDigest: "0123456789ab", AgentType: "coordinator", AgentTypeVersion: 3},
 	})
 	if err != nil {
@@ -169,7 +169,7 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	}
 	state := []string{agentStateReportedAtMetric, agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric}
 	want := map[string][]string{
-		"competitor":  append(slices.Clone(state), agentRateLimitRejectedMetric, agentRateLimitUtilizationMetric),
+		"executor":    append(slices.Clone(state), agentRateLimitRejectedMetric, agentRateLimitUtilizationMetric),
 		"coordinator": append(slices.Clone(state), agentInstructionsDigestMetric, agentInstructionsVersionMetric),
 	}
 	if !reflect.DeepEqual(written, want) || versionOf != "coordinator" {

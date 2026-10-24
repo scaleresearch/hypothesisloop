@@ -354,7 +354,11 @@ func (s *draftStore) SetProposal(_ context.Context, id string, goalVersion int, 
 			pe.SetClosesAt(p.WaitUntil)
 			if p.Baseline != nil && len(s.baselines) == 0 {
 				signup := p.BaselineSignup
-				signup.Name = domain.AgentName(signup.Role, func(string) bool { return false })
+				name, err := domain.AgentName(signup.Role, func(string) bool { return false })
+				if err != nil {
+					return err
+				}
+				signup.Name = name
 				s.baselines = append(s.baselines, signup)
 			}
 			return nil
@@ -545,7 +549,11 @@ func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperimen
 		s.acceptedAgents, s.acceptedSignups = create, signups
 		for _, signup := range signups {
 			if signup.Role == domain.SignupRoleBaseline {
-				signup.Name = domain.AgentName(signup.Role, func(string) bool { return false })
+				name, err := domain.AgentName(signup.Role, func(string) bool { return false })
+				if err != nil {
+					return err
+				}
+				signup.Name = name
 				s.baselines = append(s.baselines, signup)
 				continue
 			}
@@ -611,7 +619,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 	for i, signup := range store.acceptedSignups {
 		agent := store.acceptedAgents[i]
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.InAgentSandbox || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.InAgentSandbox || signup.Role != domain.SignupRoleExecutor || signup.Model != "" ||
 			signup.Actor == nil || signup.Actor.ID != "u-1" {
 			t.Errorf("agent %d: %+v signed up as %+v, want a sandboxed executor added by the person who accepted", i, agent, signup)
 		}
@@ -696,7 +704,7 @@ func TestAcceptingADraftSignsUpTheResearchersOfItsTeam(t *testing.T) {
 		t.Errorf("max_agents %d and agents %+v, want one executor counted and the researcher in the team", pe.MaxAgents, pe.Agents)
 	}
 	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].Role != domain.SignupRoleResearcher || store.acceptedSignups[0].AgentType != domain.ResearcherAgentType ||
-		store.acceptedSignups[1].Role != domain.SignupRoleCompetitor {
+		store.acceptedSignups[1].Role != domain.SignupRoleExecutor {
 		t.Errorf("signups %+v, want a researcher and an executor", store.acceptedSignups)
 	}
 }
@@ -1595,7 +1603,7 @@ func (s *createdStore) CompletedJobs(context.Context, string) ([]*domain.Experim
 func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _ time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	participants := make([]db.StartParticipant, len(s.agentIDs))
 	for i, agentID := range s.agentIDs {
-		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
+		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleExecutor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
 	}
 	quotas, _, err := quotasFor(participants)
 	if err != nil {
@@ -1612,7 +1620,7 @@ func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _
 }
 
 func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
-	if role != domain.SignupRoleCompetitor {
+	if role != domain.SignupRoleExecutor {
 		return nil, nil
 	}
 	return s.agentIDs, nil
@@ -1651,7 +1659,7 @@ func (s *createdStore) ListSignups(context.Context, string) ([]string, error) { 
 func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
 	signups := make([]domain.AgentSignup, len(s.agentIDs))
 	for i, agentID := range s.agentIDs {
-		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}
+		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleExecutor}
 	}
 	return append(signups, s.baselines...), nil
 }

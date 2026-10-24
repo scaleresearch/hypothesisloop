@@ -259,7 +259,7 @@ func TestACuratedHypothesisTakesNoVerdictAndNoCheckout(t *testing.T) {
 		t.Errorf("a verdict of merged: got = nil, want an error")
 	}
 	_, err = svc.CheckOut(ctx, into, "researcher-1", "hl/pe-1/r/idea")
-	requireRefusal(t, "a checkout by a researcher", err, http.StatusForbidden, platformapi.ReasonResearcherSubmitsNoJob)
+	requireRefusal(t, "a checkout by a researcher", err, http.StatusForbidden, platformapi.ReasonResearcherChecksOutNothing)
 	if len(store.recorded) != 0 {
 		t.Errorf("checkouts recorded: got = %v, want none", store.recorded)
 	}

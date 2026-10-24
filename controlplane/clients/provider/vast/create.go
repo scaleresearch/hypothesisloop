@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -36,22 +35,18 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	if err := validateSpec(spec); err != nil {
 		return "", err
 	}
-	query, err := p.createQuery(ctx, spec)
-	if err != nil {
-		return "", err
-	}
-	offers, err := p.candidates(ctx, spec.Name, query)
+	offers, err := p.candidates(ctx, spec)
 	if err != nil {
 		return "", err
 	}
 	id, err := p.rentFirstAvailable(ctx, offers, newCreateRequest(spec))
 	if errors.Is(err, provider.ErrNoOffer) {
-		p.forgetOffers(query)
+		p.forgetOffers(spec)
 	}
 	if err != nil {
 		return "", err
 	}
-	if err := p.awaitListed(ctx, id, spec); err != nil {
+	if err := p.awaitListed(ctx, id, spec.Name); err != nil {
 		destroy := func(ctx context.Context) error { return p.Destroy(ctx, id) }
 		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
 	}
@@ -116,15 +111,13 @@ func (p *Provider) rent(ctx context.Context, chosen offer, req createRequest) (s
 	return strconv.FormatInt(created.Contract, 10), nil
 }
 
-// listed says the instance is in List under spec's name, with its private address when spec
-// joins a network.
-func (p *Provider) listed(ctx context.Context, id string, spec provider.Spec) (bool, error) {
-	instances, err := p.List(ctx, spec.Name)
+func (p *Provider) listed(ctx context.Context, id, name string) (bool, error) {
+	instances, err := p.List(ctx, name)
 	if err != nil {
 		return false, err
 	}
 	for _, found := range instances {
-		if found.ID == id && found.Name == spec.Name && (spec.Network == "" || found.PrivateAddress != "") {
+		if found.ID == id && found.Name == name {
 			return true, nil
 		}
 	}
@@ -132,35 +125,29 @@ func (p *Provider) listed(ctx context.Context, id string, spec provider.Spec) (b
 }
 
 // awaitListed holds Create until the rented instance is in List, which is what tells a caller
-// with no memory of this call that the name is taken, and what gives the address of one on a
-// network.
-func (p *Provider) awaitListed(ctx context.Context, id string, spec provider.Spec) error {
+// with no memory of this call that the name is taken.
+func (p *Provider) awaitListed(ctx context.Context, id, name string) error {
 	ctx, cancel := context.WithTimeout(ctx, listedTimeout)
 	defer cancel()
 	ticker := time.NewTicker(p.poll)
 	defer ticker.Stop()
 	for {
-		listed, err := p.listed(ctx, id, spec)
+		listed, err := p.listed(ctx, id, name)
 		if err != nil {
-			return fmt.Errorf("vast: instance %s was rented for %q and could not be confirmed in the list: %w", id, spec.Name, err)
+			return fmt.Errorf("vast: instance %s was rented for %q and could not be confirmed in the list: %w", id, name, err)
 		}
 		if listed {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			if spec.Network != "" {
-				return fmt.Errorf("vast: instance %s was rented for %q on network %q and is not in the list with its address there: %w", id, spec.Name, spec.Network, ctx.Err())
-			}
-			return fmt.Errorf("vast: instance %s was rented for %q and is not in the list: %w", id, spec.Name, ctx.Err())
+			return fmt.Errorf("vast: instance %s was rented for %q and is not in the list: %w", id, name, ctx.Err())
 		case <-ticker.C:
 		}
 	}
 }
 
-// newCreateRequest hands the argv over as JSON strings end to end, so no shell ever parses it. A
-// spec on a network joins it through the key the vendor reads an overlay from, which is no
-// environment name and so is added after the spec is validated.
+// newCreateRequest hands the argv over as JSON strings end to end, so no shell ever parses it.
 func newCreateRequest(spec provider.Spec) createRequest {
 	entrypoint, args := supervised(spec.Command)
 	req := createRequest{
@@ -169,15 +156,12 @@ func newCreateRequest(spec provider.Spec) createRequest {
 		RunType:  "args",
 		Label:    spec.Name,
 		Disk:     diskGB(spec),
-		Env:      maps.Clone(spec.Env),
+		Env:      spec.Env,
 		OnStart:  entrypoint,
 		Args:     args,
 	}
 	if req.Env == nil {
 		req.Env = map[string]string{}
-	}
-	if spec.Network != "" {
-		req.Env[overlayFlag+overlayName(spec.Network)] = "1"
 	}
 	if login := spec.ImageLogin; login != nil {
 		req.ImageLogin = "-u " + login.Username + " -p " + login.Password + " " + login.Registry
