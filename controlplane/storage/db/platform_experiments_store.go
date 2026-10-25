@@ -210,7 +210,7 @@ func (s *Store) GetPlatformExperiment(ctx context.Context, id string) (*domain.P
 SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.agents, pe.metrics, pe.report_interval_seconds, pe.starts_at, pe.ends_at, pe.status, pe.stages, pe.current_stage, ` + summarySQL + `, pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.model_budget_usd, pe.default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_agentsandboxes, pe.repository, pe.repository_url, pe.branch, pe.agent_image, pe.goal, pe.goal_version, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.removed_at, pe.repository_error, pe.repository_account, COALESCE(pe.agents_held, ''),
-       pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, COALESCE(ci.activity, ''), ci.activity_at,
+       pe.duration_hours, pe.started_at, pe.planner_ends_at, COALESCE(ci.activity, ''), ci.activity_at,
        pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers, pe.image, pe.image_architecture, pe.image_set_at,
        (SELECT pi.activity FROM experiment_signups planner JOIN agentsandbox_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `),
        (SELECT pi.activity_at FROM experiment_signups planner JOIN agentsandbox_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `)
@@ -224,7 +224,7 @@ WHERE pe.id = $1`
 	var createdBy, closedBy, acceptedBy domain.Actor
 	var proposal, acceptedAnswers []byte
 	var closesAt time.Time
-	var startsAt, startedAt, answeredAt, plannerEndsAt, acceptsAt, coordinatorActivityAt, plannerActivityAt *time.Time
+	var startsAt, startedAt, answeredAt, plannerEndsAt, coordinatorActivityAt, plannerActivityAt *time.Time
 	var coordinatorActivity string
 	var plannerActivity *string
 	var image domain.ExperimentImage
@@ -240,7 +240,7 @@ WHERE pe.id = $1`
 		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxAgentSandboxes, &pe.Repository, &pe.RepositoryURL, &pe.Branch, &pe.AgentImage,
 		&pe.Goal, &pe.GoalVersion, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RemovedAt, &pe.RepositoryError, &pe.RepositoryAccount, &pe.AgentsHeld,
-		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
+		&pe.DurationHours, &startedAt, &plannerEndsAt, &coordinatorActivity, &coordinatorActivityAt,
 		&pe.AcceptedAt, &acceptedBy.Kind, &acceptedBy.ID, &acceptedAnswers, &image.Image, &image.Architecture, &imageSetAt,
 		&plannerActivity, &plannerActivityAt,
 	)
@@ -251,7 +251,7 @@ WHERE pe.id = $1`
 		return nil, fmt.Errorf("platform_experiments_store.Get: %w", err)
 	}
 	if status == string(domain.PlatformExpDraft) {
-		pe.PlannerEndsAt, pe.AcceptsAt = plannerEndsAt, acceptsAt
+		pe.PlannerEndsAt = plannerEndsAt
 	}
 	if plannerActivity != nil {
 		pe.Activity = domain.ActivityOf(*plannerActivity, plannerActivityAt)
@@ -624,15 +624,24 @@ func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.Platfor
 	})
 }
 
-// writePlatformExperiment writes the patchable fields of pe while it is still in expectedStatus
+// optionalJSON is raw as a parameter, NULL for none.
+func optionalJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return []byte(raw)
+}
+
+// writePlatformExperiment writes the patchable fields of pe, its proposal where it has one, while it is still in expectedStatus
 // and, when baseline is not empty, still has that baseline, and announces a changed description. It
 // answers which fields of the plan the write changed, for platform_experiment.plan (planChange).
 func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) ([]string, error) {
 	const q = `UPDATE platform_experiments pe
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
-    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14, model_budget_usd=$16
-FROM (SELECT name, description, duration_hours, metrics, budget_accelerator_hours, max_agents, max_concurrent_accelerators, report_interval_seconds, starts_at, model_budget_usd
+    max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14, model_budget_usd=$16,
+    proposal=COALESCE($17::jsonb, pe.proposal)
+FROM (SELECT name, description, duration_hours, metrics, budget_accelerator_hours, max_agents, max_concurrent_accelerators, report_interval_seconds, starts_at, model_budget_usd, proposal
       FROM platform_experiments WHERE id = $1 FOR UPDATE) old
 WHERE pe.id=$1 AND pe.status=$10 AND ($15 = '' OR pe.baseline_job_id = $15)
 RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours IS DISTINCT FROM old.duration_hours,
@@ -644,6 +653,7 @@ RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours I
     CASE WHEN pe.max_concurrent_accelerators IS DISTINCT FROM old.max_concurrent_accelerators THEN 'max_concurrent_accelerators' END,
     CASE WHEN pe.report_interval_seconds IS DISTINCT FROM old.report_interval_seconds THEN 'report_interval_seconds' END,
     CASE WHEN pe.model_budget_usd IS DISTINCT FROM old.model_budget_usd THEN 'model_budget_usd' END,
+    CASE WHEN pe.proposal IS DISTINCT FROM old.proposal THEN 'machine' END,
     CASE WHEN pe.starts_at IS DISTINCT FROM old.starts_at THEN 'starts_at' END], NULL)`
 	var descriptionMoved bool
 	var planned []string
@@ -651,7 +661,7 @@ RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours I
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, optionalTime(pe.StartsAt), pe.ClosesAt(),
 		expectedStatus,
-		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline, pe.ModelBudgetUSD,
+		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline, pe.ModelBudgetUSD, optionalJSON(pe.Proposal),
 	).Scan(&descriptionMoved, &planned)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("status or baseline changed concurrently, retry")
@@ -701,11 +711,11 @@ func unmarshalList[T any](raw []byte, list *[]T) error {
 }
 
 // SetPlatformExperimentImage records image as what the jobs of platform experiment id submitted
-// from now on run in, while it is open or running. It reports whether it was.
+// from now on run in, until it closes. It reports whether it was.
 func (s *Store) SetPlatformExperimentImage(ctx context.Context, id string, image domain.ExperimentImage) (bool, error) {
 	tag, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments SET image = $2, image_architecture = $3, image_set_at = $4, updated_at = now()
-WHERE id = $1 AND status IN ('open', 'running')`, id, image.Image, image.Architecture, image.SetAt)
+WHERE id = $1 AND status <> 'closed'`, id, image.Image, image.Architecture, image.SetAt)
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.SetImage: %w", err)
 	}

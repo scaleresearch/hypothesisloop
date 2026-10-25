@@ -5,14 +5,15 @@ import useSWR from 'swr'
 import { checkGitHubInstallation, fetchGitHubInstallations, fetchGitHubRepositories, GITHUB_NOT_CONFIGURED } from '@/lib/api/github'
 import { checkRepository } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
-import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
+import { clsx } from 'clsx'
+import { installationSettingsURL, useGitHubApp } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { GitHubProblem, GitHubSettingsLink, InstallProgress } from '@/components/github-status'
-import { Button } from '@/components/ui/button'
+import { ConnectGitHubRow, useConnectGitHub } from '@/components/connect-github-step'
+import { GitHubProblem, InstallProgress } from '@/components/github-status'
+import { controlHeight } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { inlineLinkClass } from '@/components/ui/link'
+import { textLinkClass } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
-import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
@@ -42,14 +43,6 @@ export function codeFields(value: string, branch: string): { repository?: string
   return namesRepository(value) ? { repository: value, branch: branch.trim() } : repositoryFields(value)
 }
 
-// GitHub's form for a new repository, private and on the connected account when there is one.
-function newRepositoryURL(form: string, accounts: OrgGitHubInstallation[]): string {
-  const url = new URL(form)
-  if (accounts.length === 1) url.searchParams.set('owner', accounts[0].account_login)
-  url.searchParams.set('visibility', 'private')
-  return url.toString()
-}
-
 // The installations GitHub says are unusable, asked by the check Settings runs on each: removed,
 // suspended, or without a permission the App asks for. A check that failed says nothing of one.
 async function unusable(orgID: string, accounts: OrgGitHubInstallation[]): Promise<number[]> {
@@ -73,47 +66,42 @@ function accountOf(value: string, accounts: OrgGitHubInstallation[], unasked?: O
  * before anything is created.
  */
 function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: OrgGitHubInstallation; onInstall?: () => void }) {
-  const { org, project } = useTenant()
+  const { project } = useTenant()
   const { error, isValidating, mutate } = useSWR(keys.repositoryCheck(project.id, value), () => checkRepository(project.id, repositoryFields(value)))
   if (!error) return null
   return (
-    <Inline gap="sm">
-      <GitHubProblem
-        reason={error instanceof ApiError ? error.reason : undefined}
-        message={error.message}
-        account={account?.account_login ?? ''}
-        installation={account}
-        onInstall={onInstall}
-        onRetry={() => void mutate()}
-        retrying={isValidating}
-      />
-      <span aria-hidden className="text-xs text-muted">·</span>
-      <GitHubSettingsLink orgID={org.id} />
-    </Inline>
+    <GitHubProblem
+      reason={error instanceof ApiError ? error.reason : undefined}
+      message={error.message}
+      account={account?.account_login ?? ''}
+      installation={account}
+      onInstall={onInstall}
+      onRetry={() => void mutate()}
+      retrying={isValidating}
+    />
   )
 }
 
 /**
  * Picks the repository a platform experiment works on, from those the org's connected GitHub
  * accounts cover. Typing searches all of them on the server, which reads GitHub on each call.
- * With none chosen the platform creates one on a connected account. Unless `compact`, the way on
- * is offered: the person creates the repository on GitHub and refreshes this list to choose it,
- * or an owner lets the App reach more in a new tab, after which the list is read again. With no
- * account connected an owner installs the App from here. On a deployment whose git host is not GitHub
- * the repository is typed: the platform creates none there. A new repository goes to the only
- * connected account or the org's default, named in the option, and with several the person may
- * pick another. Unless `compact`, what is picked is checked as the create would check it.
+ * With none chosen the platform creates a new private one from the experiment template, on the
+ * org's default account or the only one, and with several the person may pick another. With no
+ * account connected it is the way to connect one. On a deployment whose git host is not GitHub
+ * the repository is typed. What is picked is checked as the create would check it.
  */
-export function RepositorySelect({ value, onChange, compact = false }: {
+export function RepositorySelect({ value, onChange, invalid = false, describedBy }: {
   value: string
   onChange: (repository: string) => void
-  compact?: boolean
+  /** Marks the field as what stops the create. */
+  invalid?: boolean
+  describedBy?: string
 }) {
   const { org } = useTenant()
   const editsOrg = org.actions.includes('edit')
   const [q, setQ] = useState('')
   const app = useGitHubApp()
-  const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
+  const { install, start, reset } = useConnectGitHub()
   const onInstall = editsOrg && app.data ? start : undefined
   const installations = useSWR(app.data ? keys.githubInstallations(org.id) : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
@@ -122,39 +110,21 @@ export function RepositorySelect({ value, onChange, compact = false }: {
     listedAccounts.length > 0 ? keys.githubInstallationChecks(org.id, listedAccounts.map(a => a.installation_id)) : null,
     () => unusable(org.id, listedAccounts),
   ).data ?? []
-  const [refreshing, setRefreshing] = useState(false)
-  const { data, error, mutate } = useSWR(
+  const { data, error } = useSWR(
     connected ? keys.githubRepositories(org.id, q) : null,
     () => fetchGitHubRepositories(org.id, { q, limit: LISTED }),
     { keepPreviousData: true },
   )
 
   if (app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED) {
-    return (
-      <>
-        <Input className="w-full" aria-label="Repository" value={value} onChange={e => onChange(e.target.value)} />
-        <Text variant="hint">A repository on this deployment&apos;s git host, created there first.</Text>
-      </>
-    )
+    return <Input className="w-full" aria-label="Repository" placeholder="owner/name" invalid={invalid} aria-describedby={describedBy} value={value} onChange={e => onChange(e.target.value)} />
   }
   if (app.error) return <InlineError>Could not read the deployment&apos;s git host: {app.error.message}</InlineError>
-  if (installations.error) return <InlineError>Could not load the GitHub accounts of {org.name}: {installations.error.message}</InlineError>
-  if (installations.data && !connected) {
-    return (
-      <>
-        <Text variant="note">
-          No GitHub account is connected to {org.name}.{' '}
-          {onInstall
-            ? <><Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>Install GitHub App</Button>.</>
-            : 'An owner of the org installs the GitHub App.'}{' '}
-          <GitHubSettingsLink orgID={org.id} />
-        </Text>
-        <InstallProgress install={install} onCancel={reset} />
-      </>
-    )
-  }
+  if (installations.error) return <InlineError>Could not load the connected GitHub accounts: {installations.error.message}</InlineError>
+  if (!installations.data) return <div aria-hidden className={clsx(controlHeight.default, 'animate-pulse rounded border border-border-control bg-surface-inset')} />
+  if (!connected) return <ConnectGitHubRow invalid={invalid} describedBy={describedBy} />
 
-  const newLabel = compact ? 'New private repository' : 'A new private repository'
+  const newLabel = 'New repository'
   const listed = data?.items ?? []
   const more = (data?.total ?? 0) - listed.length
   // What is chosen stays an option while a search leaves it out.
@@ -169,19 +139,15 @@ export function RepositorySelect({ value, onChange, compact = false }: {
   const createsUnasked = unasked != null
   options.unshift(...creating.filter(a => a !== unasked).map(a => ({ value: ON_ACCOUNT + a.account_login, label: `${newLabel} on ${a.account_login}`, badge: undefined })))
   const unaskedLabel = unasked ? `${newLabel} on ${unasked.account_login}` : newLabel
-  async function refresh() {
-    setRefreshing(true)
-    try {
-      await mutate()
-    } finally {
-      setRefreshing(false)
-    }
-  }
+  // GitHub lists only the repositories an installation was given; its settings widen that, and the
+  // list is read again when this window takes focus back.
+  const access = accountOf(value, accounts, unasked) ?? accounts[0]
   return (
     <>
       <SearchableSelect
         fieldSize="default"
-        className={compact ? 'w-80 max-w-full' : 'w-full'}
+        className="w-full"
+        aria-label="Repository"
         value={value}
         onChange={onChange}
         onSearch={setQ}
@@ -191,22 +157,14 @@ export function RepositorySelect({ value, onChange, compact = false }: {
         options={options}
         hint={more > 0 ? `${more} more, type to search` : undefined}
       />
-      {app.data && !compact && (
+      {access && (
         <Text variant="hint">
-          Not listed?{' '}
-          <a href={newRepositoryURL(app.data.new_repository_url, accounts)} target="_blank" rel="noreferrer" className={inlineLinkClass}>create it on GitHub</a>
-          {onInstall && (
-            <>
-              {' '}or{' '}
-              <Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>give the App access</Button>
-            </>
-          )}, then{' '}
-          <Button type="button" variant="link" size="sm" loading={refreshing} onClick={() => void refresh()}>refresh this list</Button>.
+          Missing a repository? <a href={installationSettingsURL(access)} target="_blank" rel="noreferrer" className={textLinkClass}>Adjust GitHub access</a>
         </Text>
       )}
-      {!compact && <InstallProgress install={install} onCancel={reset} />}
+      <InstallProgress install={install} onCancel={reset} />
       {error && <InlineError>Could not list the repositories: {error.message}</InlineError>}
-      {!compact && (value !== '' || createsUnasked) && <RepositoryCheckNote value={value} account={accountOf(value, accounts, unasked)} onInstall={onInstall} />}
+      {(value !== '' || createsUnasked) && <RepositoryCheckNote value={value} account={accountOf(value, accounts, unasked)} onInstall={onInstall} />}
     </>
   )
 }

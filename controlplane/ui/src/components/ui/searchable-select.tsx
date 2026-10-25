@@ -42,8 +42,14 @@ interface SearchableSelectProps {
   fieldSize?: FieldSize
   /** The most rows shown, the rest left to a search. */
   limit?: number
+  /** A last row that does something instead of picking a value, e.g. opening where more options are made. */
+  action?: { label: string; onSelect: () => void }
+  disabled?: boolean
   'aria-label'?: string
 }
+
+// The value of the action row, which no option has.
+const ACTION = '\u0000action'
 
 function matches(o: SearchableSelectOption, query: string): boolean {
   const text = `${o.label} ${o.keywords ?? ''}`.toLowerCase()
@@ -60,7 +66,7 @@ function grouped(options: SearchableSelectOption[]): [string | undefined, Search
  * The Select for a list long enough that typing beats scrolling. Options are shown in the order
  * passed in, so the caller decides the sort.
  */
-export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, hideAllOption, onSearch, hint, mono, fieldSize = 'sm', limit, 'aria-label': ariaLabel }: SearchableSelectProps) {
+export function SearchableSelect({ options, value, onChange, placeholder, allLabel = 'All', className, hideAllOption, onSearch, hint, mono, fieldSize = 'sm', limit, action, disabled, 'aria-label': ariaLabel }: SearchableSelectProps) {
   const [query, setQuery] = useState('')
   useEffect(() => {
     if (!onSearch) return
@@ -79,8 +85,9 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
   return (
     <Combobox
       immediate
+      disabled={disabled}
       value={value}
-      onChange={(v: string | null) => onChange(v ?? '')}
+      onChange={(v: string | null) => v === ACTION ? action?.onSelect() : onChange(v ?? '')}
       onClose={() => setQuery('')}
       as="div"
       className={clsx('relative', className ?? 'min-w-44')}
@@ -120,6 +127,11 @@ export function SearchableSelect({ options, value, onChange, placeholder, allLab
             ))}
             {more > 0 && <OptionNote>{more} more, type to search</OptionNote>}
             {hint && <OptionNote>{hint}</OptionNote>}
+            {action && (
+              <ComboboxOption value={ACTION} className={clsx(optionClass(fieldSize, mono), 'border-t text-accent')}>
+                <OptionLabel>{action.label}</OptionLabel>
+              </ComboboxOption>
+            )}
           </ComboboxOptions>
         </>
       )}

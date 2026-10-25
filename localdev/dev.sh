@@ -9,9 +9,10 @@
 #            them in localdev/.bin; start the tunnels that are down, the UI unless it runs, and the
 #            git server when GIT_HOST_PROVIDER is plain. The settings rent compute: a sandbox
 #            section on the provider SANDBOX_PROVIDER in .env names, for hosted agents, and a
-#            cloud_compute section on the provider CLOUD_COMPUTE_PROVIDER names, for jobs, both run
-#            by control-service itself. They name the tunnels and the images under IMAGE_TAG in the
-#            registry CONTAINER_REGISTRY_PROVIDER names. Its inputs are keys of .env, and every
+#            cloud_compute entry on each provider CLOUD_COMPUTE_PROVIDERS lists (vast and runpod
+#            unless it says otherwise), for jobs, all run by control-service itself. They name the
+#            tunnels and the images under IMAGE_TAG in the registry CONTAINER_REGISTRY_PROVIDER
+#            names. Its inputs are keys of .env, and every
 #            missing one is named before anything is touched
 #   api      rebuild and restart the API and metrics-service with the settings as they were last
 #            rendered. Everything else keeps running
@@ -38,9 +39,11 @@ bin=localdev/.bin
 run=localdev/.run
 processes=(control-service metrics-service ui git-server)
 rented="${bin}/compute.yaml"
-# The compute provider jobs are rented machines on, and the name every org sees that compute under.
-cloud_provider="$( [[ ! -f .env ]] || lib_env_value CLOUD_COMPUTE_PROVIDER)"
-cloud_cluster="${cloud_provider:+hypothesisloop-${cloud_provider}}"
+# The compute providers jobs are rented machines on, each a cluster every org sees.
+cloud_providers=()
+if [[ -f .env ]]; then
+  mapfile -t cloud_providers < <(lib_cloud_providers)
+fi
 
 mkdir -p "${bin}" "${run}"
 export HYPOTHESISLOOP_CONFIG="${repo}/${settings}"
@@ -139,15 +142,20 @@ render_settings() {
   done
 }
 
-# The sandbox and cloud_compute sections are the examples the core ships, each with the provider
-# .env names and its values from .env (lib_rented), appended
-# to the settings. The provider's key reaches control-service through its environment file.
+# The sandbox and cloud_compute sections are the examples the core ships, the sandbox on the
+# provider .env names and one cloud_compute entry per provider of cloud_providers, each with its
+# values from .env (lib_rented), appended to the settings. Each provider's key reaches
+# control-service through its environment file.
 render_compute() {
-  local value sandbox cloud
+  local value sandbox cloud provider pairs=() expected=("  provider: ${sandbox_provider}")
   sandbox="$(lib_rented controlplane/settings/sandbox.yaml "${sandbox_provider}")"
-  cloud="$(lib_rented controlplane/settings/cloud-compute.yaml "${cloud_provider}" "${cloud_cluster}")"
+  for provider in "${cloud_providers[@]}"; do
+    pairs+=("${provider}" "$(lib_cloud_cluster "${provider}")")
+    expected+=("  - cluster_name: $(lib_cloud_cluster "${provider}")" "    provider: ${provider}")
+  done
+  cloud="$(lib_rented controlplane/settings/cloud-compute.yaml "${pairs[@]}")"
   printf '%s\n\n%s\n' "${sandbox}" "${cloud}" > "${rented}"
-  for value in "  provider: ${sandbox_provider}" "  - cluster_name: ${cloud_cluster}" "    provider: ${cloud_provider}"; do
+  for value in "${expected[@]}"; do
     grep -qF -- "${value}" "${rented}" || { echo "dev: controlplane/settings/sandbox.yaml or cloud-compute.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
 }
@@ -230,6 +238,10 @@ start_git_server() {
   mkdir -p "${HL_GIT_ROOT}"
   if [[ ! -d "${HL_GIT_ROOT}/${HL_GIT_EXPERIMENT_TEMPLATE}" ]]; then
     git clone --quiet --bare "${HL_EXPERIMENT_TEMPLATE_URL}" "${HL_GIT_ROOT}/${HL_GIT_EXPERIMENT_TEMPLATE}"
+  else
+    # A bare clone has no fetch refspec, so the branches are named. Offline, the copy stays as it is.
+    git -C "${HL_GIT_ROOT}/${HL_GIT_EXPERIMENT_TEMPLATE}" fetch --quiet --prune "${HL_EXPERIMENT_TEMPLATE_URL}" \
+      '+refs/heads/*:refs/heads/*' 2>/dev/null || true
   fi
   stop git-server
   require_port "${HL_GIT_PORT}"
@@ -283,19 +295,20 @@ case "${action}" in
     start_datastores
     start_git_server
     start_control_plane
-    # Both clusters take the jobs of org default, as placement chooses between them: the k3s
-    # cluster on this machine and the cloud cluster. Both belong to the org every schema starts
-    # with, the platform's, so every org's jobs are placed on them. Registering again changes
-    # nothing, and each is turned on again for org default, which an e2e run stopped half way may
-    # have left off. control-service rents nothing for the cloud cluster until it is registered.
+    # Every cluster takes the jobs of org default, as placement chooses between them: the k3s
+    # cluster on this machine and each cloud cluster. All belong to the org every schema starts
+    # with, the platform's, so every org's jobs are placed on them. control-service registers each
+    # cloud cluster itself as it starts. Each is turned on again for org default, which an e2e run
+    # stopped half way may have left off.
     lib_register_local_cluster
     lib_default_org_cluster local enable
-    lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
-    lib_default_org_cluster "${cloud_cluster}" enable
+    for provider in "${cloud_providers[@]}"; do
+      lib_default_org_cluster "$(lib_cloud_cluster "${provider}")" enable
+    done
     must_stay_up control-service
     start_ui
     echo "dev: API http://localhost:${HL_API_PORT} (from outside ${public_api}), UI http://localhost:3000"
-    echo "dev: control-service rents jobs for cluster ${cloud_cluster} and runs hosted agents on ${sandbox_provider}"
+    echo "dev: control-service rents jobs for $(for p in "${cloud_providers[@]}"; do printf '%s ' "$(lib_cloud_cluster "${p}")"; done)and runs hosted agents on ${sandbox_provider}"
     status
     ;;
   api)

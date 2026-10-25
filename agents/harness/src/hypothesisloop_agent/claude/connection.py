@@ -141,11 +141,11 @@ async def run(setup: core.RunSetup, store: Store, running: Running, resume_id: s
             # The agent ended its turn. With no job of its own submitted, queued or running on the
             # platform, no background task the CLI lists and no subagent whose start it has not
             # listed yet, its wait waits for nothing: it is told so at every such end but the one
-            # of the turn that answered the statement, after which it waits and the platform's
+            # of the turn that answered the statement and while the platform takes no job of it yet, after which it waits and the platform's
             # recurring agent.idle is its timer. A read that failed says nothing.
             answered, told_nothing = told_nothing, False
             if (config.submits_jobs(cfg) and not answered and not background and not subagents.live()
-                    and await updates.jobs_in_flight(watch_env) == 0):
+                    and await updates.jobs_in_flight(watch_env) == 0 and not await core.takes_no_job_yet(setup)):
                 log.info("nothing in flight at the end of the turn, saying so")
                 hooks.forget_job_reads()
                 await client.query(await prompts.turn_start(setup, watch_env, updates.NOTHING_IN_FLIGHT))

@@ -24,18 +24,19 @@ export default function GitHubReturnPage() {
   useEffect(() => {
     void takeReturn(query, finishGitHubInstall).then(taken => {
       setView(taken)
-      if (taken.view !== 'nothing') window.close()
+      if (taken.view !== 'nothing' && taken.view !== 'installing') window.close()
     })
   }, [query])
 
   if (!view) return <Loading text="Connecting GitHub…" />
+  if (view.view === 'installing') return <Loading text="Opening GitHub…" />
   const back = view.view === 'connected' && view.returnTo ? view.returnTo : githubCardPath(org.id)
   return (
     <Stack start>
       {view.view === 'connected' && <Text>Connected {view.account}.</Text>}
       {view.view === 'failed' && <ErrorMessage>{view.message}</ErrorMessage>}
       {view.view === 'changed' && <Text>Your changes on GitHub are saved.</Text>}
-      {view.view === 'nothing' && <Text>This page finishes an install of the GitHub App. Nothing was connected.</Text>}
+      {view.view === 'nothing' && <Text>This page finishes connecting GitHub. Nothing was connected.</Text>}
       <TextLink href={back}>Back to HypothesisLoop</TextLink>
     </Stack>
   )

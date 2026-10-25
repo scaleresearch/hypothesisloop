@@ -109,6 +109,9 @@ func setAgentsTx(ctx context.Context, tx *Write, platformExpID string, maxAgents
 	if err := evictAboveMaxTx(ctx, tx, platformExpID, maxAgents, pool == nil); err != nil {
 		return false, err
 	}
+	if err := evictAboveEntriesTx(ctx, tx, platformExpID, pool); err != nil {
+		return false, err
+	}
 	atWork, err := agentsAtWork(ctx, tx, platformExpID)
 	if err != nil {
 		return false, err
@@ -172,6 +175,60 @@ OFFSET $2`, platformExpID, maxAgents)
 		return nil
 	}
 	return lowerPoolTx(ctx, tx, platformExpID, evicted)
+}
+
+// evictAboveEntriesTx cuts, of the running platform experiment platformExpID, the newest executors
+// at work of each agent type and model above the count pool wants of it, none for one pool does
+// not name, as a lowered max_agents cuts them. A pool that is nil, and one that does not run,
+// cut nobody. Researchers are never cut: holdsAtWork refuses fewer of them than are at work.
+func evictAboveEntriesTx(ctx context.Context, tx *Write, platformExpID string, pool domain.AgentPool) error {
+	if pool == nil {
+		return nil
+	}
+	var status string
+	var stage int
+	if err := tx.QueryRow(ctx, `SELECT status, current_stage FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&status, &stage); err != nil {
+		return fmt.Errorf("read status: %w", err)
+	}
+	if status != string(domain.PlatformExpRunning) {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+SELECT s.agent_id, `+signupKeySQL+` FROM experiment_signups s
+WHERE s.platform_experiment_id = $1 AND `+executorAtWorkSQL+`
+ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
+	if err != nil {
+		return fmt.Errorf("executors at work: %w", err)
+	}
+	type working struct {
+		agentID string
+		key     domain.PoolKey
+	}
+	all, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (working, error) {
+		var w working
+		return w, row.Scan(&w.agentID, &w.key.AgentType, &w.key.Model)
+	})
+	if err != nil {
+		return fmt.Errorf("executors at work: %w", err)
+	}
+	wanted := map[domain.PoolKey]int{}
+	for _, e := range pool {
+		wanted[e.Key()] += e.Count
+	}
+	seen := map[domain.PoolKey]int{}
+	var evicted []string
+	for _, w := range all {
+		if seen[w.key]++; seen[w.key] > wanted[w.key] {
+			evicted = append(evicted, w.agentID)
+		}
+	}
+	if len(evicted) == 0 {
+		return nil
+	}
+	if err := cutTx(ctx, tx, platformExpID, evicted, stage, CutMaxAgentsLowered); err != nil {
+		return fmt.Errorf("cut executors above agents: %w", err)
+	}
+	return nil
 }
 
 // lockedPoolTx locks platform experiment platformExpID and reads its agents.

@@ -1,65 +1,137 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
+import { clsx } from 'clsx'
 import useSWR from 'swr'
-import { fetchGitHubInstallations } from '@/lib/api/github'
+import { Github } from 'lucide-react'
+import { fetchGitHubInstallations, GITHUB_NOT_CONFIGURED } from '@/lib/api/github'
+import { ApiError } from '@/lib/api/request'
 import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { GitHubSettingsLink, InstallProgress } from '@/components/github-status'
+import { InstallProgress } from '@/components/github-status'
 import { Button } from '@/components/ui/button'
-import { Inline } from '@/components/ui/stack'
+import { Dialog } from '@/components/ui/dialog'
+import { controlHeight } from '@/components/ui/field'
+import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { OrgGitHubInstallation } from '@/types/api'
 
-/**
- * Where the org stands with GitHub when it creates an experiment. On a deployment whose git host
- * is GitHub the org either has an account connected, to name a repository on or have one created
- * on, or must connect one first. Undefined while it is being read, and on a deployment whose git
- * host is another one, where the repository is named by hand.
- */
-export function useGitHub(): 'connected' | 'unconnected' | undefined {
+/** What a member who cannot connect GitHub is told. */
+export const ASK_OWNER = 'Ask an owner of your organization to connect GitHub.'
+
+/** The GitHub accounts the org connected, read under the key every GitHub view shares. */
+function useInstallations() {
   const { org } = useTenant()
   const app = useGitHubApp()
-  const installations = useSWR(app.data ? keys.githubInstallations(org.id) : null, () => fetchGitHubInstallations(org.id))
+  return useSWR(app.data ? keys.githubInstallations(org.id) : null, () => fetchGitHubInstallations(org.id))
+}
+
+/**
+ * Where the org stands with GitHub when it creates an experiment: an account connected, to name a
+ * repository on or have one created on, or none yet. Undefined while it is being read, and on a
+ * deployment whose git host is another one, where the repository is named by hand.
+ */
+export function useGitHub(): 'connected' | 'unconnected' | undefined {
+  const app = useGitHubApp()
+  const installations = useInstallations()
   if (!app.data || !installations.data) return undefined
   return installations.data.total > 0 ? 'connected' : 'unconnected'
 }
 
-/** Whether the org must connect GitHub before it creates an experiment. */
-export function useNeedsGitHub(): boolean {
-  return useGitHub() === 'unconnected'
+/** The GitHub accounts the org connected, once read. */
+export function useGitHubAccounts(): OrgGitHubInstallation[] | undefined {
+  return useInstallations().data?.items
+}
+
+/** Whether the deployment's git host is a plain one, where a repository is named by hand. */
+export function usePlainGitHost(): boolean {
+  const app = useGitHubApp()
+  return app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED
+}
+
+/** Connects GitHub from this page, in a new tab it waits for. */
+export function useConnectGitHub() {
+  const { org } = useTenant()
+  return useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
 }
 
 /**
- * Installs the GitHub App from where an experiment is created, in a new tab this page waits for,
- * without leaving the page. A member is told an owner does it. Both are led to the org's GitHub settings.
+ * Asks for GitHub where an experiment needs its repository and none can be made yet. Connecting
+ * runs in a new tab; once the org's accounts read as connected, `onConnected` is told and the
+ * caller carries on. A member is told to ask an owner.
  */
-export function InstallGitHub({ label = 'Install GitHub App' }: { label?: string }) {
+export function ConnectGitHubDialog({ open, onClose, onConnected }: { open: boolean; onClose: () => void; onConnected: () => void }) {
   const { org } = useTenant()
-  const editsOrg = org.actions.includes('edit')
-  const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
-  if (!editsOrg) {
-    return <Text as="span" variant="note">An owner of {org.name} installs the GitHub App to start. <GitHubSettingsLink orgID={org.id} /></Text>
-  }
+  const owner = org.actions.includes('edit')
+  const github = useGitHub()
+  const { install, start, reset } = useConnectGitHub()
+  const told = useRef(onConnected)
+  told.current = () => { reset(); onConnected() }
+
+  // Told once per opening, once a connect made here lands, or once the org reads as connected
+  // after it did not: an org whose old account was removed opens this already counted as connected.
+  const sawUnconnected = useRef(false)
+  const done = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      sawUnconnected.current = false
+      done.current = false
+      return
+    }
+    if (github === 'unconnected') sawUnconnected.current = true
+    if (!done.current && github === 'connected' && (sawUnconnected.current || install.phase === 'connected')) {
+      done.current = true
+      told.current()
+    }
+  }, [open, github, install.phase])
+
+  const close = () => { reset(); onClose() }
   return (
-    <>
-      <Inline gap="md">
-        <Button type="button" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>{label}</Button>
-        <GitHubSettingsLink orgID={org.id} />
-      </Inline>
-      <InstallProgress install={install} onCancel={reset} />
-    </>
+    <Dialog open={open} onClose={close} title="Connect GitHub" size="sm">
+      <Text tone="muted">{owner ? 'Your experiment gets its own private repository. Connect GitHub so we can create it for you.' : ASK_OWNER}</Text>
+      {install.phase === 'waiting' && <Text variant="hint" role="status" className="mt-3">Finish connecting in the GitHub tab.</Text>}
+      {install.phase === 'failed' && <InlineError className="mt-3 block">{install.message}</InlineError>}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button type="button" onClick={close}>{owner ? 'Cancel' : 'Close'}</Button>
+        {owner && (
+          <Button type="button" variant="primary" loading={install.phase === 'waiting'} onClick={start}>
+            <Github aria-hidden className="size-4" />
+            Connect GitHub
+          </Button>
+        )}
+      </div>
+    </Dialog>
   )
 }
 
-/** Stands where an experiment is created while the org has connected no GitHub account. */
-export function ConnectGitHubStep() {
+/**
+ * Stands in the repository field while the org has no GitHub account: one row of a field's
+ * height with the way to connect. `invalid` marks it as what stops the create.
+ */
+export function ConnectGitHubRow({ invalid, describedBy }: { invalid?: boolean; describedBy?: string }) {
   const { org } = useTenant()
+  const owner = org.actions.includes('edit')
+  const { install, start, reset } = useConnectGitHub()
   return (
     <>
-      <Text tone="muted">
-        An experiment keeps its code in a GitHub repository, and no GitHub account is connected to {org.name}.
-      </Text>
-      <InstallGitHub />
+      <div
+        data-invalid={invalid ? '' : undefined}
+        className={clsx(
+          controlHeight.default,
+          'flex items-center justify-between gap-3 rounded border border-dashed border-border-control px-3',
+          invalid && 'border-solid border-danger',
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2 text-sm text-muted">
+          <Github aria-hidden className="size-4 flex-none" />
+          <span className="truncate">{owner ? 'Connect GitHub to create or choose a repository' : ASK_OWNER}</span>
+        </span>
+        {owner && (
+          <Button type="button" size="sm" loading={install.phase === 'waiting'} aria-describedby={describedBy} onClick={start}>Connect GitHub</Button>
+        )}
+      </div>
+      {install.phase !== 'idle' && <InstallProgress install={install} onCancel={reset} />}
     </>
   )
 }

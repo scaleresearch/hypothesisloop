@@ -29,7 +29,7 @@ func registerExperimentImage(doc *Doc, experiments *platformexperiments.Service,
 			"The platform asks its registry which image the reference names and records it by digest, with the architecture it runs on: architecture, " +
 			"or the one the image runs on when that is one; 422 image_architecture names them when it runs on several. Every job submitted from then on runs in it, " +
 			"on nodes of that architecture, and records the digest; a job submitted before keeps its own. It needs sh and git: each job's commit is fetched into " +
-			domain.JobCodeDir + " at start and its command runs there. Recorded while the platform experiment is open or running. " +
+			domain.JobCodeDir + " at start and its command runs there. Recorded until the platform experiment closes, also on a draft, whose baseline agent builds the image while the plan is drafted. " +
 			"422 image_unresolved when the registry does not answer for it, image_of_another_org for one in another org's repository.",
 	}, a.set)
 	register(doc, auth.AudienceAgent, huma.Operation{

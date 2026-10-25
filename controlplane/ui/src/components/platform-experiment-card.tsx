@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { experimentPath } from '@/lib/routes'
 import { formatAccH, isZeroDate } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
+import { useBudgetReference } from '@/lib/capacity'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
@@ -30,6 +31,7 @@ export function PlatformExperimentCard({
   pe: PlatformExperiment
   onEdit: (pe: PlatformExperiment) => void
 }) {
+  const reference = useBudgetReference()
   const router = useRouter()
   const href = experimentPath(pe.id)
   const started = pe.status !== 'draft'
@@ -39,7 +41,7 @@ export function PlatformExperimentCard({
     () => fetchHypothesisStats(pe.id),
   )
 
-  const unit = budgetUnit(pe.budget_kind)
+  const unit = budgetUnit(pe.budget_kind, 'short', reference)
   const live = pe.status === 'open' || pe.status === 'running'
   const daysLeft = live && !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)

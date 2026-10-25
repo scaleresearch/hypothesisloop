@@ -237,20 +237,22 @@ func TestAnImageItsRegistryDoesNotAnswerForIsRefused(t *testing.T) {
 	refusedWith(t, err, http.StatusUnprocessableEntity, domain.ReasonImageUnresolved)
 }
 
-// The image is recorded while the platform experiment is open or running: one that is closed, or
-// closes between the read and the write, is refused with 409.
+// The image is recorded until the platform experiment closes, a draft's too, which its baseline
+// agent builds while the plan is drafted: one that is closed, or closes between the read and the
+// write, is refused with 409.
 func TestAClosedPlatformExperimentRecordsNoImage(t *testing.T) {
-	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpClosed, domain.PlatformExpDraft} {
-		f := newImageFixture(status, &orgRegistry{})
-		_, err := f.svc.SetImage(context.Background(), "pe-1", ownImage, "")
-		refusedWith(t, err, http.StatusConflict, platformapi.ReasonExperimentClosed)
-		if len(f.images.reads) != 0 {
-			t.Errorf("%s: the image was read", status)
-		}
-	}
-	f := newImageFixture(domain.PlatformExpRunning, &orgRegistry{})
-	f.store.closesFirst = true
+	f := newImageFixture(domain.PlatformExpClosed, &orgRegistry{})
 	_, err := f.svc.SetImage(context.Background(), "pe-1", ownImage, "")
+	refusedWith(t, err, http.StatusConflict, platformapi.ReasonExperimentClosed)
+	if len(f.images.reads) != 0 {
+		t.Errorf("the image of a closed one was read")
+	}
+	if _, err := newImageFixture(domain.PlatformExpDraft, &orgRegistry{}).svc.SetImage(context.Background(), "pe-1", ownImage, ""); err != nil {
+		t.Errorf("a draft's image: %v, want it recorded", err)
+	}
+	f = newImageFixture(domain.PlatformExpRunning, &orgRegistry{})
+	f.store.closesFirst = true
+	_, err = f.svc.SetImage(context.Background(), "pe-1", ownImage, "")
 	refusedWith(t, err, http.StatusConflict, platformapi.ReasonExperimentClosed)
 
 	_, err = f.svc.SetImage(context.Background(), "pe-404", ownImage, "")

@@ -176,7 +176,7 @@ describe('what nobody here edits', () => {
     type = CATALOG[0]
     vi.mocked(createAgentType).mockResolvedValue(agentType('at-copy', 'Copy of Generalist', 'executor'))
     show()
-    expect(await screen.findByText(/Built-in types are read-only for everyone/)).toBeTruthy()
+    expect(await screen.findByText(/Built-in types are read-only\. Duplicate it to make an editable copy/)).toBeTruthy()
     expect(prompt().readOnly).toBe(true)
     expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Duplicate' }))
@@ -186,7 +186,7 @@ describe('what nobody here edits', () => {
 
   it('shows a member the org\'s type read-only and says who can edit it', async () => {
     show('member')
-    expect(await screen.findByText('Only an owner of Lab can edit agent types.')).toBeTruthy()
+    expect(await screen.findByText('Only owners can edit agent types.')).toBeTruthy()
     expect(prompt().readOnly).toBe(true)
     expect(screen.queryByRole('button', { name: /Duplicate|Archive/ })).toBeNull()
     await screen.findByText('3 versions')

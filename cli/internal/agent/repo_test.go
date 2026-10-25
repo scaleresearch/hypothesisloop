@@ -5,11 +5,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec/templatetest"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/clitest"
 )
@@ -197,5 +200,46 @@ func TestRepoCheckIsRefusedOutsideAClone(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if code, out := repo(t, RepoCheck); code == 0 || !strings.Contains(out, "this is not a git repository") {
 		t.Errorf("hl repo check outside a clone = %d\n%s", code, out)
+	}
+}
+
+// A repository made from the experiment template fails hl repo check on each file it leaves to
+// fill in, by the count of its placeholders, and passes once they are filled in for the platform
+// experiment: its name and its metrics.
+func TestRepoCheckListsWhatTheTemplateLeavesToFillIn(t *testing.T) {
+	experiment := declaredExperiment{ID: "pe-1", Name: "sweep", Metrics: []experimentspec.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}}
+	failures, err := notReady(templatetest.Files(), experiment, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"readme: " + experimentspec.Readme + " still has 5 " + experimentspec.Placeholder + " to fill in",
+		"experiment: " + experimentspec.ExperimentFile + " still has 7 " + experimentspec.Placeholder + " to fill in",
+		"job-spec: " + experimentspec.JobSpec + " still has 2 " + experimentspec.Placeholder + " to fill in",
+	}
+	if !slices.Equal(failures, want) {
+		t.Fatalf("the template: failures =\n%s\nwant\n%s", strings.Join(failures, "\n"), strings.Join(want, "\n"))
+	}
+	filled := fstest.MapFS{
+		experimentspec.Readme:         {Data: []byte(templatetest.FillReadme())},
+		experimentspec.ExperimentFile: {Data: []byte(templatetest.FillExperiment("sweep", "val_accuracy"))},
+		experimentspec.JobSpec:        {Data: []byte(templatetest.FillJob())},
+	}
+	if failures, err := notReady(filled, experiment, ""); err != nil || len(failures) != 0 {
+		t.Fatalf("the template filled in: failures = %q, %v, want none", failures, err)
+	}
+	// Every metric the file comments out stated: a platform experiment that declares them all.
+	every := []byte(templatetest.Uncomment(templatetest.FillExperiment("sweep", "val_accuracy")))
+	stated, err := experimentspec.Parse(every)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filled[experimentspec.ExperimentFile] = &fstest.MapFile{Data: every}
+	if failures, err := notReady(filled, experiment, ""); err != nil || len(failures) != 1 || !strings.Contains(failures[0], "the file is another experiment's") {
+		t.Fatalf("metrics the platform experiment does not declare: failures = %q, %v, want the experiment file's", failures, err)
+	}
+	experiment.Metrics = stated.Metrics
+	if failures, err := notReady(filled, experiment, ""); err != nil || len(failures) != 0 {
+		t.Fatalf("the template filled in, every optional key stated: failures = %q, %v, want none", failures, err)
 	}
 }

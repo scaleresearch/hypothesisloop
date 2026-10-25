@@ -79,10 +79,16 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(kind, updates.WAKES["agent"])
         self.assertEqual(updates.WAKES["researcher"][:len(updates.WAKES["agent"])], updates.WAKES["agent"])
 
+    # A baseline agent starts beside the planner: the plan drafted and changed is its update.
+    def test_a_baseline_agent_wakes_on_the_plan(self):
+        for kind in ("platform_experiment.proposal", "platform_experiment.plan"):
+            self.assertIn(kind, updates.WAKES["baseline"])
+            self.assertNotIn(kind, updates.WAKES["agent"])
+
     def test_the_watch_env_says_which_kinds_wake_its_agent(self):
         with unittest.mock.patch.dict(os.environ, {"API_URL": "http://api", "HL_TOKEN": ENV["HL_TOKEN"]}):
             cfg = updates.config.Config()
-            for role, wakes in (("researcher", "researcher"), ("executor", "agent")):
+            for role, wakes in (("researcher", "researcher"), ("executor", "agent"), ("baseline", "baseline")):
                 cfg.role = role
                 self.assertEqual(updates.watch_env(cfg, "/tmp/w")[updates._WAKES_OF], wakes)
 

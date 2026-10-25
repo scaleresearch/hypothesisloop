@@ -190,6 +190,7 @@ func (a budgetAPI) getStages(ctx context.Context, in *struct {
 
 type liveCapacity struct {
 	Clusters             []platformexperiments.ClusterCapacity     `json:"clusters"`
+	BudgetReference      string                                    `json:"budget_reference" doc:"The accelerator budgets are counted in: an hour on it is one accelerator-hour, and an hour on another type counts its acch_per_hour (budget_reference in the settings file, H100 by default)."`
 	PlatformComputeLimit *platformexperiments.PlatformComputeLimit `json:"platform_compute_limit,omitempty" doc:"The org's limits on the platform's shared clusters, in accelerator hours per hour, and what its placed jobs reserve of them. Absent from staff's read of every cluster."`
 }
 
@@ -204,7 +205,7 @@ func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get resource capacity", err)
 	}
-	answer := liveCapacity{Clusters: clusters}
+	answer := liveCapacity{Clusters: clusters, BudgetReference: a.experiments.BudgetReference()}
 	if !every {
 		principal, _ := auth.FromContext(ctx)
 		if answer.PlatformComputeLimit, err = a.experiments.ComputeLimit(ctx, orgID, principal.ProjectID); err != nil {

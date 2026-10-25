@@ -9,7 +9,7 @@ import { Inline } from '@/components/ui/stack'
 /** A page with nothing to show but why, and the ways back: to your experiments, and whatever `actions` adds. */
 export function DeadEnd({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
   return (
-    <Centered wide head={<NextLink href={LANDING_PATH} className="justify-self-start rounded"><Logo /></NextLink>} title={title}>
+    <Centered wide head={<NextLink href={LANDING_PATH} className="inline-flex rounded"><Logo /></NextLink>} title={title}>
       {children}
       <Inline>
         <ButtonLink href={HOME_PATH} variant="primary">Go to your experiments</ButtonLink>

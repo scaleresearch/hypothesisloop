@@ -28,7 +28,7 @@ type Store interface {
 	InstructionsStore
 	// CreatePlatformExperiment stores pe with the agents it is created with signed up, or neither.
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
-	// SetPlatformExperimentImage records the image the jobs of an open or running platform
+	// SetPlatformExperimentImage records the image the jobs of a platform
 	// experiment run in (db.Store).
 	SetPlatformExperimentImage(ctx context.Context, id string, image domain.ExperimentImage) (bool, error)
 	// AgentTypeCatalog and ProjectAgentTypeCatalog are the agent types the agents of a platform
@@ -100,19 +100,10 @@ type Store interface {
 	// or the agent was already signed up. An executor past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
-	// SetProposal stores a draft's proposal for goal goalVersion with what p says of it: until
-	// when it waits, when the platform accepts it by itself, how long its planner's machine is
-	// kept for a change of the goal and the baseline agent it signs up; db.ErrNotDraft for
-	// anything but a draft, db.ErrGoalChanged once it has another goal.
-	SetProposal(ctx context.Context, id string, goalVersion int, proposal []byte, p db.Proposed) error
-	// HoldAccept stops the platform accepting a proposed draft by itself: db.ErrNotDraft,
-	// db.ErrNotProposed.
-	HoldAccept(ctx context.Context, id string) error
-	// DraftsToAccept is the proposed drafts whose accepts_at has passed.
-	DraftsToAccept(ctx context.Context) ([]string, error)
-	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
-	// team signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
-	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
+	// ApplyProposal stores a draft's proposal for goal goalVersion and makes it the open platform
+	// experiment pe describes, with its team signed up, in one write or not at all:
+	// db.ErrNotDraft, db.ErrPlanningOver, db.ErrGoalChanged and the limits of a signup.
+	ApplyProposal(ctx context.Context, pe *domain.PlatformExperiment, goalVersion int, proposal []byte, create []*domain.Agent, signups []domain.AgentSignup) error
 	// SetGoal changes the goal of a platform experiment and tells whoever acts on it, giving a
 	// draft back to its planner until planUntil: db.ErrNotEditable.
 	SetGoal(ctx context.Context, id, goal string, planUntil time.Time) error
@@ -121,11 +112,14 @@ type Store interface {
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
 	// Decline stores why a draft's planner proposes nothing for goal goalVersion, until when the
-	// draft waits for a person and how long the planner's machine is kept; the errors of
-	// SetProposal.
+	// draft waits for a person and how long the planner's machine is kept; db.ErrNotDraft,
+	// db.ErrPlanningOver, db.ErrGoalChanged.
 	Decline(ctx context.Context, id string, goalVersion int, reason string, waitUntil time.Time, keepPlanner time.Duration) error
-	// CreateDraft creates a draft with its planner signed up, or neither.
-	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
+	// CreateDraft creates a draft with its planner and its baseline agent signed up, or none.
+	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, baseline *domain.Agent, baselineSignup domain.AgentSignup) error
+	// SetWorkingPlan stores the plan a draft's planner works on for goal goalVersion, with nothing
+	// answered; the errors of Decline.
+	SetWorkingPlan(ctx context.Context, id string, goalVersion int, proposal []byte) error
 	// RepositoriesToCreate, GiveRepository and FailRepository are the repository pass's: the
 	// platform experiments whose repository is to be created, and what became of each.
 	RepositoriesToCreate(ctx context.Context) ([]db.RepositoryToCreate, error)
@@ -158,7 +152,7 @@ type Store interface {
 	// ListSignupsByRole is the ranking-side read: standings are about executors, never about
 	// the whole roster.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
-	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
+	// ListParticipants is the signups still taking part: all but the planner of a draft that opened.
 	ListParticipants(ctx context.Context, platformExpID string) ([]string, error)
 	// FinishedBaselineJobs is the COMPLETED jobs on the objective that the baseline agents of a
 	// platform experiment that finished left, oldest first.
@@ -195,6 +189,8 @@ type Store interface {
 	// GetExperiment resolves a winning sample's job_id to the row carrying its code_ref — see
 	// rank, where a standing without it is a number nobody can reproduce.
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
+	// ListActiveByPlatformExperiment is every QUEUED, SUBMITTED or RUNNING job of a platform experiment.
+	ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
 	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error), rateLimit db.SubmissionRateLimit, inserted func(context.Context) error) (db.AdmitDecision, error)
 	ReserveAdmittedAcceleratorTypeTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observed func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
@@ -238,6 +234,8 @@ type Service struct {
 	idleAfter time.Duration
 	// personIdeas counts the open ideas of people (WithPersonIdeas).
 	personIdeas PersonIdeas
+	// jobs cancels a job, settling what it spent (WithJobCancel).
+	jobs JobCanceller
 	// placement reads the live capacity jobs of a project's org can be placed on, node by node.
 	// WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
 	placement func(ctx context.Context, projectID string) (*Placement, error)
@@ -280,6 +278,17 @@ func (s *Service) WithIdleNotice(notices IdleNotices, after time.Duration) *Serv
 // WithPersonIdeas wires the graph the situation counts the open ideas of people in.
 func (s *Service) WithPersonIdeas(ideas PersonIdeas) *Service {
 	s.personIdeas = ideas
+	return s
+}
+
+// JobCanceller cancels a QUEUED, SUBMITTED or RUNNING job. *scheduler.Service satisfies it.
+type JobCanceller interface {
+	CancelExperiment(ctx context.Context, id string) error
+}
+
+// WithJobCancel wires what cancels the baseline jobs a change of the plan's machine leaves behind.
+func (s *Service) WithJobCancel(jobs JobCanceller) *Service {
+	s.jobs = jobs
 	return s
 }
 
@@ -391,8 +400,7 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The text every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many executors may be at work at once, counted as a join counts them: the agents of role executor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, researchers, agents of role baseline and reviewers never count. Lowered below the executors at work of a running one, it cuts the newest of them: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_executors says how many are signed up. Executors of agents the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its executors left unspent: one trial of the baseline for each."`
-	Agents                    *domain.AgentPool          `json:"agents,omitempty" doc:"The team it is to have at work, the whole list as on create: researchers in entries of agent_type researcher, executors in the others, at most max_agents in all. Each entry at least the agents of its agent type and model at work: 409 agents_below_at_work otherwise. Where the platform runs the agents it adds the ones a raised count wants."`
+	Agents                    *domain.AgentPool          `json:"agents,omitempty" doc:"The team it is to have at work, the whole list as on create: researchers in entries of agent_type researcher, executors in the others, whose total becomes max_agents. Where the platform runs the agents it adds the ones a raised count wants. Fewer executors of an entry than are at work cuts the newest of them while it runs: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, and for researchers always, an entry holds at least the agents of its agent type and model at work: 409 agents_below_at_work otherwise. While it runs, more executors are held to the hours its executors left unspent: one trial of the baseline for each."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
@@ -400,6 +408,10 @@ type PlatformExperimentPatch struct {
 	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"How long the run lasts from the moment it starts."`
 	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"While the platform experiment is open, declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. While it runs, raises the baseline to a stronger completed job of the experiment that ran the baseline's code_ref unchanged in a better configuration, with baseline_reason."`
 	ModelBudgetUSD            *float64                   `json:"model_budget_usd,omitempty" doc:"What its agents and coordinator may spend on model calls, in US dollars, at most quota.max_model_budget_usd (422 model_budget_too_high). Raised past what they spent, refused model calls are made again."`
+	AcceleratorType           *domain.AcceleratorType    `json:"accelerator_type,omitempty" doc:"The machine of the plan, with cpu, memory and storage: what one node of the run's jobs asks for. Changed while the platform experiment is open, on one made from a sentence: one of the accelerator_type strings GET /resource-catalog/capacity lists, or empty for CPU cores, 422 accelerator_unreachable otherwise. A change between an accelerator and CPU cores changes what the budget counts, so the body states budget_accelerator_hours beside it (422 budget_unit_changed). Changed, the baseline is measured again on it: baseline_due_at is baseline_minutes from now, the baseline jobs on the machine before are cancelled, a baseline job on another machine is refused (not_the_plans_machine) and never declared, and platform_experiment.plan names machine."`
+	CPU                       *string                    `json:"cpu,omitempty" doc:"What one node of the run's jobs asks for in cores, as job.cpu: see accelerator_type. 422 invalid_resources for no quantity, as for memory and storage."`
+	Memory                    *string                    `json:"memory,omitempty" doc:"What one node of the run's jobs asks for in memory, as job.memory: see accelerator_type."`
+	Storage                   *string                    `json:"storage,omitempty" doc:"What one node of the run's jobs asks for in scratch space, as job.storage: see accelerator_type."`
 	BaselineReason            *string                    `json:"baseline_reason,omitempty" doc:"Why the baseline of a running platform experiment is raised to baseline_job_id: the configuration of the control that job measured. Required with baseline_job_id while it runs, and taken then only."`
 
 	// by is whose credential sent the patch, recorded with a raise of the baseline.
@@ -417,7 +429,6 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"name", p.Name != nil},
 		{"description", p.Description != nil},
 		{"budget_accelerator_hours", p.BudgetAcceleratorHours != nil},
-		{"max_agents", p.MaxAgents != nil},
 		{"agents", p.Agents != nil},
 		{"max_concurrent_accelerators", p.MaxConcurrentAccelerators != nil},
 		{"metrics", p.Metrics != nil},
@@ -427,6 +438,10 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"baseline_job_id", p.BaselineJobID != nil},
 		{"baseline_reason", p.BaselineReason != nil},
 		{"model_budget_usd", p.ModelBudgetUSD != nil},
+		{"accelerator_type", p.AcceleratorType != nil},
+		{"cpu", p.CPU != nil},
+		{"memory", p.Memory != nil},
+		{"storage", p.Storage != nil},
 	} {
 		if field.set && !slices.Contains(except, field.name) {
 			out = append(out, field.name)

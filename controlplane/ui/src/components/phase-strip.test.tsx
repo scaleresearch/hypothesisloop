@@ -6,7 +6,6 @@ import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { PhaseStrip } from '@/components/phase-strip'
 import { formatDate } from '@/lib/format'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import type { StoredProposal } from '@/lib/planning'
 import type { JoinedAgent, Me, PlatformExperiment, PlatformExperimentStatus, StatusReason } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
@@ -65,19 +64,20 @@ describe('the phase strip', () => {
   it.each([
     ['draft', 'planning', {}, 'Planning'],
     ['draft', 'revising', {}, 'Planning'],
-    ['draft', 'proposed', { proposed_at: at }, 'Proposal'],
-    ['draft', 'declined', {}, 'Proposal'],
-    ['open', 'baseline_measuring', {}, 'Preparing baseline'],
-    ['open', 'baseline_required', {}, 'Preparing baseline'],
-    ['open', 'budget_below_baseline', {}, 'Preparing baseline'],
-    ['open', 'starts_at_ahead', {}, 'Preparing baseline'],
-    ['open', 'starting', {}, 'Preparing baseline'],
+    ['draft', 'declined', {}, 'Planning'],
+    ['draft', 'repository_creating', {}, 'Repository'],
+    ['open', 'repository_creating', {}, 'Repository'],
+    ['open', 'baseline_measuring', {}, 'Baseline'],
+    ['open', 'baseline_required', {}, 'Baseline'],
+    ['open', 'budget_below_baseline', {}, 'Baseline'],
+    ['open', 'starts_at_ahead', {}, 'Baseline'],
+    ['open', 'starting', {}, 'Baseline'],
     ['running', 'agents_starting', {}, 'Running'],
     ['running', 'running', {}, 'Running'],
     ['closed', 'end_time_reached', {}, 'Closed'],
     ['closed', 'agents_not_started', {}, 'Closed'],
     ['closed', 'planner_stopped', {}, 'Closed'],
-  ] as const)('stands at one phase, from the status, its reason and whether a proposal stands: %s, %s', (status, reason, more, phase) => {
+  ] as const)('stands at one phase, from the status and its reason: %s, %s', (status, reason, more, phase) => {
     show(experiment(status, reason, more))
     expect(current()).toEqual([phase])
   })
@@ -88,10 +88,10 @@ describe('the phase strip', () => {
     expect(sentence()).toBe(`Closed ${formatDate(at)}. ${said}`)
   })
 
-  it('says the baseline wait in the API\'s summary, after what it prepares', async () => {
+  it('says the baseline wait in the API\'s summary', async () => {
     vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([agent('baseline')])
     show(experiment('open', 'baseline_measuring', {}, { summary: 'Baseline 1 is measuring the baseline. The run starts by itself when it finishes.' }))
-    expect(sentence()).toBe('Preparing the baseline. Baseline 1 is measuring the baseline. The run starts by itself when it finishes.')
+    expect(sentence()).toBe('Baseline 1 is measuring the baseline. The run starts by itself when it finishes.')
     expect(await screen.findByRole('group', { name: 'Baseline agent' })).toBeTruthy()
   })
 
@@ -161,69 +161,5 @@ describe('the baseline agent in the phase strip', () => {
     first.unmount()
     show(experiment('running', 'running', { ends_at: at }))
     expect(screen.queryByRole('group', { name: 'Baseline agent' })).toBeNull()
-  })
-})
-
-// Once a proposal was accepted the page had no way back to it: what was proposed, the planner's
-// questions and the answers given, and who accepted it were gone from sight.
-describe('the proposal of an accepted experiment', () => {
-  const proposal: StoredProposal = {
-    experiment: {
-      name: 'Schedules on tiny transformers',
-      description: 'Train the small transformer in train.py and report val_loss.',
-      metrics: [{ key: 'val_loss', direction: 'minimize' }],
-    },
-    budget_accelerator_hours: 6,
-    duration_hours: 4,
-    baseline_minutes: 30,
-    goal_version: 1,
-    agents: [{}, {}],
-    cpu: '4',
-    memory: '16Gi',
-    storage: '20Gi',
-    accelerator_type: 'rtx-4090',
-    accelerator_kind: 'accelerator',
-    metric_reason: 'Validation loss on held-out text is the goal itself.',
-    measurement: 'bench.py scores a split the training never reads.',
-    sizing_reason: 'An estimate, nothing has run.',
-    questions: [
-      { question: 'How big a win counts?', answer: '20% lower loss.' },
-      { question: 'Which batch sizes are held equal?', answer: '32 only.' },
-    ],
-  }
-  const accepted = { proposal, proposed_at: '2026-10-05T12:10:00Z', accepted_at: '2026-10-05T12:15:00Z' }
-  const step = () => within(screen.getByRole('list', { name: 'Phase' })).queryByRole('button', { name: 'Proposal' })
-
-  it('opens from the Proposal step as a record, with who accepted it and the answers given, and nothing to act on', async () => {
-    show(experiment('running', 'running', { ...accepted, accepted_by: { kind: 'user', id: 'u-1', name: 'Ada' }, accepted_answers: ['20% lower loss.', '32 and 64.'] }))
-    expect(screen.queryByText('How big a win counts?')).toBeNull()
-    await userEvent.click(step()!)
-    expect(step()!.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByRole('note').textContent).toBe(`Accepted by Ada on ${formatDate('2026-10-05T12:15:00Z')}.`)
-    expect(screen.getByText('How big a win counts?')).toBeTruthy()
-    expect(screen.getByText('32 and 64.')).toBeTruthy()
-    expect(screen.getByText('The planner had planned on: 32 only.')).toBeTruthy()
-    expect(screen.getByText('Schedules on tiny transformers')).toBeTruthy()
-    expect(screen.getByText('val_loss, lower is better')).toBeTruthy()
-    expect(await screen.findAllByText('Executor')).toHaveLength(2)
-    expect(screen.queryAllByRole('textbox')).toHaveLength(0)
-    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0)
-    for (const name of ['Accept and run', 'Accept now', 'Edit', 'Reject']) expect(screen.queryByRole('button', { name })).toBeNull()
-    await userEvent.click(step()!)
-    expect(screen.queryByText('How big a win counts?')).toBeNull()
-  })
-
-  it('says when the platform accepted it by itself', async () => {
-    show(experiment('closed', 'end_time_reached', { ...accepted, proposal: { ...proposal, questions: undefined } }))
-    await userEvent.click(step()!)
-    expect(screen.getByRole('note').textContent).toBe(`Accepted automatically on ${formatDate('2026-10-05T12:15:00Z')}.`)
-  })
-
-  it('is no step to open on a draft, whose proposal is on its page, nor on one created whole', () => {
-    const draft = show(experiment('draft', 'proposed', { proposal, proposed_at: accepted.proposed_at }))
-    expect(step()).toBeNull()
-    draft.unmount()
-    show(experiment('open', 'baseline_measuring'))
-    expect(step()).toBeNull()
   })
 })

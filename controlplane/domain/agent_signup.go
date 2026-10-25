@@ -275,6 +275,9 @@ type AgentInstance struct {
 	// provider's and "progress_unreadable" says nothing of the command: none of the three is a
 	// failure of the machine, and none spends a restart.
 	EndReason string `json:"end_reason,omitempty" enum:"exited,gone,never_seen,still_starting,silent,progress_unreadable,expired,released"`
+	// ExitReason is the one plain phrase that ExitLog reduces to, for a machine whose command ended.
+	// Set when written.
+	ExitReason string `json:"exit_reason,omitempty" doc:"Why the last machine whose command ended stopped, in a short phrase read from the end of its output. Absent otherwise."`
 	// Released means the run the machine was for is over and its wind-down has passed: the
 	// platform experiment closed, or the agent was cut. The launcher is no longer asked for the
 	// machine and has destroyed it, so what it last reported of it says nothing any more.
@@ -306,10 +309,30 @@ func (i AgentInstance) Shown() string {
 	return i.Reported
 }
 
+// ExitReasonOf reduces the end of a command's output to a short phrase: the last line of it, or
+// "could not reach the platform" for the lines that say a connection failed to open.
+func ExitReasonOf(exitLog string) string {
+	lines := strings.Split(strings.TrimSpace(exitLog), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	lower := strings.ToLower(last)
+	for _, unreachable := range []string{"name or service not known", "name resolution", "nodename nor servname", "connection refused", "connecterror"} {
+		if strings.Contains(lower, unreachable) {
+			return "could not reach the platform"
+		}
+	}
+	if r := []rune(last); len(r) > 120 {
+		return string(r[:119]) + "…"
+	}
+	return last
+}
+
 func (i AgentInstance) MarshalJSON() ([]byte, error) {
 	type fields AgentInstance
 	out := fields(i)
 	out.State = i.Shown()
+	if i.EndReason == "exited" {
+		out.ExitReason = ExitReasonOf(i.ExitLog)
+	}
 	return json.Marshal(out)
 }
 

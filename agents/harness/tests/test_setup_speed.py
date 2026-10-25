@@ -104,27 +104,23 @@ class PlannerOpeningTest(unittest.TestCase):
 
     # Only a session that starts fresh is opened with them: a resumed one has read them.
     def test_only_a_fresh_session_is_opened_with_its_roles_reads(self):
-        pe = {"status": "draft", "status_reason": {"reason": "planning"}, "proposal": {"repo_map": "bench.py: the harness"}}
+        pe = {"status": "draft", "status_reason": {"reason": "planning"}}
         client = FakePlatform(pe)
         with mock.patch.object(seed, "planner", lambda workdir: "READS"):
             self.assertEqual(opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), None), "Begin.\n\nREADS")
             self.assertEqual(opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), "s-1"), "Continue where you left off.")
         opened = opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), None)
-        self.assertTrue(opened.startswith("Your goal is the control") and opened.endswith("\n\n=== The planner's map of the repository\nbench.py: the harness"), opened)
+        self.assertEqual(opened, seed.BASELINE_OPENING)
         self.assertEqual(opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1"), "Continue where you left off.")
 
-    # A fresh baseline session opens with its goal, the slowest part first, and the planner's pins.
+    # A fresh baseline session opens with its goal, the slowest part first, and where the plan is
+    # while the planner drafts it: it starts beside the planner, before there is a plan.
     def test_a_baseline_agent_opens_with_its_goal(self):
-        opened = seed.baseline("src/: the code. rust-toolchain.toml pins 1.95.0.")
-        first, _, rest = opened.partition("\n\n")
-        for said in ("executors, who wait for it", "slowest first", "experiment's image", "the planner's map below names", "subagents"):
-            self.assertIn(said, first)
-        self.assertTrue(rest.endswith("rust-toolchain.toml pins 1.95.0."), rest)
-        bare = seed.baseline("")
-        self.assertNotIn("map", bare)
-        self.assertIn("the repository's pin files state", bare)
+        for said in ("executors, who wait for it", "slowest first", "experiment's image", "the repository's pin files state", "subagents",
+                     "`proposal` in `hl platform-experiments get` is the plan so far"):
+            self.assertIn(said, seed.BASELINE_OPENING)
         open_pe = FakePlatform({"status": "open", "baseline_due_at": None})
-        self.assertEqual(opening(SimpleNamespace(cfg=baseline_agent(), client=open_pe, workdir="/w"), None), bare)
+        self.assertEqual(opening(SimpleNamespace(cfg=baseline_agent(), client=open_pe, workdir="/w"), None), seed.BASELINE_OPENING)
 
 
 class ToolsTest(unittest.TestCase):
@@ -148,37 +144,17 @@ class ToolsTest(unittest.TestCase):
         self.assertFalse({"WebSearch", "WebFetch"} & set(given["disallowed_tools"]))
 
 
-class UntilAcceptedTest(unittest.TestCase):
-    # The baseline agent is signed up with the proposal and its machine starts while the draft
-    # counts down: it starts its session once the draft is accepted, and not before.
-    def test_a_baseline_agent_starts_once_its_draft_is_accepted(self):
-        statuses = iter([{"status": "draft"}, api_client.APIError("GET", "/pe", 503, "down"), {"status": "draft"}, {"status": "open"}])
-        read = []
-
-        async def get(_id):
-            read.append(_id)
-            answer = next(statuses)
-            if isinstance(answer, Exception):
-                raise answer
-            return answer
-
-        said = []
-        setup = SimpleNamespace(cfg=baseline_agent(), client=SimpleNamespace(get_platform_experiment=get))
-        asyncio.run(core.until_accepted(setup, [False], poll_s=0, said=lambda: said.append(1)))
-        self.assertEqual(len(read), 4)
-        self.assertEqual(said, [1])
-
-    def test_no_other_agent_waits_and_a_stop_ends_the_wait(self):
-        never = FakePlatform(lambda: self.fail("read"))
-        asyncio.run(core.until_accepted(SimpleNamespace(cfg=planner(), client=never), [False], poll_s=0))
-        asyncio.run(core.until_accepted(SimpleNamespace(cfg=baseline_agent(), client=never), [True], poll_s=0))
-        stop = [False]
-
-        async def get(_id):
-            stop[0] = True
-            return {"status": "draft"}
-
-        asyncio.run(core.until_accepted(SimpleNamespace(cfg=baseline_agent(), client=SimpleNamespace(get_platform_experiment=get)), stop, poll_s=0))
+class TakesNoJobYetTest(unittest.TestCase):
+    # A baseline agent starts beside the planner and an executor before the run starts: neither is
+    # told it has nothing in flight while the platform takes no job of it yet.
+    def test_the_platform_takes_no_job_of_a_baseline_agent_in_a_draft_nor_of_an_executor_before_the_run(self):
+        executor = SimpleNamespace(**{**vars(baseline_agent()), "role": "executor"})
+        for cfg, status, waits in ((baseline_agent(), "draft", True), (baseline_agent(), "open", False),
+                                   (executor, "open", True), (executor, "running", False)):
+            setup = SimpleNamespace(cfg=cfg, client=FakePlatform({"status": status}))
+            self.assertEqual(asyncio.run(core.takes_no_job_yet(setup)), waits, (cfg.role, status))
+        down = SimpleNamespace(cfg=baseline_agent(), client=FakePlatform(api_client.APIError("GET", "/pe", 503, "down")))
+        self.assertFalse(asyncio.run(core.takes_no_job_yet(down)))
 
 
 if __name__ == "__main__":

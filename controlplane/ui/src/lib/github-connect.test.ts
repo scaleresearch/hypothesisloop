@@ -116,6 +116,28 @@ describe('the tab GitHub returns to', () => {
     expect(finish).not.toHaveBeenCalled()
   })
 
+  it('connects what the person may reach when GitHub returns from its authorization page', async () => {
+    const go = vi.fn()
+    await expect(lib.takeReturn('state=s-1&code=c-1', finish, go)).resolves.toEqual({ view: 'connected', account: 'acme', returnTo: RETURN })
+    expect(finish).toHaveBeenCalledExactlyOnceWith('s-1', 'c-1', 0)
+    expect(go).not.toHaveBeenCalled()
+  })
+
+  it('goes on to the install page when there is nothing to connect, and tells the other tab the new state', async () => {
+    const other = overheard()
+    const go = vi.fn()
+    finish.mockResolvedValue({ org_id: 'org_a', return_to: RETURN, install: { state: 's-2', install_url: `${INSTALL}?state=s-2`, expires_at: '' } })
+    await expect(lib.takeReturn('state=s-1&code=c-1', finish, go)).resolves.toEqual({ view: 'installing' })
+    expect(go).toHaveBeenCalledExactlyOnceWith(`${INSTALL}?state=s-2`)
+    await waitFor(() => expect(other.heard).toEqual([{ state: 's-1', next: 's-2' }]))
+    other.close()
+  })
+
+  it('connects nothing when GitHub returns with neither an installation nor a code', async () => {
+    await expect(lib.takeReturn('state=s-1&error=access_denied', finish)).resolves.toMatchObject({ view: 'failed' })
+    expect(finish).not.toHaveBeenCalled()
+  })
+
   it('leads back to no page outside this app', async () => {
     finish.mockResolvedValue({ org_id: 'org_a', return_to: '//elsewhere.example', installation })
     await expect(lib.takeReturn('installation_id=7&state=s-2', finish)).resolves.toMatchObject({ view: 'connected', returnTo: null })
@@ -141,6 +163,17 @@ describe('the tab the install started in', () => {
     // Another install's outcome says nothing here.
     await lib.takeReturn('installation_id=8&state=s-other', finish)
     await lib.takeReturn('installation_id=7&state=s-9', finish)
+    await waitFor(() => expect(result.current.install).toEqual({ phase: 'connected', installation }))
+  })
+
+  it('follows the install onto the state the install page carries', async () => {
+    const { result } = hook()
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.install.phase).toBe('waiting'))
+    finish.mockResolvedValueOnce({ org_id: 'org_a', return_to: RETURN, install: { state: 's-10', install_url: `${INSTALL}?state=s-10`, expires_at: '' } })
+    await lib.takeReturn('state=s-9&code=c-1', finish, vi.fn())
+    await waitFor(() => expect(result.current.install).toEqual({ phase: 'waiting', state: 's-10' }))
+    await lib.takeReturn('installation_id=7&state=s-10&code=c-2', finish)
     await waitFor(() => expect(result.current.install).toEqual({ phase: 'connected', installation }))
   })
 

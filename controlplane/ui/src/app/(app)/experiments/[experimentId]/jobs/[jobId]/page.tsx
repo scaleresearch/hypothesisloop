@@ -24,6 +24,7 @@ import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
 import { MetricLineChart } from '@/components/metric-line-chart'
 import { formatAccH, formatDate, formatDuration, formatMetric, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
+import { useBudgetReference } from '@/lib/capacity'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
@@ -43,6 +44,7 @@ const LAST_ATTEMPT: Record<string, string> = {
 
 export default function JobDetailPage({ params }: { params: { experimentId: string; jobId: string } }) {
   const { experimentId, jobId: id } = params
+  const reference = useBudgetReference()
   const router = useRouter()
 
   const { data: job, error } = useSWR(keys.job(id), () => fetchExperiment(id), { refreshInterval: POLL.reports })
@@ -162,7 +164,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
           <Detail label="Capacity tier" mono={false}><TierBadge tier={j.capacity_tier} /></Detail>
           <Detail label="Accelerator">{`${j.accelerator_count}× ${j.accelerator_type}`}</Detail>
           <Detail label="Est. duration" mono={false}>{j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'}</Detail>
-          <Detail label="Est. cost" mono={false}>{costEstimate != null ? `${costEstimate} ${budgetUnit(j.accelerator_kind)}` : '—'}</Detail>
+          <Detail label="Est. cost" mono={false}>{costEstimate != null ? `${costEstimate} ${budgetUnit(j.accelerator_kind, 'short', reference)}` : '—'}</Detail>
           <Detail label="Submitted" mono={false}>{formatDate(j.created_at)}</Detail>
           {j.submitted_at && <Detail label="Sent to cluster" mono={false}>{formatDate(j.submitted_at)}</Detail>}
           {j.finished_at && (

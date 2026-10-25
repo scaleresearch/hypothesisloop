@@ -1,8 +1,9 @@
 # The cloud_compute section of the settings: provider accounts on which the control plane rents a
 # machine for every job placed on them, each account scheduled as one cluster. A deployment that
-# rents compute adds it to its settings file. Each cluster is registered as any other is
-# (hl-admin cluster add <cluster_name> <org>, org default for every org's jobs): the
-# control plane runs its runtime itself, and rents nothing for a cluster that is not registered.
+# rents compute adds it to its settings file. Listing an entry is the consent to rent on it:
+# control-service registers each cluster for the platform's org default as it starts, so it serves
+# every org's jobs, and runs its runtime itself. Registering again keeps the cluster's settings
+# and every org's choice to turn it off.
 # Jobs boot with services.public_api_url, which a rented machine must reach, in the image their
 # platform experiment records. On vast.ai and Runpod each job runs under a supervisor that ends its
 # own instance's run when the job ends; the programs it needs in the image are what hl capacity
@@ -12,12 +13,14 @@
 # has, and none of the other providers' sections. Each entry's account key comes from the
 # environment as CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY, its cluster_name in capitals with
 # each dash an underscore, so entries on one provider each rent on their own account, or on one
-# account in namespaces of their own.
+# account in namespaces of their own. The two entries here, one on vast.ai and one on Runpod, run
+# side by side: each is a cluster of its own, and placement tries both, the one with the most room
+# for a job first. A deployment on one provider keeps that entry alone.
 cloud_compute:
   # Lowercase letters and digits joined by single dashes.
   - cluster_name: vast
 
-    # The vendor, one of the sections below: vast or runpod.
+    # The vendor: vast or runpod, with the section of the same name below.
     provider: vast
 
     # Part of every instance name, hl-job-<namespace>-...: the cluster lists, counts and destroys
@@ -76,36 +79,6 @@ cloud_compute:
           gpu_name: A100 PCIE
           min_gpu_ram_mb: 80000
 
-    # A Runpod account, whose API key is CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY as vast's is. Each
-    # job runs under a supervisor that keeps its pod after the job ends, billed at the pod's rate
-    # until the cluster destroys it once its result is read. The nodes of a job over several are
-    # GPU pods in one data center of data_centers on the vendor's global networking, 100 Mbps
-    # between pods, which holds a job within a zone or a region and none within a placement group.
-    runpod:
-      # The account's user id, as the Runpod console shows it. With the provider and the
-      # namespace it is the cluster's id.
-      account_id: REPLACE-WITH-ACCOUNT-ID
-      # Pods above this price for the whole pod are never rented. In October 2026 an RTX 4090
-      # cost $0.89 an hour on the SECURE cloud and $0.34 on COMMUNITY, an A100 80GB PCIe $1.79
-      # and $1.19, and a CPU pod of 8 vCPUs and 16 GB from $0.24.
-      max_price_per_hour: 1.50
-      # The tier GPU pods are rented on: SECURE, the vendor's own data centers, or COMMUNITY.
-      # CPU pods are always SECURE.
-      cloud: SECURE
-      # The vendor's data center ids pods are rented in. Leave empty for any.
-      data_centers: []
-      # The CPU flavor ids a pod without a GPU is rented as, the cheapest that fits first. Leave
-      # empty for any.
-      cpu_flavors: []
-      # Every GPU model a shape below names, under both of its names: product as the NVIDIA
-      # driver reports it, which is what the catalog string is made from, and gpu_id as Runpod's
-      # GPU catalog lists it.
-      accelerators:
-        - product: NVIDIA GeForce RTX 4090
-          gpu_id: NVIDIA GeForce RTX 4090
-        - product: NVIDIA A100 80GB PCIe
-          gpu_id: NVIDIA A100 80GB PCIe
-
     # What this account may rent. Each of a shape's max_instances is reported as a node that holds
     # one job, so the scheduler needs no provider settings of its own. A job is admitted to a shape
     # with exactly the accelerators it asks for and at least the cpu, memory and storage, the
@@ -135,8 +108,70 @@ cloud_compute:
         memory: 64Gi
         storage: 200Gi
         max_instances: 200
-      # vast.ai rents no machine without a GPU, so there this is the cheapest offer of any GPU
-      # model with the cores, memory and disk, within the filters above. On Runpod it is a CPU pod.
+      # vast.ai rents no machine without a GPU, so this is the cheapest offer of any GPU model
+      # with the cores, memory and disk, within the filters above.
+      - name: cpu
+        cpu: "8"
+        memory: 32Gi
+        storage: 50Gi
+        max_instances: 200
+
+  - cluster_name: runpod
+    provider: runpod
+    namespace: main
+    # Each key as vast's above.
+    reconcile_interval_seconds: 10
+    status_interval_seconds: 30
+    offer_wait_seconds: 180
+    startup_seconds: 240
+
+    # A Runpod account, whose API key is CLOUD_COMPUTE_RUNPOD_API_KEY, after the cluster_name. Each
+    # job runs under a supervisor that keeps its pod after the job ends, billed at the pod's rate
+    # until the cluster destroys it once its result is read. The nodes of a job over several are
+    # GPU pods in one data center of data_centers on the vendor's global networking, 100 Mbps
+    # between pods, which holds a job within a zone or a region and none within a placement group.
+    runpod:
+      # The account's user id, as the Runpod console shows it. With the provider and the
+      # namespace it is the cluster's id.
+      account_id: REPLACE-WITH-ACCOUNT-ID
+      # Pods above this price for the whole pod are never rented. In October 2026 an RTX 4090
+      # cost $0.89 an hour on the SECURE cloud and $0.34 on COMMUNITY, an A100 80GB PCIe $1.79
+      # and $1.19, and a CPU pod of 8 vCPUs and 16 GB from $0.24.
+      max_price_per_hour: 1.50
+      # The tier GPU pods are rented on: SECURE, the vendor's own data centers, or COMMUNITY.
+      # CPU pods are always SECURE.
+      cloud: SECURE
+      # The vendor's data center ids pods are rented in. Leave empty for any.
+      data_centers: []
+      # The CPU flavor ids a pod without a GPU is rented as, the cheapest that fits first. Leave
+      # empty for any.
+      cpu_flavors: []
+      # Every GPU model a shape below names, under both of its names: product as the NVIDIA
+      # driver reports it, which is what the catalog string is made from, and gpu_id as Runpod's
+      # GPU catalog lists it.
+      accelerators:
+        - product: NVIDIA GeForce RTX 4090
+          gpu_id: NVIDIA GeForce RTX 4090
+        - product: NVIDIA A100 80GB PCIe
+          gpu_id: NVIDIA A100 80GB PCIe
+
+    # The same shapes as vast's, which jobs are admitted to as they are there.
+    shapes:
+      - name: rtx4090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 200
+      - name: a100
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+        accelerators: 1
+        cpu: "8"
+        memory: 64Gi
+        storage: 200Gi
+        max_instances: 200
+      # A CPU pod, of the cpu_flavors above.
       - name: cpu
         cpu: "8"
         memory: 32Gi

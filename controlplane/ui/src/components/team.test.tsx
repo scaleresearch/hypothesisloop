@@ -34,7 +34,7 @@ function agent(id: string, hour: number, agentType = 'generalist', more: Partial
 }
 
 const pe = {
-  id: 'pe-1', project_id: 'prj_1', status: 'running', max_agents: 4, editable: ['name', 'description', 'duration_hours', 'max_agents', 'agents'],
+  id: 'pe-1', project_id: 'prj_1', status: 'running', max_agents: 4, editable: ['name', 'description', 'duration_hours', 'agents'],
   agents: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', count: 2 }, { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', count: 1 }, { agent_type: 'researcher', count: 1 }],
   agents_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', at_work: 2 }, { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', at_work: 1 }, { agent_type: 'researcher', at_work: 1 }], outside_team: 0 },
   coordinator: { model: 'anthropic/claude-opus-5-5' },
@@ -89,51 +89,57 @@ describe('the team of an experiment', () => {
     expect(rows.at(-1)).toBe('Added by the coordinator beyond the team2')
   })
 
-  it('confirms a lowered max naming how many and which executors, the newest, are cut, never a researcher', async () => {
+  it('confirms a team of fewer executors than are at work, naming which, the newest, are cut, never a researcher', async () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    const max = screen.getByRole('spinbutton', { name: 'Max executors' })
-    await userEvent.clear(max)
-    await userEvent.type(max, '1')
+    expect(screen.queryByRole('spinbutton', { name: 'Max executors' })).toBeNull()
+    await userEvent.click(within(screen.getByRole('listitem', { name: 'Team entry 2' })).getByRole('button', { name: 'Remove team entry 2' }))
+    const count = screen.getByRole('spinbutton', { name: 'Team entry 1 count' })
+    await userEvent.clear(count)
+    await userEvent.type(count, '1')
     expect(screen.getByText('Saving cuts the 2 newest executors at work.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     const dialog = within(screen.getByRole('dialog'))
-    expect(dialog.getByText('Lower max executors to 1?')).toBeTruthy()
+    expect(dialog.getByText('Cut 2 executors at work?')).toBeTruthy()
     expect(dialog.getAllByRole('listitem').map(li => li.firstChild?.textContent)).toEqual(['ag-mid', 'ag-lr'])
     expect(updatePlatformExperiment).not.toHaveBeenCalled()
-    await userEvent.click(dialog.getByRole('button', { name: 'Lower and cut 2' }))
-    expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { max_agents: 1 })
+    await userEvent.click(dialog.getByRole('button', { name: 'Save and cut 2' }))
+    expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', {
+      agents: [{ agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', count: 1 }, { agent_type: 'researcher', count: 1 }],
+    })
   })
 
-  it('raises max and adds to the team in one change, without asking, an entry keeping its hyperparameters', async () => {
+  it('sends a larger team, without asking, an entry keeping its hyperparameters, the coordinator shown first', async () => {
     show({ ...pe, agents: [{ ...pe.agents![0], hyperparameters: { direction: 'kernels' } }, ...pe.agents!.slice(1)] })
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    const max = screen.getByRole('spinbutton', { name: 'Max executors' })
-    await userEvent.clear(max)
-    await userEvent.type(max, '6')
+    const coordinator = screen.getByRole('listitem', { name: 'Coordinator' })
+    expect(within(coordinator).getByLabelText('Coordinator model')).toHaveProperty('disabled', true)
+    expect(screen.getByText('Starts from: kernels')).toBeTruthy()
     // A researcher's entry defaults to the coordinator's model when neither it nor its type names one.
     expect((screen.getByLabelText('Team entry 3 model') as HTMLInputElement).placeholder).toBe("Coordinator's model: anthropic/claude-opus-5-5")
     await userEvent.click(screen.getByRole('button', { name: '+ Add executor' }))
     await choose(screen.getByLabelText('Team entry 4 type'), 'Data search')
+    const count = screen.getByRole('spinbutton', { name: 'Team entry 4 count' })
+    await userEvent.clear(count)
+    await userEvent.type(count, '3')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      max_agents: 6,
       agents: [
         { agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', count: 2, hyperparameters: { direction: 'kernels' } },
         { agent_type: 'at-lr', model: 'anthropic/claude-sonnet-5', count: 1 },
         { agent_type: 'researcher', count: 1 },
-        { agent_type: 'data-search', count: 1 },
+        { agent_type: 'data-search', count: 3 },
       ],
     }))
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('sends an entry below its agents at work and shows the API\'s refusal of it, staying open', async () => {
-    const refusal = '2 Generalist executors on m are at work: keep at least 2. Lower max executors to cut the newest.'
+    const refusal = '2 Generalist executors on m are at work: keep at least 2.'
     vi.mocked(updatePlatformExperiment).mockRejectedValue(new ApiError(422, refusal, 'agents_below_at_work', {
       reason: 'agents_below_at_work', message: refusal, problems: [{ reason: 'agents_below_at_work', message: refusal, field: 'agents' }],
     }))
-    show()
+    show({ ...pe, status: 'open' })
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     const count = screen.getByRole('spinbutton', { name: 'Team entry 1 count' })
     await userEvent.clear(count)

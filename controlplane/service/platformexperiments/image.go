@@ -81,7 +81,7 @@ func (s *Service) registryUnavailable(what string, err error) error {
 const ReasonRegistryPreparing = "registry_preparing"
 
 // SetImage records the image ref names as what the jobs of platform experiment id submitted from
-// now on run in, while it is open or running: the digest its registry answers for ref, of
+// now on run in, until it closes, a draft's baseline agent building it early: the digest its registry answers for ref, of
 // architecture, or of the one architecture the image runs on when architecture is empty. An image
 // of the deployment's registry is read with a login of the org's own repository, and one of
 // another org's repository is refused.
@@ -90,8 +90,8 @@ func (s *Service) SetImage(ctx context.Context, id, ref, architecture string) (*
 	if err != nil {
 		return nil, err
 	}
-	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
-		return nil, refuseUpdate(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment %s is %s: its image is recorded while it is open or running", id, pe.Status)
+	if pe.Status == domain.PlatformExpClosed {
+		return nil, refuseUpdate(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment %s is closed: its image is recorded until it closes", id)
 	}
 	orgID, err := s.clusters.ProjectOrg(ctx, pe.ProjectID)
 	if err != nil {
@@ -120,13 +120,13 @@ func (s *Service) SetImage(ctx context.Context, id, ref, architecture string) (*
 		return nil, err
 	}
 	if !set {
-		return nil, refuseUpdate(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment %s closed: its image is recorded while it is open or running", id)
+		return nil, refuseUpdate(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment %s closed: its image is recorded until it closes", id)
 	}
 	return &recorded, nil
 }
 
 // RegistryCredential is a short-lived login that pushes the images of platform experiment id to
-// its org's repository, while it is open or running. The first asks for the org's repository to
+// its org's repository, until it closes. The first asks for the org's repository to
 // be provisioned, which the registry pass does off the request, and is answered 503
 // registry_preparing until it is.
 func (s *Service) RegistryCredential(ctx context.Context, id string) (*platformapi.RegistryCredential, error) {
@@ -137,8 +137,8 @@ func (s *Service) RegistryCredential(ctx context.Context, id string) (*platforma
 	if err != nil {
 		return nil, err
 	}
-	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
-		return nil, refuseUpdate(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment %s is %s: its images are pushed while it is open or running", id, pe.Status)
+	if pe.Status == domain.PlatformExpClosed {
+		return nil, refuseUpdate(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment %s is closed: its images are pushed until it closes", id)
 	}
 	orgID, err := s.clusters.ProjectOrg(ctx, pe.ProjectID)
 	if err != nil {

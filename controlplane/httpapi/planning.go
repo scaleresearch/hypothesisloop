@@ -18,7 +18,7 @@ type planningAPI struct {
 }
 
 // registerPlanning registers the way from one sentence to a running platform experiment: a
-// draft, the planner's proposal, and the person's acceptance.
+// draft and the planner's proposal, which opens it.
 func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger *zap.Logger) {
 	a := planningAPI{platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}}
 	register(doc, auth.AudienceAgent, huma.Operation{
@@ -26,63 +26,42 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 		Summary: "Decline to propose, with the reason", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after), when the goal cannot be made into an experiment: " +
 			"nothing measurable, or nothing this platform can run. reason is read by the person who wrote the goal, in plain words, with what would make it plannable. " +
-			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and declined_at and no proposed_at, its status_reason reads declined, a proposal made before is cleared so there is nothing to accept, " +
-			"the planner's machine is kept until planner_ends_at for a goal changed soon and released then, and the person changes the draft's goal or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason. " +
+			"Stored, the draft carries declined_reason and declined_at and no proposed_at, its status_reason reads declined, " +
+			"the planner's machine is kept until planner_ends_at for a goal changed soon and released then, and the person changes the draft's goal or closes it. It waits for that until proposal_expires_at, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason. " +
 			"goal_version is the draft's goal_version the decline answers: 409 goal_changed once the draft has another goal, which the planner reads and answers instead. Stored, it is told as platform_experiment.proposal declined.",
 	}, a.putDecline)
-	register(doc, auth.AudienceCoordinator, huma.Operation{
-		OperationID: "accept-draft", Method: "POST", Path: "/platform-experiments/{id}/accept",
-		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
-		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
-			"its budget, its length, the minutes its baseline has and its team (agents) are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
-			"name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). " +
-			"answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the description, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. " +
-			"proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. " +
-			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the executors, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
-			"The platform hosts its coordinator, each agent of its team and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. " + platformexperiments.CoordinatorWanted + " " +
-			"starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
-			"and no machine of its team is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. " +
-			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and agents, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. " +
-			"409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, " +
-			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; " +
-			"503 agentsandbox_not_configured when nothing could run it. A draft's own planner cannot accept it.",
-	}, a.acceptDraft)
-	register(doc, auth.AudienceCoordinator, huma.Operation{
-		OperationID: "hold-draft", Method: "POST", Path: "/platform-experiments/{id}/hold",
-		Summary: "Keep the platform from accepting a draft's proposal by itself", Tags: []string{"platform-experiments"},
-		Description: "For a person who edits the proposal before accepting it: accepts_at is cleared, status_reason reads proposed, and the draft waits for the person to accept it (POST /platform-experiments/{id}/accept, with what they changed), change its goal or close it. " +
-			"The baseline agent the proposal signed up is let go of its machine until then, and is given one again with the accept. Holding a draft that is held changes nothing. " +
-			"409 invalid_transition for anything but a draft with a proposal standing.",
-	}, a.holdDraft)
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "put-proposal", Method: "PUT", Path: "/platform-experiments/{id}/proposal",
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
-			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. " +
+			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are what the run costs and who runs it. " +
 			"agents is the team, one entry for each agent, [{agent_type, model, hyperparameters}]: an entry of agent_type researcher is a researcher, which runs no job, holds no quota and steers the work through the hypothesis graph, defaulting to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one, and any other an executor, which runs the jobs; at least one executor, and the executors are the run's max_agents. " +
-			"A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, its numbers are estimates, " +
-			"and the baseline is measured once it is accepted, before any executor starts, by the baseline agent the proposal signs up, whose machine starts with it. " +
-			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
+			"A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, and its numbers are estimates. " +
+			"The proposal is checked, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
-			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is. Stored, it replaces the one before, marks the draft proposed " +
-			"(proposed_at), is told as platform_experiment.proposal proposed, and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, changes its goal or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. " +
-			"goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never stored nor accepted by itself. " +
+			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is. " +
+			"One that passes is applied in the same write: the draft becomes an open platform experiment with the proposal's name, description, metrics, report interval, stages, policies, budget, length and team, the answers to its questions added to the end of the description under the assumptions the plan runs on, " +
+			"and the platform hosts its coordinator and each agent of its team beside the baseline agent the draft was created with. " + platformexperiments.CoordinatorWanted + " " +
+			"starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts. The baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, and the executors' machines start with the first baseline job, so they are up and have read the code when it does; no job of theirs is taken before. " +
+			"proposal stays on the platform experiment as it was proposed, with proposed_at and accepted_at, and accepted_answers the answers added. It is told as platform_experiment.proposal proposed and platform_experiment.status open, and the planner's machine is released. A person changes what they want of the plan afterwards with PATCH /platform-experiments/{id}. " +
+			"goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never applied. 503 agentsandbox_not_configured when nothing could run it. " +
 			"A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. " +
-			"With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.",
+			"With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries a variant with check before it proposes the one it means. " +
+			"With working=true the proposal is checked exactly so and stored as the draft's working plan in proposal, with proposed_at unset: the draft stays a draft, the next working plan or proposal replaces it, a change of the goal drops it, and it is told as platform_experiment.proposal working, which the baseline agent starts from. 409 already_answered once the planner answered the goal.",
 	}, a.putProposal)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-draft", Method: "POST", Path: "/platform-experiments/drafts",
 		Summary: "Start planning a platform experiment from one sentence", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
-			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) " +
-			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
-			"the description, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most agents a proposal's team may name: max_agentsandboxes less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
+			"A draft has no budget, no metrics, and two agents, which the platform runs at once and which are in the roster like any agent: its planner and its baseline agent (role baseline). " +
+			"Nobody else joins. The planner works out how to measure the goal and proposes the metrics, " +
+			"the description, the hardware, the budget and the agents, and that proposal opens it. Until then its max_agents is the most agents a proposal's team may name: max_agentsandboxes less the coordinator and the baseline agent. A draft takes no job, so nothing is measured " +
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the account the org connected on the git host. " +
 			"repository_account says which account when the org connected several. 422 git_host_not_connected, repository_account_required and installation_not_connected as on POST /platform-experiments. " +
-			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
+			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its machines start once the repository is there. " +
 			"When the git host does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what the git host answered. " +
 			"repository and branch are checked as on POST /platform-experiments, and a repository named that does not exist is created from the experiment template. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it. " +
@@ -113,41 +92,11 @@ func (a planningAPI) putDecline(ctx context.Context, in *struct {
 	return a.answer(ctx, pe)
 }
 
-func (a planningAPI) acceptDraft(ctx context.Context, in *struct {
-	ID   string `path:"id"`
-	Body platformexperiments.AcceptRequest
-}) (*struct{ Body *domain.PlatformExperiment }, error) {
-	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
-		return nil, err
-	}
-	caller, err := caller(ctx, a.logger)
-	if err != nil {
-		return nil, err
-	}
-	pe, err := a.experiments.Accept(ctx, in.ID, in.Body, caller.Actor())
-	if err != nil {
-		return nil, planningRefusal(err)
-	}
-	return a.answer(ctx, pe)
-}
-
-func (a planningAPI) holdDraft(ctx context.Context, in *struct {
-	ID string `path:"id"`
-}) (*struct{ Body *domain.PlatformExperiment }, error) {
-	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
-		return nil, err
-	}
-	pe, err := a.experiments.Hold(ctx, in.ID)
-	if err != nil {
-		return nil, err
-	}
-	return a.answer(ctx, pe)
-}
-
 func (a planningAPI) putProposal(ctx context.Context, in *struct {
-	ID    string `path:"id"`
-	Check bool   `query:"check" doc:"Check the proposal as a proposal is checked and store nothing: the answer is the draft as it stands, or 422 with every problem."`
-	Body  platformexperiments.Proposal
+	ID      string `path:"id"`
+	Check   bool   `query:"check" doc:"Check the proposal as a proposal is checked and store nothing: the answer is the draft as it stands, or 422 with every problem."`
+	Working bool   `query:"working" doc:"Check the proposal as a proposal is checked and store it as the draft's working plan: the draft stays a draft, its baseline agent starts from it, and a later one replaces it."`
+	Body    platformexperiments.Proposal
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
@@ -156,7 +105,7 @@ func (a planningAPI) putProposal(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	pe, err := a.experiments.Propose(ctx, in.ID, caller, &in.Body, in.Check)
+	pe, err := a.experiments.Propose(ctx, in.ID, caller, &in.Body, in.Check, in.Working)
 	if err != nil {
 		return nil, planningRefusal(err)
 	}

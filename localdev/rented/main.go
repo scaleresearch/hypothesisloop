@@ -1,9 +1,11 @@
-// rented <example> <provider> [<cluster_name>] writes the sandbox or cloud_compute example of
-// controlplane/settings as local development rents with it: each section names provider and keeps
-// that provider's section alone, and each value there that .env holds as <SECTION>_<NAME>_<FIELD>
-// (config.ProviderKey) is set from it, NAME the sandbox's provider or the cluster_name the
-// cloud_compute entry is renamed to. It refuses a provider this build has no adapter for, a
-// placeholder left in the chosen section, and an account key .env does not hold.
+// rented <example> <provider> | <example> <provider> <cluster_name> [<provider> <cluster_name>]...
+// writes the sandbox or cloud_compute example of controlplane/settings as local development rents
+// with it: each section names provider and keeps that provider's section alone, and each value
+// there that .env holds as <SECTION>_<NAME>_<FIELD> (config.ProviderKey) is set from it, NAME the
+// sandbox's provider or the cluster_name a cloud_compute entry is renamed to. Of cloud_compute it
+// keeps one entry per pair, the example's entry on that provider, in the order the pairs are named.
+// It refuses a provider this build has no adapter for, a placeholder left in a chosen section, and
+// an account key .env does not hold.
 package main
 
 import (
@@ -19,13 +21,10 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 && len(os.Args) != 4 {
-		fail("usage: rented <example> <provider> [<cluster_name>]")
+	if len(os.Args) < 3 {
+		fail(usage)
 	}
-	path, provider := os.Args[1], os.Args[2]
-	if !slices.Contains(providers.Names(), provider) {
-		fail(fmt.Sprintf("rented: provider %q is not one this build rents on (%s)", provider, strings.Join(providers.Names(), ", ")))
-	}
+	path := os.Args[1]
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		fail(err.Error())
@@ -40,27 +39,81 @@ func main() {
 	}
 	name, value := top.Content[0].Value, top.Content[1]
 	section := strings.ToUpper(name)
-	sections, keyName := []*yaml.Node{value}, provider
-	switch {
-	case value.Kind == yaml.SequenceNode && (len(os.Args) != 4 || len(value.Content) != 1):
-		fail(fmt.Sprintf("rented: %s takes one entry and the cluster_name to give it", path))
-	case value.Kind == yaml.SequenceNode:
-		sections, keyName = value.Content, os.Args[3]
-	case len(os.Args) == 4:
-		fail(fmt.Sprintf("rented: %s lists no clusters to name", path))
+	args := os.Args[2:]
+	if value.Kind != yaml.SequenceNode {
+		if len(args) != 1 {
+			fail(fmt.Sprintf("rented: %s lists no clusters to name", path))
+		}
+		known(args[0])
+		choose(value, name, section, args[0], args[0])
+		requireKey(section, args[0])
+		encode(&document)
+		return
 	}
-	for _, s := range sections {
-		choose(s, name, section, provider, keyName)
+	if len(args)%2 != 0 {
+		fail(fmt.Sprintf("rented: %s takes a provider and a cluster_name for each entry", path))
 	}
-	if value.Kind == yaml.SequenceNode {
-		rename(value.Content[0], name, keyName)
+	var entries []*yaml.Node
+	named := map[string]bool{}
+	for i := 0; i < len(args); i += 2 {
+		provider, clusterName := args[i], args[i+1]
+		known(provider)
+		if named[clusterName] {
+			fail(fmt.Sprintf("rented: cluster_name %s is named twice", clusterName))
+		}
+		named[clusterName] = true
+		entry := entryOf(value, name, provider)
+		choose(entry, name, section, provider, clusterName)
+		rename(entry, name, clusterName)
+		requireKey(section, clusterName)
+		entries = append(entries, entry)
 	}
+	value.Content = entries
+	encode(&document)
+}
+
+const usage = "usage: rented <example> <provider> | <example> <provider> <cluster_name> [<provider> <cluster_name>]..."
+
+func known(provider string) {
+	if !slices.Contains(providers.Names(), provider) {
+		fail(fmt.Sprintf("rented: provider %q is not one this build rents on (%s)", provider, strings.Join(providers.Names(), ", ")))
+	}
+}
+
+// entryOf is a copy of the example's entry whose provider is provider, or of its one entry when
+// that holds a section of provider among others.
+func entryOf(list *yaml.Node, name, provider string) *yaml.Node {
+	for _, entry := range list.Content {
+		for i := 0; i+1 < len(entry.Content); i += 2 {
+			key, value := entry.Content[i].Value, entry.Content[i+1]
+			if key == "provider" && value.Value == provider || key == provider && len(list.Content) == 1 {
+				return deepCopy(entry)
+			}
+		}
+	}
+	fail(fmt.Sprintf("rented: %s has no entry on %s", name, provider))
+	return nil
+}
+
+func deepCopy(n *yaml.Node) *yaml.Node {
+	c := *n
+	c.Content = make([]*yaml.Node, len(n.Content))
+	for i, child := range n.Content {
+		c.Content[i] = deepCopy(child)
+	}
+	return &c
+}
+
+func requireKey(section, keyName string) {
 	if key := config.AccountKey(section, keyName); os.Getenv(key.Name) == "" {
 		fail(fmt.Sprintf("rented: .env does not set %s, %s", key.Name, key.For))
 	}
+}
+
+func encode(document *yaml.Node) {
 	encoder := yaml.NewEncoder(os.Stdout)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(&document); err != nil {
+	if err := encoder.Encode(document); err != nil {
 		fail(err.Error())
 	}
 }

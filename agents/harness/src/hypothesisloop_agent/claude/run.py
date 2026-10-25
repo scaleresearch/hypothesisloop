@@ -62,7 +62,6 @@ async def _run(setup: core.RunSetup, store: Store) -> None:
 
 async def _run_until_stopped(setup: core.RunSetup, store: Store, stop_flag: list) -> None:
     backoff_s = _RECONNECT_BACKOFF_INITIAL_S
-    await core.until_accepted(setup, stop_flag, said=lambda: stream.progress.doing("waiting for the plan to be accepted"))
     running = Running(setup)
 
     def reset_backoff() -> None:

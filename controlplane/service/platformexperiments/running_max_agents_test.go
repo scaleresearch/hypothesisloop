@@ -51,8 +51,8 @@ func (s *seatStore) GetAgentRunningExperiments(context.Context, string, string) 
 	return nil, nil
 }
 
-// The owner who wants more executors at work had to close the run and start another. max_agents
-// changes while it runs, for the places nobody took, as long as what the executors left unspent
+// The owner who wants more executors at work had to close the run and start another. The team, and
+// so max_agents, changes while it runs, for the places nobody took, as long as what the executors left unspent
 // still holds one trial of the baseline for each of them.
 func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	update := func(maxAgents int, cut ...string) (*seatStore, error) {
@@ -74,7 +74,7 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 		svc.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return measuredBaseline(), nil
 		}
-		_, err := svc.Update(context.Background(), "pe-1", PlatformExperimentPatch{MaxAgents: &maxAgents})
+		_, err := svc.Update(context.Background(), "pe-1", PlatformExperimentPatch{Agents: &domain.AgentPool{{AgentType: domain.DefaultAgentType, Count: maxAgents}}})
 		return store, err
 	}
 	reason := func(err error) string {
@@ -89,7 +89,7 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	if store, err := update(7); err != nil || store.created[0].MaxAgents != 7 {
 		t.Errorf("seven places 4.5 unspent hours hold: got = %v, stored %d, want 7", err, store.created[0].MaxAgents)
 	}
-	// The store cuts the newest executors above a lowered max_agents of a running one.
+	// The store cuts the newest executors above a team made smaller on a running one.
 	if store, err := update(1); err != nil || store.created[0].MaxAgents != 1 {
 		t.Errorf("fewer places than at work: got = %v, stored %d, want 1", err, store.created[0].MaxAgents)
 	}

@@ -55,7 +55,7 @@ type Spec struct {
 	Description               string             `json:"description" required:"false"`
 	Metrics                   []MetricDefinition `json:"metrics" required:"false"`
 	BudgetAcceleratorHours    float64            `json:"budget_accelerator_hours" required:"false" doc:"The cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores. Required and positive: 422 invalid_cost otherwise."`
-	MaxAgents                 int                `json:"max_agents" required:"false" doc:"Required and positive: 422 invalid_agents otherwise. How many executors may be at work at once: the agents of role executor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the executors of agents in all."`
+	MaxAgents                 int                `json:"max_agents" required:"false" doc:"Positive, and left out only with agents, whose executors it is then: 422 invalid_agents otherwise. How many executors may be at work at once: the agents of role executor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the executors of agents in all."`
 	DurationHours             float64            `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
 	Agents                    []AgentPoolEntry   `json:"agents,omitempty" doc:"Optional: the team it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}]. An entry of agent_type researcher is of researchers, which run no job and default to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one; every other is of executors, at most max_agents in all. A model left out is the agent type's, else the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model that is no <provider>/<model id> reference, two entries of one agent type and model, or executors more than max_agents in all, and 422 model_not_served for a model GET /models does not list. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add agents beyond them, executors up to max_agents."`
 	CoordinatorInAgentSandbox bool               `json:"coordinator_in_agentsandbox,omitempty"`
@@ -107,6 +107,7 @@ var requestOnly = map[string]string{
 	"repository_account": "the request, when the platform creates the repository",
 	"continues":          "the UI or the API",
 	"starts_at":          "the UI or the API",
+	"model_budget_usd":   "the request",
 }
 
 // Parse reads an experiment file from YAML. A key it does not have is refused by name.
@@ -254,7 +255,7 @@ func (spec *Spec) Validate() error {
 		refuse("duration_hours", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
 	}
 	if s.MaxAgents <= 0 {
-		refuse("max_agents", "max_agents is required and must be positive: how many executors may be at work at once")
+		refuse("max_agents", "max_agents is required and must be positive, or agents with an executor in it: how many executors may be at work at once")
 	}
 	if s.ReportIntervalSeconds < 0 {
 		refuse("report_interval_seconds", "report_interval_seconds must be positive: how often a job really reports")
@@ -283,6 +284,17 @@ func (spec *Spec) Validate() error {
 		return nil
 	}
 	return problems
+}
+
+// Executors is how many executors agents wants at work.
+func (s *Spec) Executors() int {
+	executors := 0
+	for _, e := range s.Agents {
+		if !e.Key().Researches() {
+			executors += e.Count
+		}
+	}
+	return executors
 }
 
 func (s *Spec) agentProblems() []string {

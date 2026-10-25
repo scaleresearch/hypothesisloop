@@ -30,8 +30,6 @@ var statusWaiters = map[string]Waiter{
 	"repository_creating": WaitsForPlatform,
 	"planning":            WaitsForPlatform,
 	"revising":            WaitsForPlatform,
-	"accepting":           WaitsForPlatform,
-	"proposed":            WaitsForOwner,
 	"declined":            WaitsForOwner,
 
 	"baseline_measuring":  WaitsForPlatform,
@@ -40,11 +38,12 @@ var statusWaiters = map[string]Waiter{
 	"baseline_undeclared": WaitsForCoordinator,
 	// What the platform's own declaration of the measured job is refused for. Another baseline
 	// agent repairs a job that measured too little, and only the owner changes a bound or pays.
-	"no_baseline":              WaitsForCoordinator,
-	"baseline_not_completed":   WaitsForCoordinator,
-	"baseline_not_on_branch":   WaitsForCoordinator,
-	"baseline_without_finding": WaitsForCoordinator,
-	"baseline_missing_metric":  WaitsForCoordinator,
+	"no_baseline":                   WaitsForCoordinator,
+	"baseline_not_completed":        WaitsForCoordinator,
+	"baseline_not_on_branch":        WaitsForCoordinator,
+	"baseline_not_on_plans_machine": WaitsForCoordinator,
+	"baseline_without_finding":      WaitsForCoordinator,
+	"baseline_missing_metric":       WaitsForCoordinator,
 	// The baseline agent declares the job of its strongest configuration: the coordinator
 	// declares one, or adds a baseline agent to measure it.
 	"baseline_weaker_than_own_job": WaitsForCoordinator,

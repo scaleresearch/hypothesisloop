@@ -10,6 +10,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/providers"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/agentsandbox/launcher"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
@@ -43,6 +44,25 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 		loops = append(loops, cluster.Run)
 	}
 	return loops, nil
+}
+
+// clusterRegistry registers a cluster name for an org, changing nothing for a name the org
+// already holds.
+type clusterRegistry interface {
+	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
+}
+
+// registerCloudClusters registers every cloud_compute entry for the platform's org, which serves
+// every org: listing an entry is the operator's consent to rent on it. A cluster already
+// registered keeps its settings and the orgs that turned it off. A name another org holds stops
+// the process, since the platform would rent machines for a cluster that org controls.
+func registerCloudClusters(ctx context.Context, registry clusterRegistry, pcfg *hypothesisloopcfg.ControlService) error {
+	for _, cc := range pcfg.CloudCompute {
+		if _, err := registry.RegisterCluster(ctx, cc.ClusterName, domain.PlatformOrgID); err != nil {
+			return fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
+		}
+	}
+	return nil
 }
 
 func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*launcher.Launcher, error) {

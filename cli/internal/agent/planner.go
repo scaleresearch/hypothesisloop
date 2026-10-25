@@ -12,12 +12,14 @@ import (
 )
 
 func PlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := command.NewFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [--check] [FILE|-]
+	fs := command.NewFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [--check | --working] [FILE|-]
 
 For the planner of a draft. A proposal defines the experiment and runs nothing: no job, no
 code. --check runs the platform's whole check of FILE and stores nothing: it prints every
-problem at once, or that the proposal passes. Try variants with --check; propose only the one
-you mean, since a propose that passes is stored at once.
+problem at once, or that the proposal passes. --working runs the same check and stores FILE as
+the draft's working plan: the draft stays a draft, its baseline agent starts from it, and a later
+--working or the proposal replaces it. Propose only the one you mean: a propose that passes opens
+the experiment at once.
 FILE is YAML of this shape, with every field shown required unless it says optional.
 Every free-text value is a | block, a list item too (- |): unquoted text breaks on a colon or
 a leading quote.
@@ -56,10 +58,10 @@ a leading quote.
   cpu: 8                               # required, like memory and storage: what one node of a job
   memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
   storage: 100Gi                       # the baseline writes them into job.yaml, so no description repeats them
-  budget_accelerator_hours: 6          # proposed, positive; the person states the real ones at accept
+  budget_accelerator_hours: 6          # positive: the cap on everything the run spends
   duration_hours: 4                    # the run, from its start: a time the goal states is this
-  baseline_minutes: 60                 # what measuring the baseline needs from the accept, from
-                                       # planning.min_baseline_minutes (45) to
+  baseline_minutes: 30                 # what measuring the baseline needs from the proposal, from
+                                       # planning.min_baseline_minutes (15) to
                                        # planning.baseline_limit_minutes
   agents:                              # the team, one entry per agent: executors, which run the
     - agent_type: hyperparameter-search # jobs and count toward max_agents, and researchers, which
@@ -88,28 +90,27 @@ a leading quote.
     - |
       what could make the result mislead
   questions:                           # each decision the goal left open, with the answer you
-    - question: |                      # planned on. A proposal with questions waits for the
-        how big a win counts           # person to confirm or change each answer, which then goes
-      answer: |                        # into the description; one without is accepted as proposed
+    - question: |                      # planned on: each answer is an assumption the run starts
+        how big a win counts           # on, added to the description, which the person changes
+      answer: |                        # if they want it otherwise
         1.5x the control's throughput, since the goal states no margin
-  repo_map: |                          # optional, at most 4000 bytes: what you read of the repository,
-    a line per file or directory that matters, its entry points, how it builds and runs, and
-    the toolchain and dependency pins. The baseline agent is given it when it starts.
 
 A refusal names every problem at once and changes nothing: for a file that is no YAML the line
 and what is wrong there, accelerator_unreachable with the types that are listed, and invalid_resources
-for a cpu, memory or storage left out or no quantity. Without --check, one that passes is stored at
-once, replaces the one before and is what the person is asked to accept, so propose only the
-finished proposal. Your machine is kept some minutes after it, and a change of the goal the
-person makes in that time arrives as your next update.`, stderr)
+for a cpu, memory or storage left out or no quantity. Without --check or --working, one that
+passes opens the experiment at once and your work is done.`, stderr)
 	pe := command.ExperimentFlag(fs)
 	check := fs.Bool("check", false, "check the proposal and store nothing")
+	working := fs.Bool("working", false, "check the proposal and store it as the draft's working plan")
 	operands, err := command.ParseArgs(fs, args)
 	if err != nil {
 		return command.ParseExit(err)
 	}
 	if len(operands) > 1 {
 		return command.ParseExit(command.Misuse(fs, "want at most one FILE, got %d operands", len(operands)))
+	}
+	if *check && *working {
+		return command.ParseExit(command.Misuse(fs, "--check and --working: choose one"))
 	}
 	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
@@ -127,8 +128,11 @@ person makes in that time arrives as your next update.`, stderr)
 	quantitiesAsStrings(body)
 	textsAsLists(body)
 	path = "/platform-experiments/" + url.PathEscape(id) + "/proposal"
-	if *check {
+	switch {
+	case *check:
 		path += "?check=true"
+	case *working:
+		path += "?working=true"
 	}
 	var out any
 	if err := c.Do("PUT", path, body, &out); err != nil {
@@ -136,6 +140,10 @@ person makes in that time arrives as your next update.`, stderr)
 	}
 	if *check {
 		fmt.Fprintln(stdout, "the proposal passes every check; nothing is stored. Propose it without --check when it is the one you mean.")
+		return 0
+	}
+	if *working {
+		fmt.Fprintln(stdout, "stored as the working plan; the draft is still a draft. Propose without --working when it is the one you mean.")
 		return 0
 	}
 	command.PrintJSON(stdout, out)

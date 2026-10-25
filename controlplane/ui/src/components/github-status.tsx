@@ -2,10 +2,10 @@
 
 import type { ReactNode } from 'react'
 import type { Tone } from '@/lib/colors'
-import { githubCardPath, installationSettingsURL, type Install } from '@/lib/github-connect'
+import { installationSettingsURL, type Install } from '@/lib/github-connect'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { inlineLinkClass, TextLink } from '@/components/ui/link'
+import { inlineLinkClass } from '@/components/ui/link'
 import { Inline } from '@/components/ui/stack'
 import { InlineError, Spinner } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
@@ -20,11 +20,6 @@ export function StatusChip({ tone, label, explain }: { tone: Tone; label: string
       <span className="sr-only">: {explain}</span>
     </span>
   )
-}
-
-/** The GitHub section of the org's settings, where an owner manages the connection and a member sees it. */
-export function GitHubSettingsLink({ orgID }: { orgID: string }) {
-  return <TextLink inline href={githubCardPath(orgID)} className="text-xs">See the connection in settings</TextLink>
 }
 
 /** What fixes a GitHub problem: installing again from here, or the installation's page on GitHub. */
@@ -54,20 +49,20 @@ function githubProblem(reason: string | undefined, message: string, account: str
   const on = account ? ` on ${account}` : ''
   switch (reason) {
     case 'installation_gone':
-      return { tone: 'danger', label: 'Not installed', explain: `The GitHub App was removed${on}, so experiments cannot use its repositories. ${owner ? 'Reinstall it' : 'An owner of the org reinstalls it'} to connect again.`, fix: 'install' }
+      return { tone: 'danger', label: 'Removed', explain: `GitHub access was removed${on}, so experiments cannot use its repositories. ${owner ? 'Reconnect GitHub' : 'Ask an owner of your organization to reconnect GitHub'} to use them again.`, fix: 'install' }
     case 'installation_suspended':
-      return { tone: 'warning', label: 'Suspended', explain: `The GitHub App is suspended${on}. Unsuspend it on GitHub to use its repositories again.`, fix: 'review' }
+      return { tone: 'warning', label: 'Suspended', explain: `GitHub access is suspended${on}. Unsuspend it on GitHub to use its repositories again.`, fix: 'review' }
     case 'git_host_permission_missing': {
       const missing = permissionsIn(message)
-      return { tone: 'warning', label: 'Missing permission', explain: `The GitHub App${on} has not been granted ${missing || 'every permission it asks for'}. Accept the permissions on GitHub.`, fix: 'review' }
+      return { tone: 'warning', label: 'Missing permission', explain: `GitHub access${on} is missing ${missing || 'a permission it needs'}. Accept the permissions on GitHub.`, fix: 'review' }
     }
     case 'repository_not_reachable':
-      return { tone: 'warning', label: 'No access', explain: `The GitHub App cannot reach this repository. ${owner ? 'Add it' : 'An owner of the org adds it'} to the App's repositories${on}.`, fix: 'install' }
+      return { tone: 'warning', label: 'No access', explain: `GitHub access does not cover this repository. ${owner ? 'Add it' : 'Ask an owner of your organization to add it'} to the repositories it can reach${on}.`, fix: 'install' }
     case 'repository_creation_not_permitted':
-      return { tone: 'warning', label: 'Cannot create', explain: `GitHub does not let the App create repositories${on}. Review the App's permissions on GitHub, or pick an existing repository.`, fix: 'review' }
+      return { tone: 'warning', label: 'Cannot create', explain: `GitHub does not allow creating repositories${on}. Review the permissions on GitHub, or pick an existing repository.`, fix: 'review' }
     case 'installation_not_connected':
     case 'git_host_not_connected':
-      return { tone: 'warning', label: 'Not connected', explain: `No GitHub account${on} is connected. ${owner ? 'Install' : 'An owner of the org installs'} the GitHub App on it.`, fix: 'install' }
+      return { tone: 'warning', label: 'Not connected', explain: `No GitHub account${on} is connected. ${owner ? 'Connect it' : 'Ask an owner of your organization to connect it'}.`, fix: 'install' }
     case 'git_host_failed':
     case 'unavailable':
       return { tone: 'neutral', label: 'No answer', explain: 'GitHub did not answer the check. Try again in a moment.', fix: 'retry' }
@@ -93,7 +88,7 @@ export function GitHubProblem({ reason, message, account, installation, onInstal
   const problem = githubProblem(reason, message, account, org.actions.includes('edit'))
   let action: ReactNode = <Button type="button" variant="link" size="sm" loading={retrying} onClick={onRetry}>Check again</Button>
   if (problem.fix === 'install' && onInstall) {
-    action = <Button type="button" variant="link" size="sm" onClick={onInstall}>{reason === 'installation_gone' ? 'Reinstall' : reason === 'repository_not_reachable' ? 'Add repositories' : 'Install GitHub App'}</Button>
+    action = <Button type="button" variant="link" size="sm" onClick={onInstall}>{reason === 'installation_gone' ? 'Reconnect' : reason === 'repository_not_reachable' ? 'Add repositories' : 'Connect GitHub'}</Button>
   } else if (problem.fix === 'review' && installation) {
     action = <a href={installationSettingsURL(installation)} target="_blank" rel="noreferrer" className={`${inlineLinkClass} text-xs`}>Review on GitHub</a>
   }
@@ -115,7 +110,7 @@ export function InstallProgress({ install, onCancel }: { install: Install; onCan
       return (
         <Inline gap="sm" role="status">
           <Spinner />
-          <Text as="span" variant="hint">Waiting for GitHub. Finish the install in the new tab.</Text>
+          <Text as="span" variant="hint">Waiting for GitHub. Finish connecting in the GitHub tab.</Text>
           <Button type="button" variant="link" size="sm" onClick={onCancel}>Cancel</Button>
         </Inline>
       )

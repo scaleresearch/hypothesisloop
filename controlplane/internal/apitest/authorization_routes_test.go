@@ -313,8 +313,6 @@ var routes = []route{
 	{method: "GET", path: "/platform-experiments/{id}/results", request: "/platform-experiments/<pe>/results", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/health", request: "/platform-experiments/<pe>/health", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/situation", request: "/platform-experiments/<pe>/situation", rule: scoped(agentAudience, reached), sharedRead: true},
-	{method: "POST", path: "/platform-experiments/{id}/accept", request: "/platform-experiments/<pe>/accept", body: `{"budget_accelerator_hours":1,"duration_hours":1,"baseline_minutes":1,"agents":[{}]}`, rule: scoped(coordinatorAudience, reached)},
-	{method: "POST", path: "/platform-experiments/{id}/hold", request: "/platform-experiments/<pe>/hold", rule: scoped(coordinatorAudience, reached)},
 	{method: "PUT", path: "/platform-experiments/{id}/decline", request: "/platform-experiments/<pe>/decline", body: `{"reason":"nothing here can be measured","goal_version":1}`, rule: plannerOnly(agentAudience)},
 	{method: "PUT", path: "/platform-experiments/{id}/proposal", request: "/platform-experiments/<pe>/proposal", body: `{"goal_version":1,"experiment":{},"budget_accelerator_hours":1,"duration_hours":1,"baseline_minutes":1,"agents":[{}],"accelerator_type":"nvidia.com/gpu.product=A","cpu":"1","memory":"1Gi","storage":"1Gi","metric_reason":"r","measurement":"m","sizing_reason":"s"}`, rule: plannerOnly(agentAudience)},
 	{method: "PUT", path: "/platform-experiments/{id}/image", request: "/platform-experiments/<pe>/image", body: `{"image":"registry.test/i:1"}`, rule: scoped(agentAudience, reached)},

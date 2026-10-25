@@ -6,6 +6,7 @@ import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { useCreateAgentType } from '@/components/agent-types/duplicate'
 import { ModelName } from '@/components/model-name'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -54,7 +55,7 @@ function NewTypeDialog({ catalog, roles: allRoles, onClose }: { catalog: ListedA
           />
           <Text variant="hint">{roleOf(allRoles, role).description} The role is fixed once made.</Text>
         </Stack>
-        <FormField label="Name" hint={start ? `Starts as a copy of ${start.name}.` : undefined}>
+        <FormField label="Name">
           <Input value={name} placeholder={start ? `Copy of ${start.name}` : ''} onChange={e => setName(e.target.value)} autoFocus />
         </FormField>
         {error && <ErrorMessage>{error}</ErrorMessage>}
@@ -79,7 +80,7 @@ function RoleGroup({ r, types, duplicate, busy }: {
   const ordered = [...types].sort((a, b) =>
     Number(b.builtin) - Number(a.builtin) || Number(!!a.archived_at) - Number(!!b.archived_at) || (a.builtin ? 0 : a.name.localeCompare(b.name)))
   return (
-    <Section title={`${r.name} types`} note={r.description} scrollX>
+    <Section title={`${r.name} types`} note={r.description && <InfoTip>{r.description}</InfoTip>} scrollX>
       <Table aria-label={`${r.name} types`} className="min-w-3xl table-fixed">
         <thead>
           <tr>
@@ -127,11 +128,6 @@ export function AgentTypesList() {
       title="Agent types"
       actions={editsOrg && catalog && roles && <Button variant="primary" size="sm" onClick={() => setAdding(true)}>New type</Button>}
     >
-      {!editsOrg && (
-        <Text tone="muted" role="note">
-          Only an owner of {org.name} can create, edit or archive agent types.
-        </Text>
-      )}
       {error && <ErrorMessage>Could not load agent types: {error.message}</ErrorMessage>}
       {rolesError && <ErrorMessage>Could not load the agent roles: {rolesError.message}</ErrorMessage>}
       {createError && <ErrorMessage>{createError}</ErrorMessage>}

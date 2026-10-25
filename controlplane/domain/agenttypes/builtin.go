@@ -21,7 +21,7 @@ var files embed.FS
 // under the next Release, becomes current like any other change. Raise it by one with every change
 // of a built-in's name, description, prompt or settings, or of the rules: TestReleaseNamesWhatItSeeds
 // keeps the digest of each.
-const Release = 10
+const Release = 11
 
 // executorFocus marks where builtin/executor.md, the body every executor shares, takes the
 // executor's own builtin/<id>.md.

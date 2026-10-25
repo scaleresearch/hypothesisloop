@@ -86,8 +86,26 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 		}
 	}
 
+	for name, tc := range map[string]struct {
+		org  string
+		id   int64
+		want bool
+	}{
+		"one another org connected too":  {orgA, 7, true},
+		"one only this org connected":    {orgA, 8, false},
+		"one only another org connected": {orgB, 8, true},
+		"one no org connected":           {orgA, 99, false},
+	} {
+		if got, err := accounts.GitHubInstallationConnectedElsewhere(ctx, tc.org, tc.id); err != nil || got != tc.want {
+			t.Errorf("connected elsewhere, %s: got = %v, %v, want = %v", name, got, err, tc.want)
+		}
+	}
+
 	if err := accounts.DisconnectGitHubInstallation(ctx, orgA, 7); err != nil {
 		t.Fatalf("disconnect: %v", err)
+	}
+	if elsewhere, err := accounts.GitHubInstallationConnectedElsewhere(ctx, orgB, 7); err != nil || elsewhere {
+		t.Fatalf("connected elsewhere once the other org disconnected it: got = %v, %v, want false", elsewhere, err)
 	}
 	if err := accounts.DisconnectGitHubInstallation(ctx, orgA, 7); !errors.Is(err, ErrGitHubInstallationNotFound) {
 		t.Fatalf("disconnect twice: got = %v, want = %v", err, ErrGitHubInstallationNotFound)
@@ -149,8 +167,27 @@ func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *test
 	if err != nil || len(listed) != 2 || listed[0].InstallationID != 7 || listed[1].InstallationID != 18 {
 		t.Fatalf("listed = %+v, %v, want Acme's and the new one on carol, the removed one gone", listed, err)
 	}
-	if err := accounts.DisconnectGitHubInstallation(ctx, org, 18); err != nil || len(defaults()) != 0 {
-		t.Fatalf("disconnect the default: %v, defaults %v, want none left", err, defaults())
+	third := &domain.OrgGitHubInstallation{OrgID: org, InstallationID: 19, AccountLogin: "dave", AccountType: "User", ConnectedActor: by}
+	if err := accounts.ConnectGitHubInstallation(ctx, third); err != nil || third.Default {
+		t.Fatalf("connect a third: %+v, %v, want it not the default", third, err)
+	}
+	if err := accounts.DisconnectGitHubInstallation(ctx, org, 19); err != nil || fmt.Sprint(defaults()) != "[18]" {
+		t.Fatalf("disconnect one that is not the default: %v, defaults %v, want 18 kept", err, defaults())
+	}
+	if err := accounts.ConnectGitHubInstallation(ctx, third); err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.DisconnectGitHubInstallation(ctx, org, 18); err != nil || fmt.Sprint(defaults()) != "[7]" {
+		t.Fatalf("disconnect the default: %v, defaults %v, want the oldest, 7, promoted", err, defaults())
+	}
+	if err := accounts.DisconnectGitHubInstallation(ctx, org, 7); err != nil || fmt.Sprint(defaults()) != "[19]" {
+		t.Fatalf("disconnect the default again: %v, defaults %v, want 19 promoted", err, defaults())
+	}
+	if err := accounts.DisconnectGitHubInstallation(ctx, org, 19); err != nil || len(defaults()) != 0 {
+		t.Fatalf("disconnect the last: %v, defaults %v, want none", err, defaults())
+	}
+	if err := accounts.DisconnectGitHubInstallation(ctx, org, 19); !errors.Is(err, ErrGitHubInstallationNotFound) {
+		t.Fatalf("disconnect one not connected: %v, want %v", err, ErrGitHubInstallationNotFound)
 	}
 }
 

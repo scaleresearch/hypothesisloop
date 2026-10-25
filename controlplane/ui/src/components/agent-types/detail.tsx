@@ -28,11 +28,11 @@ import { keys } from '@/lib/keys'
 import type { EditedAgentType, ListedAgentType } from '@/types/api'
 
 // Why the API lets the person not edit the type, or null when it does.
-function readOnlyReason(t: ListedAgentType, orgName: string): string | null {
+function readOnlyReason(t: ListedAgentType): string | null {
   if (t.actions.includes('edit')) return null
-  if (t.builtin) return 'Built-in types are read-only for everyone. Duplicate it to get a copy you can edit.'
-  if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and cannot be edited. Duplicate it to start a new type from it.`
-  return `Only an owner of ${orgName} can edit agent types.`
+  if (t.builtin) return 'Built-in types are read-only. Duplicate it to make an editable copy.'
+  if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and cannot be edited.`
+  return 'Only owners can edit agent types.'
 }
 
 // JSON with every object's keys sorted, so two equal values read the same whatever their key order.
@@ -242,11 +242,11 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const back = { label: 'Agent types', onClick: () => router.push(agentTypesPath(org.id)) }
   if (error) {
     const missing = error instanceof ApiError && error.status === 404
-    return <Page title="Agent type" back={back}><ErrorMessage>{missing ? `No agent type ${typeID} in ${org.name}.` : `Could not load the agent type: ${error.message}`}</ErrorMessage></Page>
+    return <Page title="Agent type" back={back}><ErrorMessage>{missing ? `Agent type ${typeID} not found.` : `Could not load the agent type: ${error.message}`}</ErrorMessage></Page>
   }
   if (!type) return <Page title="Agent type" back={back}><Loading /></Page>
 
-  const reason = readOnlyReason(type, org.name)
+  const reason = readOnlyReason(type)
   return (
     <Page
       back={back}

@@ -45,7 +45,7 @@ fi
 # server `make dev` runs on this machine (localdev/local-git). That one serves the bare
 # repositories under HL_GIT_ROOT to its one credential, whose password is made on this machine by
 # the first use and never leaves it, and holds a copy of the experiment template,
-# HL_GIT_EXPERIMENT_TEMPLATE, cloned from HL_EXPERIMENT_TEMPLATE_URL when it is missing, so the
+# HL_GIT_EXPERIMENT_TEMPLATE, cloned from HL_EXPERIMENT_TEMPLATE_URL and fetched again on each start, so the
 # platform creates repositories there with no network. The secret of either reaches the processes
 # that read it through their environment files (lib_env_files).
 HL_GIT_PORT=8085
@@ -272,16 +272,21 @@ lib_register_local_cluster() {
   lib_hl_admin cluster add local default >/dev/null
 }
 
-# The cluster control-service rents jobs for, which make dev registers under the provider
-# CLOUD_COMPUTE_PROVIDER in .env names.
+# The providers control-service rents machines for jobs on under make dev, one per line:
+# CLOUD_COMPUTE_PROVIDERS in .env, split on spaces or commas, else the one CLOUD_COMPUTE_PROVIDER
+# names, else vast and runpod. Each is the cluster lib_cloud_cluster names.
+lib_cloud_providers() {
+  local list
+  list="$(lib_env_value CLOUD_COMPUTE_PROVIDERS)"
+  [[ -n "${list}" ]] || list="$(lib_env_value CLOUD_COMPUTE_PROVIDER)"
+  [[ -n "${list}" ]] || list="vast runpod"
+  printf '%s\n' ${list//,/ }
+}
+
+# lib_cloud_cluster PROVIDER: the cluster of org default make dev rents on PROVIDER as, whose
+# account key is CLOUD_COMPUTE_HYPOTHESISLOOP_<PROVIDER>_API_KEY.
 lib_cloud_cluster() {
-  local provider
-  provider="$(lib_env_value CLOUD_COMPUTE_PROVIDER)"
-  if [[ -z "${provider}" ]]; then
-    echo "auth: .env sets no CLOUD_COMPUTE_PROVIDER" >&2
-    return 1
-  fi
-  printf 'hypothesisloop-%s' "${provider}"
+  printf 'hypothesisloop-%s' "$1"
 }
 
 # lib_default_org_cluster NAME enable|disable: whether org default places jobs on the cluster.

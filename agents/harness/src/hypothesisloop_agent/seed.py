@@ -94,20 +94,12 @@ def planner(workdir: str) -> str:
 
 
 # The image is what usually takes longest, and the control waits for it. The opening says the
-# run waits on the goal and what to start first.
-_BASELINE_OPENING = (
+# run waits on the goal and what to start first: the baseline agent starts beside the planner,
+# before there is a plan to read.
+BASELINE_OPENING = (
     "Your goal is the control and each reference measured and your branch ready for executors, "
-    "who wait for it to start. Start what is slowest first, often the "
-    "experiment's image from the toolchain and dependency pins {source}, and do the rest alongside "
-    "it, with subagents where parallel work is faster.")
-_FROM_MAP = "the planner's map below names"
-_FROM_REPOSITORY = "the repository's pin files state"
-
-
-def baseline(repo_map: str) -> str:
-    """The opening of a baseline agent whose session starts fresh: its goal, and the planner's map
-    of the repository where it left one."""
-    opening = _BASELINE_OPENING.format(source=_FROM_MAP if repo_map else _FROM_REPOSITORY)
-    if not repo_map:
-        return opening
-    return "\n\n".join([opening, _section("The planner's map of the repository", repo_map)])
+    "who wait for it to start. Start what is slowest first, often the experiment's image from the "
+    "toolchain and dependency pins the repository's pin files state, and do the rest alongside it, "
+    "with subagents where parallel work is faster. While the experiment is a draft its planner is "
+    "drafting the plan: `proposal` in `hl platform-experiments get` is the plan so far, an update "
+    "tells you when it changes, and jobs are taken once the plan applies and the experiment is open.")

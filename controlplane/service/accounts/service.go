@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -91,10 +90,10 @@ type Service struct {
 	liveWithin    time.Duration
 	signingSecret string
 	runtimes      RuntimeAddresses
-	// platformClusters are the cluster names the control plane runs itself (cloud_compute), which
-	// only an operator registers: whoever registered one would have the platform rent machines
-	// for its jobs and hold the cluster's runtime token.
-	platformClusters []string
+	// platformClusters are the clusters the control plane runs itself (cloud_compute), by name,
+	// each with the provider it rents on. Only an operator registers one: whoever registered one
+	// would have the platform rent machines for its jobs and hold the cluster's runtime token.
+	platformClusters map[string]string
 	limits           Limits
 	logger           *zap.Logger
 	access           *auth.Access
@@ -110,7 +109,7 @@ type Limits struct {
 
 // NewService takes liveness, which counts a cluster connected while it reported within
 // liveWithin.
-func NewService(accounts Accounts, clusters Clusters, liveness Liveness, liveWithin time.Duration, signingSecret string, runtimes RuntimeAddresses, platformClusters []string, limits Limits, access *auth.Access, logger *zap.Logger) *Service {
+func NewService(accounts Accounts, clusters Clusters, liveness Liveness, liveWithin time.Duration, signingSecret string, runtimes RuntimeAddresses, platformClusters map[string]string, limits Limits, access *auth.Access, logger *zap.Logger) *Service {
 	if logger == nil {
 		panic("accounts.NewService: a logger is required")
 	}
@@ -196,6 +195,7 @@ type RegisteredCluster struct {
 // its agent is connected right now, and when it was last heard from.
 type ListedCluster struct {
 	ClusterView
+	Provider          string                 `json:"provider,omitempty" doc:"The vendor the platform rents a machine on for each job placed on the cluster, vast or runpod, for a cluster the control plane runs itself. Absent for one whose own agent runs it."`
 	Owned             bool                   `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of the platform's org listed to another org: its org_id, cluster_id, settings, agent_version and last_error are left out."`
 	Connected         bool                   `json:"connected"`
 	Place             int                    `json:"place,omitempty" doc:"Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's clusters come after every cluster of the org's own. Absent while the org has the cluster turned off."`
@@ -274,6 +274,9 @@ func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Pr
 			contact = &seen
 		}
 		out[i] = listed(c, orgID, caller, role, connected[c.Name], connected[c.Name] && autoscalers[c.Name], contact, h.runtimes.ImageTag)
+		if c.OfPlatform() {
+			out[i].Provider = h.platformClusters[c.Name]
+		}
 		if !c.EnabledFor(orgID) {
 			continue
 		}
@@ -598,7 +601,7 @@ func (h *Service) RegisterCluster(ctx context.Context, orgID, name string) (*Reg
 	if err := domain.ValidateIdentifier("cluster name", name); err != nil {
 		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("name")
 	}
-	if slices.Contains(h.platformClusters, name) {
+	if _, taken := h.platformClusters[name]; taken {
 		return nil, refusal.Conflict("name_taken", "cluster name "+name+" is the platform's own")
 	}
 	cluster, err := h.clusters.RegisterCluster(ctx, name, orgID)

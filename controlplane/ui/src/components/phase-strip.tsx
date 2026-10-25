@@ -4,15 +4,13 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useSWRConfig } from 'swr'
 import { formatDate } from '@/lib/format'
-import { OWNER_ACTIONS, PHASES, phaseOf, reasonOf, waitsFor } from '@/lib/phase'
+import { OWNER_ACTIONS, phaseOf, phasesOf, reasonOf, waitsFor } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
 import { AgentAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
 import { PlanningProgress } from '@/components/planning-progress'
-import { proposalOf } from '@/lib/planning'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
-import { ProposalForm } from '@/components/proposal-form'
 import { RunProgress } from '@/components/run-progress'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, InsetCard } from '@/components/ui/card'
@@ -89,8 +87,7 @@ function baselineAgent(agents: JoinedAgent[] | undefined): JoinedAgent | undefin
  * waits for is doing. `jobs` are the experiment's newest, among which the baseline agent's is
  * looked for. `stages` puts how far the run is under the phases while it runs, and `children`
  * say what its machines are doing. A reader of a shared experiment is told neither that a move is
- * theirs nor that none is. Past its proposal, the Proposal step opens the proposal as it was
- * accepted, to read.
+ * theirs nor that none is.
  */
 export function PhaseStrip({ pe, jobs = [], stages, children }: {
   pe: PlatformExperiment
@@ -102,7 +99,6 @@ export function PhaseStrip({ pe, jobs = [], stages, children }: {
   const { data: agents } = useRoster(pe)
   const why = (
     <Text role="status">
-      {phase === 'baseline' && !pe.baseline_job_id && reasonOf(pe).reason !== 'repository_creating' && 'Preparing the baseline. '}
       {phase === 'closed' && pe.closed_at ? closedLine(reasonOf(pe).summary, pe.closed_at) : reasonOf(pe).summary}
     </Text>
   )
@@ -110,19 +106,13 @@ export function PhaseStrip({ pe, jobs = [], stages, children }: {
   const who = pe.actions.length === 0 || phase === 'closed' ? undefined : waitsFor(pe)
   const planner = agents?.find(agent => agent.agent_type === 'planner')
   const baseline = baselineAgent(agents)
-  const [showProposal, setShowProposal] = useState(false)
-  const proposal = proposalOf(pe)
-  const pastProposal = phase !== 'planning' && phase !== 'proposal' && !!proposal
+  const planning = pe.status === 'draft' && reasonOf(pe).reason !== 'declined'
   return (
-    <>
     <Card role="region" aria-label="Where this experiment stands">
       <CardContent className="grid gap-3">
-        <Steps
-          label="Phase" steps={PHASES} current={phase} live={phase !== 'closed'}
-          open={pastProposal ? ['proposal'] : []} shown={showProposal ? 'proposal' : undefined} onOpen={() => setShowProposal(shown => !shown)}
-        />
+        <Steps label="Phase" steps={phasesOf(pe)} current={phase} live={phase !== 'closed'} />
         {phase === 'running' && pe.started_at && stages && stages.stages.length > 0 && <RunProgress status={stages} />}
-        {phase === 'planning' ? <PlanningProgress pe={pe} planner={planner} /> : !who ? why : who === 'owner' ? (
+        {planning ? <PlanningProgress pe={pe} planner={planner} /> : !who ? why : who === 'owner' ? (
           <Callout tone="warning" className="grid justify-items-start gap-1.5">
             <Eyebrow tone="warning">Your move</Eyebrow>
             {why}
@@ -144,9 +134,5 @@ export function PhaseStrip({ pe, jobs = [], stages, children }: {
         )}
       </CardContent>
     </Card>
-    {pastProposal && showProposal && proposal && (
-      <ProposalForm key={pe.proposed_at} draft={pe} proposal={proposal} editable={false} accepting={false} accepted onDone={() => {}} />
-    )}
-    </>
   )
 }

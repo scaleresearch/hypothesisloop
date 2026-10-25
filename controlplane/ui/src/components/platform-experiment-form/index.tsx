@@ -3,27 +3,28 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
-import { createPlatformExperiment, EXPERIMENT_FILE_ELSEWHERE, fetchExperimentFile, INVALID_EXPERIMENT_FILE, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import { createPlatformExperiment, EXPERIMENT_FILE_ELSEWHERE, EXPERIMENT_FILE_UNFILLED, fetchExperimentFile, INVALID_EXPERIMENT_FILE, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
 import { isZeroDate } from '@/lib/format'
+import { proposalOf } from '@/lib/planning'
 import { useTenant } from '@/lib/tenant'
 import { codeFields, DEFAULT_BRANCH, namesRepository } from '@/components/repository-select'
-import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
+import { useGitHub, usePlainGitHost } from '@/components/connect-github-step'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
 import { Text } from '@/components/ui/text'
-import { NEW_EXPERIMENT, NEW_TEAM, STEPS, refusedStep, toDrafts, toStages } from '@/components/platform-experiment-form/model'
-import type { FormState, Problem, StepID } from '@/components/platform-experiment-form/model'
+import { MACHINE_FIELDS, NEW_EXPERIMENT, NEW_TEAM, STEPS, refusedStep, stepOneProblems, toDrafts, toStages } from '@/components/platform-experiment-form/model'
+import type { FormState, Machine, Problem, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
 import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
 import { StepBudget } from '@/components/platform-experiment-form/step-budget'
 import { errorMessage, namingSent } from '@/lib/errors'
-import { toTeam, toTeamRows } from '@/lib/team'
+import { executorCount, keptRows, toTeam, toTeamRows } from '@/lib/team'
 import { keys } from '@/lib/keys'
 import type { ExperimentDraft, PlatformExperiment } from '@/types/api'
 import { canEdit, type EditableField } from '@/lib/editable'
@@ -37,7 +38,7 @@ interface FormProps {
   onSaved: (saved: PlatformExperiment, created?: boolean) => void
   /** Offers Cancel. A form that is the page's own content has nothing to go back to and passes none. */
   onCancel?: () => void
-  /** The form is in a dialog: the steps stay at the top and the buttons at the bottom while the panel scrolls. */
+  /** The form fills a dialog of fixed height: the steps stay at the top and the buttons at the bottom while the step between them scrolls. */
   docked?: boolean
 }
 
@@ -49,7 +50,7 @@ interface FormHandle {
 // Every field of the form the repository's experiment file fills, by the words the form names it with.
 const FILE_FIELDS = [
   ['branch', 'the branch'], ['name', 'the name'], ['description', 'the experiment goal'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
-  ['max_agents', 'the max executors'], ['duration_hours', 'the duration'], ['agents', 'the team'],
+  ['duration_hours', 'the duration'], ['agents', 'the team'],
   ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder'], ['max_concurrent_accelerators', 'the max concurrent accelerators'],
   ['agent_image', 'the agent image'], ['coordinator_model', 'the coordinator model'], ['default_quota_tier', 'the default quota tier'],
 ] as const
@@ -60,19 +61,27 @@ const FILE_FIELDS = [
  * rule is the API's: the editors hint at what the API will refuse as it is typed, and a refusal
  * is shown at the step it concerns. A new experiment left with anything typed is kept as a draft.
  */
+/** The machine the plan of pe states, null for an experiment made whole. */
+function machineOf(pe: PlatformExperiment | null | undefined): Machine | null {
+  const proposal = pe && proposalOf(pe)
+  if (!proposal?.cpu) return null
+  return { accelerator_type: proposal.accelerator_type ?? '', cpu: proposal.cpu, memory: proposal.memory ?? '', storage: proposal.storage ?? '' }
+}
+
 export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function PlatformExperimentForm({ initial, draft, onSaved, onCancel, docked }, ref) {
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
-  const needsGitHub = useNeedsGitHub()
+  const github = useGitHub()
+  const plainHost = usePlainGitHost()
   const isEdit = !!initial
   // An edit changes the fields the API lists in editable and locks the rest. The team is changed
   // in place on the experiment's page.
   const locked = (field: EditableField) => !!initial && !canEdit(initial, field)
+  const keptForm = draft?.form as Partial<FormState> | undefined
   const [form, setForm] = useState<FormState>(() => ({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
     budget_accelerator_hours: String(initial?.budget_accelerator_hours ?? NEW_EXPERIMENT.budget_accelerator_hours),
-    max_agents: String(initial?.max_agents ?? NEW_EXPERIMENT.executors),
     agents: initial ? toTeamRows(initial.agents) : NEW_TEAM,
     max_concurrent_accelerators: initial?.max_concurrent_accelerators != null ? String(initial.max_concurrent_accelerators) : '',
     starts_at: !isZeroDate(initial?.starts_at) ? new Date(initial!.starts_at!).toISOString().slice(0, 16) : '',
@@ -85,7 +94,9 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     agent_image: initial?.agent_image ?? '',
     coordinator_model: initial?.coordinator?.model ?? '',
     default_quota_tier: initial?.default_quota_tier ?? '',
-    ...draft?.form as Partial<FormState> | undefined,
+    machine: machineOf(initial),
+    ...keptForm,
+    ...(keptForm?.agents ? { agents: keptRows(keptForm.agents) } : {}),
   }))
   // The form as it opened. An edit sends the fields that differ from it, and a new one left
   // unchanged needs no draft kept.
@@ -102,7 +113,12 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const [refused, setRefused] = useState<Problem[] | null>(draft?.failure ? [{ message: draft.failure }] : null)
   const failure = refused?.map(p => p.message).join(' ') ?? ''
   const panel = useRef<HTMLDivElement>(null)
+  const body = useRef<HTMLDivElement>(null)
   const moved = useRef(false)
+  // Once Next or Create found step 1 lacking, its fields say what they lack until it is given.
+  const [checked, setChecked] = useState(false)
+  const problems = !isEdit && checked ? stepOneProblems(form, { github, plainHost }) : {}
+  const [pointAt, setPointAt] = useState(0)
 
   const unsaved = JSON.stringify(form) !== JSON.stringify(kept)
 
@@ -110,12 +126,34 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     setForm(f => ({ ...f, [field]: value }))
   }
 
-  // A step that changed takes the focus to its panel, so the keyboard goes on from its first field.
-  // Focusing that field itself would open the metric picker, which opens on focus.
+  // A step that changed opens at its top and takes the focus to its panel, so the keyboard goes on
+  // from its first field. Focusing that field itself would open the metric picker, which opens on focus.
   useEffect(() => {
     if (!moved.current) return
-    panel.current?.focus()
+    if (body.current) body.current.scrollTop = 0
+    panel.current?.focus({ preventScroll: true })
   }, [step])
+
+  // Takes the focus to the first field step 1 lacks, or to the button that connects GitHub.
+  useEffect(() => {
+    if (!pointAt) return
+    const field = panel.current?.querySelector<HTMLElement>('[data-invalid], [aria-invalid="true"]')
+    const target = field instanceof HTMLDivElement ? field.querySelector('button') ?? field : field
+    target?.scrollIntoView({ block: 'nearest' })
+    target?.focus()
+  }, [pointAt])
+
+  // Whether step 1 holds what a create needs, and otherwise opens it at what it lacks.
+  function stepOneReady(which: 'all' | 'fields'): boolean {
+    if (isEdit) return true
+    const found = stepOneProblems(form, { github, plainHost })
+    const lacking = which === 'all' ? Object.keys(found).length > 0 : !!(found.name || found.description)
+    if (!lacking) return true
+    setChecked(true)
+    if (step !== '1') go('1')
+    setPointAt(n => n + 1)
+    return false
+  }
 
   // Keeps the form as it stands as this form's draft, the one it opened from or a new one.
   async function keepDraft(at: StepID, failure: string): Promise<void> {
@@ -194,7 +232,6 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         description: f.description.trim() || file.description || '',
         metrics: file.metrics?.length ? file.metrics : f.metrics,
         budget_accelerator_hours: stated(file.budget_accelerator_hours, f.budget_accelerator_hours),
-        max_agents: stated(file.max_agents, f.max_agents),
         duration_hours: stated(file.duration_hours, f.duration_hours),
         agents: file.agents?.length ? toTeamRows(file.agents) : f.agents,
         report_interval_seconds: stated(file.report_interval_seconds, f.report_interval_seconds),
@@ -209,6 +246,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       setFromFile({ repository, branch: stated(file.branch, branch), state: 'filled', filled })
     } catch (err: unknown) {
       if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, branch, state: 'none' })
+      if (err instanceof ApiError && err.reason === EXPERIMENT_FILE_UNFILLED) return setFromFile({ repository, branch, state: 'unfilled' })
       if (err instanceof ApiError && err.reason === EXPERIMENT_FILE_ELSEWHERE) return setFromFile({ repository, branch, state: 'elsewhere', message: err.message })
       if (err instanceof ApiError && err.reason === INVALID_EXPERIMENT_FILE) return setFromFile({ repository, branch, state: 'invalid', message: err.message })
       setFromFile({ repository, branch, state: 'failed', message: errorMessage(err) })
@@ -227,6 +265,9 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     if (!locked('metrics') && JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
     if (!locked('report_interval_seconds') && form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
     if (!locked('starts_at') && form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
+    for (const field of MACHINE_FIELDS) {
+      if (!locked(field) && form.machine && opened.machine && form.machine[field].trim() !== opened.machine[field]) patch[field] = form.machine[field].trim()
+    }
     return patch
   }
 
@@ -246,6 +287,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     e.preventDefault()
     const err = clearedError()
     if (err) { setError(err); return }
+    if (!stepOneReady('all')) return
     setSubmitting(true)
     setError(null)
     let sent: CreatePlatformExperimentRequest | undefined
@@ -260,11 +302,15 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         setError(team.problem)
         return
       }
+      const executors = executorCount(form.agents)
+      if (executors < 1) {
+        setError('Add at least one executor to the team.')
+        return
+      }
       const payload: CreatePlatformExperimentRequest = {
         name: form.name.trim(),
         description: form.description.trim(),
         budget_accelerator_hours: Number(form.budget_accelerator_hours),
-        max_agents: Number(form.max_agents),
         agents: team.agents,
         ...(form.max_concurrent_accelerators.trim() !== '' ? { max_concurrent_accelerators: Number(form.max_concurrent_accelerators) } : {}),
         metrics: form.metrics,
@@ -310,47 +356,50 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const back = STEPS[at - 1]
   const fileNote = fromFile?.repository === form.repository && fromFile.branch === form.branch ? fromFile : null
   const stepProps = { form, set, isEdit, locked }
+  const submits = isEdit || !next || !!refused
 
   return (
-    <Stack gap="xl">
-      <div className={docked ? 'sticky -top-6 z-10 -mx-6 -mt-2 bg-surface-raised px-6 pt-2' : undefined}>
-        <Tabs label="Steps" tabs={[...STEPS]} value={step} onChange={go} />
-      </div>
+    <Stack gap="xl" className={docked ? 'min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]' : undefined}>
+      <Tabs label="Steps" tabs={[...STEPS]} value={step} onChange={go} />
 
-      <Stack as="form" gap="xl" onSubmit={handleSubmit}>
-        <div ref={panel} role="tabpanel" tabIndex={-1} aria-label={STEPS[at].label} className="grid gap-6 outline-none">
-          {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRead={(r, b) => void readFile(r, b)} />}
-          {step === '2' && <StepMeasure {...stepProps} />}
-          {step === '3' && <StepBudget {...stepProps} budgetKind={initial?.budget_kind} />}
+      <form onSubmit={handleSubmit} className={docked ? 'flex min-h-0 flex-col' : 'grid grid-cols-1 gap-5'}>
+        <div ref={body} className={docked ? '-mx-6 grid min-h-0 flex-1 grid-cols-1 content-start gap-5 overflow-y-auto px-6 pb-5 pt-1' : 'contents'}>
+          <div ref={panel} role="tabpanel" tabIndex={-1} aria-label={STEPS[at].label} className="grid gap-6 outline-none">
+            {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRead={(r, b) => void readFile(r, b)} problems={problems} />}
+            {step === '2' && <StepMeasure {...stepProps} />}
+            {step === '3' && <StepBudget {...stepProps} budgetKind={initial?.budget_kind} />}
+          </div>
+
+          {refused && (
+            <Stack gap="xs">
+              <ErrorMessage>
+                {refused.length === 1 ? refused[0].message : (
+                  <ul className="grid list-disc gap-1 pl-4">
+                    {refused.map((p, i) => <li key={i}>{p.message}</li>)}
+                  </ul>
+                )}
+              </ErrorMessage>
+              <Text variant="hint">Not created. Change what the refusal names and try again.</Text>
+            </Stack>
+          )}
+          {error && <ErrorMessage>{error}</ErrorMessage>}
         </div>
 
-        {refused && (
-          <Stack gap="xs">
-            <ErrorMessage>
-              {refused.length === 1 ? refused[0].message : (
-                <ul className="grid list-disc gap-1 pl-4">
-                  {refused.map((p, i) => <li key={i}>{p.message}</li>)}
-                </ul>
-              )}
-            </ErrorMessage>
-            <Text variant="hint">Not created. Change what the refusal names and try again.</Text>
-          </Stack>
-        )}
-        {error && <ErrorMessage>{error}</ErrorMessage>}
-
-        <Inline nowrap className={docked ? 'sticky -bottom-6 z-10 -mx-6 -mb-6 mt-1 border-t bg-surface-raised px-6 py-4' : 'mt-1'}>
+        {/* On a phone the step buttons take a row of their own on every step, so the row count never changes. */}
+        <Inline className={docked ? '-mx-6 -mb-6 shrink-0 border-t px-6 py-4' : 'mt-1'}>
           {onCancel && <Button type="button" disabled={savingDraft} onClick={() => void leave()}>Cancel</Button>}
           {!isEdit && <Button type="button" loading={savingDraft} disabled={!unsaved} onClick={() => void saveDraft()}>{draftID && !unsaved ? 'Draft saved' : 'Save draft'}</Button>}
-          <span className="flex-1" />
-          {back && <Button type="button" onClick={() => go(back.id)}>Back</Button>}
-          {next && <Button type="button" variant={isEdit || refused ? 'default' : 'primary'} onClick={() => go(next.id)}>Next: {next.label.replace(/^\d+\. /, '')}</Button>}
-          {(isEdit || !next || refused) && (!isEdit && needsGitHub ? <ConnectGitHubStep /> : (
-            <Button type="submit" variant="primary" loading={submitting}>
-              {isEdit ? 'Save changes' : refused ? 'Try again' : 'Create experiment'}
-            </Button>
-          ))}
+          <Inline className="ml-auto w-full justify-end sm:w-auto">
+            {back && <Button type="button" onClick={() => go(back.id)}>Back</Button>}
+            {next && <Button type="button" variant={isEdit || refused ? 'default' : 'primary'} onClick={() => { if (step !== '1' || stepOneReady('fields')) go(next.id) }}>Next: {next.label.replace(/^\d+\. /, '')}</Button>}
+            {submits && (
+              <Button type="submit" variant="primary" loading={submitting}>
+                {isEdit ? 'Save changes' : refused ? 'Try again' : 'Create experiment'}
+              </Button>
+            )}
+          </Inline>
         </Inline>
-      </Stack>
+      </form>
     </Stack>
   )
 })
@@ -372,7 +421,7 @@ export function PlatformExperimentDialog({ initial, draft, onSaved, onClose }: {
 }) {
   const form = useRef<FormHandle>(null)
   return (
-    <Dialog open onClose={() => form.current?.leave()} title={initial ? 'Edit experiment' : 'New experiment'}>
+    <Dialog open onClose={() => form.current?.leave()} title={initial ? 'Edit experiment' : 'New experiment'} fixedHeight>
       <PlatformExperimentForm ref={form} docked initial={initial} draft={draft} onCancel={onClose} onSaved={(saved, created) => { onSaved(saved, created); onClose() }} />
     </Dialog>
   )

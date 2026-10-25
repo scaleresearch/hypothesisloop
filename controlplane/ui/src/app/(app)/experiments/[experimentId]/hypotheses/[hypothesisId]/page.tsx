@@ -23,6 +23,7 @@ import { Prose } from '@/components/ui/prose'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
+import { useBudgetReference } from '@/lib/capacity'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
 import { Curation } from '@/components/hypotheses/curation'
 import { Verdict, Actor } from '@/components/actor'
@@ -74,6 +75,7 @@ function HypothesisText({ text }: { text: string }) {
 
 export default function HypothesisDetailPage({ params }: { params: { experimentId: string; hypothesisId: string } }) {
   const { experimentId, hypothesisId: id } = params
+  const reference = useBudgetReference()
   const router = useRouter()
 
   const { data, error, mutate } = useSWR(keys.hypothesis(id), () => fetchHypothesis(id))
@@ -102,7 +104,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
   const shownEnv = variedEnv.length > 0 ? variedEnv : Array.from(new Set(jobs.flatMap(j => Object.keys(j.job?.env ?? {})))).sort()
   const linkJob = (ref: string) => (ref.startsWith('job-') ? jobPath(experimentId, ref) : undefined)
   const kinds = new Set(jobs.map(j => j.accelerator_kind))
-  const costUnit = kinds.size === 1 ? budgetUnit(jobs[0].accelerator_kind) : ''
+  const costUnit = kinds.size === 1 ? budgetUnit(jobs[0].accelerator_kind, 'short', reference) : ''
   const metricName = jobs.find(j => j.metric)?.metric?.name
 
   return (
@@ -269,7 +271,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                     </td>
                     <td className="whitespace-nowrap font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className={num}>
-                      {cost != null ? (costUnit ? cost : `${cost} ${budgetUnit(j.accelerator_kind)}`) : '—'}
+                      {cost != null ? (costUnit ? cost : `${cost} ${budgetUnit(j.accelerator_kind, 'short', reference)}`) : '—'}
                     </td>
                     <td className={num}>
                       {j.metric ? formatMetric(j.metric.value) : <span className="text-muted">—</span>}

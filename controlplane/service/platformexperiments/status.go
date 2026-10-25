@@ -94,10 +94,6 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 	switch {
 	case pe.DeclinedAt != nil:
 		return &domain.StatusReason{Reason: "declined", Message: "its planner proposed no experiment, for declined_reason: change its goal with PATCH /platform-experiments/" + pe.ID + ", saying what the planner lacked, or close it. The platform closes it at proposal_expires_at"}
-	case pe.ProposedAt != nil && pe.AcceptsAt != nil:
-		return &domain.StatusReason{Reason: "accepting", Message: "its planner proposed an experiment, in proposal, and the platform accepts it as proposed at accepts_at, with its baseline agent's machine starting now. Accept it sooner with POST /platform-experiments/" + pe.ID + "/accept, hold it to edit it with POST /platform-experiments/" + pe.ID + "/hold, change its goal or close it"}
-	case pe.ProposedAt != nil:
-		return &domain.StatusReason{Reason: "proposed", Message: "its planner proposed an experiment, in proposal: accept it with POST /platform-experiments/" + pe.ID + "/accept, with answers to proposal.questions where it has any, change its goal or close it. The platform closes it at proposal_expires_at"}
 	case pe.GoalVersion > 1:
 		return &domain.StatusReason{Reason: "revising", Message: "its planner is planning again from the changed goal and has until planning_ends_at"}
 	}
@@ -244,7 +240,7 @@ func (s *Service) closedReason(ctx context.Context, pe *domain.PlatformExperimen
 		domain.CloseByRequest:            closer + " asked for it to be closed",
 		domain.CloseRemoved:              closer + " removed it",
 		domain.ClosePlanningLimitReached: "its planner answered nothing by planning_ends_at and the platform closed the draft",
-		domain.CloseProposalExpired:      "no person accepted its planner's answer or changed its goal by proposal_expires_at and the platform closed the draft",
+		domain.CloseProposalExpired:      "nobody changed the goal its planner declined by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log)",
 		domain.CloseAgentsNotStarted:     "it started and no executor's machine was running by agents_due_at, so the platform closed it. Each agent's instance says why its machine did not come up",
 		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started. The git host answered: " + pe.RepositoryError,

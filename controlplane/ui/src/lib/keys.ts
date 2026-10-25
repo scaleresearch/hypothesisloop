@@ -62,7 +62,6 @@ export const keys = {
 
   agents: (projectID: string, ...filters: unknown[]) => ['agents-page', projectID, ...filters],
   agentStats: (projectID: string, ...filters: unknown[]) => ['agent-stats', projectID, ...filters],
-  agentCount: (projectID: string) => ['agent-count', projectID],
   agentSearch: (scope: unknown, q: string) => ['agent-search', scope, q],
 }
 

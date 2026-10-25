@@ -82,7 +82,7 @@ describe('the org\'s clusters', () => {
     expect(within(await rowOf('new')).getByText('Disconnected')).toBeTruthy()
     const shared = await rowOf('platform-gpu')
     expect(within(shared).getByText('Platform')).toBeTruthy()
-    expect(screen.getByRole('columnheader', { name: 'Platform compute, for every org, tried after Ada\'s own' })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: 'Platform clusters' })).toBeTruthy()
     expect(within(shared).getByText('4')).toBeTruthy()
     expect(within(shared).queryByRole('button')).toBeNull()
     expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu'])
@@ -113,10 +113,22 @@ describe('the org\'s clusters', () => {
     show(member)
     const shared = await rowOf('platform-gpu')
     expect(within(shared).getByRole('switch')).toHaveProperty('disabled', true)
-    expect(within(shared).getByText('Off: no new jobs go here.')).toBeTruthy()
+    expect(within(shared).getByText('No new jobs')).toBeTruthy()
     expect(within(shared).getByText('Off')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
     expect(screen.queryByLabelText('Cluster name')).toBeNull()
+  })
+})
+
+describe('a cluster the platform rents machines on', () => {
+  it('reads by its vendor, with its own name under it', async () => {
+    clusters = [{ ...platform, name: 'hypothesisloop-vast', provider: 'vast' }, { ...platform, name: 'hypothesisloop-runpod', provider: 'runpod' }]
+    const { container } = show()
+    expect(await screen.findByText('Vast.ai')).toBeTruthy()
+    expect(screen.getByText('RunPod')).toBeTruthy()
+    const row = container.querySelector('tr[data-cluster="hypothesisloop-runpod"]') as HTMLElement
+    expect(within(row).getByText('hypothesisloop-runpod · on demand')).toBeTruthy()
+    expect(within(row).getByRole('switch', { name: 'Use RunPod for jobs' })).toBeTruthy()
   })
 })
 
@@ -124,8 +136,8 @@ describe('where the org\'s jobs run', () => {
   it('is the places the API answers, tied ones marked, with the first connected place named above the table', async () => {
     clusters = [owned('lab', { place: 1 }), owned('spare', { place: 1, connected: true }), owned('old', { enabled: false }), { ...platform, place: 2 }]
     show()
-    expect(await screen.findByText(/Jobs go to the first connected cluster below with room: right now/)).toBeTruthy()
-    expect(screen.getByText(/right now/).querySelector('code')!.textContent).toBe('spare')
+    expect(await screen.findByText(/Next job goes to/)).toBeTruthy()
+    expect(screen.getByText(/Next job goes to/).querySelector('code')!.textContent).toBe('spare')
     for (const name of ['lab', 'spare']) {
       const row = within(await rowOf(name))
       expect(row.getByText('1')).toBeTruthy()
@@ -141,9 +153,9 @@ describe('where the org\'s jobs run', () => {
   it('is the platform\'s compute alone for an org with no cluster of its own, which is told where its own would go', async () => {
     clusters = [{ ...platform, place: 1 }, { ...platform, name: 'platform-tt', place: 1, connected: false }]
     show()
-    expect(await screen.findByRole('columnheader', { name: 'Clusters of Ada, tried first, in the order you set' })).toBeTruthy()
-    expect(screen.getByText('None yet.')).toBeTruthy()
-    expect(screen.getByText(/right now/).querySelector('code')!.textContent).toBe('platform-gpu')
+    expect(await screen.findByRole('columnheader', { name: 'Your clusters' })).toBeTruthy()
+    expect(screen.getByText('None')).toBeTruthy()
+    expect(screen.getByText(/Next job goes to/).querySelector('code')!.textContent).toBe('platform-gpu')
     expect(names()).toEqual(['platform-gpu', 'platform-tt'])
     expect(within(await rowOf('platform-tt')).getByText('Platform')).toBeTruthy()
   })
@@ -151,11 +163,11 @@ describe('where the org\'s jobs run', () => {
   it('says jobs wait when no cluster in use is connected, or every one is off', async () => {
     clusters = [owned('lab', { place: 1 }), { ...platform, connected: false, place: 2 }]
     const { unmount } = show()
-    expect(await screen.findByText('No cluster in use is connected, so jobs wait in the queue until one is.')).toBeTruthy()
+    expect(await screen.findByText('No cluster in use is connected. Jobs wait in the queue.')).toBeTruthy()
     unmount()
     clusters = [owned('lab', { enabled: false }), { ...platform, enabled: false, place: undefined }]
     show()
-    expect(await screen.findByText('Every cluster is turned off, so jobs wait in the queue.')).toBeTruthy()
+    expect(await screen.findByText('All clusters are off. Jobs wait in the queue.')).toBeTruthy()
   })
 })
 
@@ -202,13 +214,13 @@ describe('turning a cluster off for the org\'s jobs', () => {
   it('is an owner\'s on every row, the platform\'s cluster included, and says what it means', async () => {
     show()
     const row = await rowOf('platform-gpu')
-    const use = within(row).getByRole('switch', { name: 'Use platform-gpu for the jobs of Ada' })
+    const use = within(row).getByRole('switch', { name: 'Use platform-gpu for jobs' })
     expect(use.getAttribute('aria-checked')).toBe('true')
-    expect(within(await rowOf('lab')).getByRole('switch', { name: 'Use lab for the jobs of Ada' })).toBeTruthy()
+    expect(within(await rowOf('lab')).getByRole('switch', { name: 'Use lab for jobs' })).toBeTruthy()
 
     await userEvent.click(use)
     expect(setClusterEnabled).toHaveBeenCalledExactlyOnceWith('org_a', 'platform-gpu', false)
-    expect(await within(row).findByText('Off: no new jobs go here.')).toBeTruthy()
+    expect(await within(row).findByText('No new jobs')).toBeTruthy()
     expect(within(row).getByRole('switch').getAttribute('aria-checked')).toBe('false')
 
     vi.mocked(setClusterEnabled).mockRejectedValue(new Error('forbidden: only an owner of the org may change it'))

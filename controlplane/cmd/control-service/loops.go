@@ -95,6 +95,9 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 	if err != nil {
 		logger.Fatal("control-service: rented machines", zap.Error(err))
 	}
+	if err := registerCloudClusters(runCtx, store, pcfg); err != nil {
+		logger.Fatal("control-service: register the cloud compute clusters", zap.Error(err))
+	}
 
 	pass := pcfg.Scheduler.PassTimeout()
 	dataKeySweep := platformexperiments.NewDataKeySweep(store, dataStore.DeleteDataKey,
@@ -108,8 +111,8 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 		// A draft's create wakes this pass on the leader; the interval covers one created on
 		// another replica and one left by a restart.
 		func(ctx context.Context) { expQuotaSvc.StartRepositoryPass(ctx, 5*time.Second, pass) },
-		// A proposal is accepted by itself planning.auto_accept_seconds after it is made.
-		func(ctx context.Context) { expQuotaSvc.StartAutoAccept(ctx, 2*time.Second, pass) },
+		// A proposal stored before proposals applied themselves is applied once.
+		func(ctx context.Context) { expQuotaSvc.ApplyStanding(ctx, pass) },
 		func(ctx context.Context) { schedulerLoop.Start(ctx, pass) },
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
 		func(ctx context.Context) { pruneChanges(ctx, store, logger) },

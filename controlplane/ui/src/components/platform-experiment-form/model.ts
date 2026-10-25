@@ -15,9 +15,7 @@ export interface FormState {
   name: string
   description: string
   budget_accelerator_hours: string
-  // The most executors at work at once, sent as max_agents.
-  max_agents: string
-  // The team the platform starts and keeps at work, sent as agents.
+  // The team the platform starts and keeps at work, sent as agents: its executors are the most at work at once.
   agents: TeamRow[]
   // Empty is the platform's default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators: string
@@ -37,7 +35,22 @@ export interface FormState {
   coordinator_model: string
   // Empty is the platform's default.
   default_quota_tier: QuotaTier | ''
+  // The machine of the plan of an experiment made from a sentence, null for one made whole.
+  machine: Machine | null
 }
+
+/** What one node of the run's jobs asks for, as its plan states it. */
+export interface Machine {
+  accelerator_type: string
+  cpu: string
+  memory: string
+  storage: string
+}
+
+export const MACHINE_FIELDS = ['accelerator_type', 'cpu', 'memory', 'storage'] as const
+
+/** The type of a run on CPU cores, as the platform stores it. */
+export const CPU_TYPE = 'hypothesisloop.dev/cpu=core'
 
 export type SetField = <K extends keyof FormState>(field: K, value: FormState[K]) => void
 
@@ -81,6 +94,30 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+/** What stops a new experiment at step 1, by field, in the words shown beside it. */
+export interface StepOneProblems {
+  repository?: string
+  name?: string
+  description?: string
+}
+
+export const NO_GITHUB = 'Connect GitHub first.'
+export const NO_REPOSITORY = 'Name the repository.'
+export const NO_NAME = 'Name the experiment.'
+export const NO_GOAL = 'Describe what the experiment should achieve.'
+
+/**
+ * What step 1 lacks before a create can be sent: GitHub connected, or on a plain git host a
+ * repository named, and a name and a goal. Empty when nothing does.
+ */
+export function stepOneProblems(form: FormState, git: { github: 'connected' | 'unconnected' | undefined; plainHost: boolean }): StepOneProblems {
+  const problems: StepOneProblems = {}
+  if (git.plainHost ? form.repository.trim() === '' : git.github === 'unconnected') problems.repository = git.plainHost ? NO_REPOSITORY : NO_GITHUB
+  if (form.name.trim() === '') problems.name = NO_NAME
+  if (form.description.trim() === '') problems.description = NO_GOAL
+  return problems
+}
+
 export const STEPS = [
   { id: '1', label: '1. What' },
   { id: '2', label: '2. Measure' },
@@ -103,4 +140,4 @@ export function refusedStep(reason: string | undefined): StepID {
   return '3'
 }
 
-export const LOCKED = 'Locked once running.'
+export const LOCKED = 'Fixed once running.'

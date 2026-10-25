@@ -250,6 +250,18 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		f.answer(w, http.StatusOK, map[string]any{"total_count": len(all), "installations": paged(r, all)})
 	case len(segments) == 4 && segments[0] == "app" && segments[1] == "installations" && segments[3] == "access_tokens" && r.Method == http.MethodPost:
 		f.mint(w, r, bearer, segments[2])
+	case len(segments) == 3 && segments[0] == "app" && segments[1] == "installations" && r.Method == http.MethodDelete:
+		if !f.appAuthenticated(bearer) {
+			f.refuse(w, http.StatusUnauthorized, "A JSON web token could not be decoded")
+			return
+		}
+		id, _ := strconv.ParseInt(segments[2], 10, 64)
+		if _, ok := f.installations[id]; !ok {
+			f.refuse(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		delete(f.installations, id)
+		w.WriteHeader(http.StatusNoContent)
 	case len(segments) == 3 && segments[0] == "app" && segments[1] == "installations" && r.Method == http.MethodGet:
 		if !f.appAuthenticated(bearer) {
 			f.refuse(w, http.StatusUnauthorized, "A JSON web token could not be decoded")
@@ -1111,5 +1123,39 @@ func TestUserInstallationsAreThoseGitHubListsForThePersonTheCodeWasIssuedTo(t *t
 	}
 	if got, err := client.UserInstallations(ctx, testClientSecret, "code-many"); err != nil || !slices.Equal(got, many) {
 		t.Fatalf("got %d installations, %v, want all %d across pages", len(got), err, len(many))
+	}
+}
+
+// Uninstall removes the installation as the App, and one GitHub no longer has is removed already.
+func TestUninstallRemovesTheInstallationFromGitHub(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	if err := client.Uninstall(ctx, 200); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if _, ok := f.installations[200]; ok {
+		t.Fatal("the installation is still on GitHub")
+	}
+	if err := client.Uninstall(ctx, 200); err != nil {
+		t.Fatalf("uninstall what GitHub removed already: %v, want nil", err)
+	}
+	f.now = func() time.Time { return time.Now().Add(time.Hour) }
+	if err := client.Uninstall(ctx, 100); !errors.Is(err, ErrAppCredentials) {
+		t.Fatalf("a JWT GitHub refuses: %v, want ErrAppCredentials", err)
+	}
+	f.now = time.Now
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer broken.Close()
+	client.apiURL = broken.URL
+	var failed *FailedError
+	if err := client.Uninstall(ctx, 100); !errors.As(err, &failed) || failed.Installation != 100 {
+		t.Fatalf("GitHub failing: %v, want a FailedError naming the installation", err)
+	}
+}
+
+// A connect starts at the App's authorization page, which knows the App by its client id.
+func TestTheAppIsAuthorizedByItsClientID(t *testing.T) {
+	_, client := newFakeGitHub(t)
+	if got, want := client.App().AuthorizeURL, client.webURL+"/login/oauth/authorize?client_id="+testClientID; got != want {
+		t.Fatalf("AuthorizeURL = %q, want %q", got, want)
 	}
 }

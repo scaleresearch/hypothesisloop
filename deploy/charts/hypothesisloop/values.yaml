@@ -247,8 +247,9 @@ ui:
 # provider's section is read by the provider's adapter alone, and the chart translates no key it
 # does not read. Each names its provider and holds that provider's section and no other; they hold
 # no secret: control-service is handed the provider's account key from the Secret. Without a
-# sandbox no agent runs in an agent sandbox. Each cloud_compute entry is a cluster registered as any
-# other (hl-admin cluster add, run in the control-service pod), and nothing is rented for it until
-# it is.
+# sandbox no agent runs in an agent sandbox. Each cloud_compute entry is a cluster of the platform's
+# org, which control-service registers as it starts, so listing one is the consent to rent on it.
+# cloud-compute.yaml holds an entry on vast.ai and one on Runpod, which run side by side;
+# list both here, each with its CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY in the Secret, for both.
 sandbox: {}
 cloudCompute: []

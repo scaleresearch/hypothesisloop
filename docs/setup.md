@@ -134,7 +134,7 @@ Each external service fills a role, and every role names its provider the same w
 | git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` |
 | agent sandboxes | `SANDBOX_PROVIDER` | `sandbox.provider` | `fly`, `e2b` |
 | agent models | `MODEL_ANTHROPIC_OAUTH_TOKEN`, `MODEL_OPENROUTER_API_KEY`, `MODEL_OPENAI_AUTH_JSON` | `models.<provider>` | `anthropic`, `openrouter`, `openai` |
-| rented compute | `CLOUD_COMPUTE_PROVIDER` | `cloud_compute[].provider` | `vast`, `runpod` |
+| rented compute | `CLOUD_COMPUTE_PROVIDERS` (a list, both by default) | `cloud_compute[].provider` | `vast`, `runpod` |
 | the platform's own clusters | `OWNED_COMPUTE_CLUSTERS` | registered clusters | `k8s`, `bare-metal` |
 
 Providers in `.env` are the platform's own, and adding one is an operator's decision. A customer
@@ -145,6 +145,21 @@ cluster. It rents one machine per node of a job and destroys it when the job end
 single-node jobs. `runpod` runs single-node jobs and multi-node jobs on GPU pods in one data
 center over Global Networking. Each entry lists the shapes (machine sizes) the account may rent,
 CPU-only shapes included.
+
+The example ships two entries, one on vast.ai and one on RunPod, and the control plane runs every
+entry it is given at once, each as its own cluster with its own account key. To use both, list
+both entries in the settings (the chart's `cloudCompute`), each with its `account_id`, and put
+`CLOUD_COMPUTE_VAST_API_KEY` and `CLOUD_COMPUTE_RUNPOD_API_KEY` (after each `cluster_name`) in the
+Secret. Listing an entry is the consent to rent on it: control-service registers each one for the
+platform's org as it starts. Registering again changes nothing, so a cluster keeps its settings and
+every org's choice to turn it off. A name another org already registered stops control-service at
+start.
+
+A cluster of the platform's org serves every org and is on for every org until that org turns it
+off, so a new org starts with both. Both clusters share one place in an org's order, after the
+org's own, and a job goes to the one with the most room for it. The Compute page names them
+Vast.ai and RunPod and shows each one's on-demand capacity. A deployment on one provider lists
+that entry alone.
 
 ## Sign-in
 
@@ -195,10 +210,13 @@ the e2e suite and the UI's browser tests sign in with. With `IDENTITY_PROVIDER=s
 Every experiment keeps its code in git. `git_host.provider` names the host, and local development
 reads `GIT_HOST_PROVIDER` from `.env`.
 
-- **`github`**: the platform's GitHub App. An org owner presses Install GitHub App (Settings,
-  GitHub, or the new-experiment form), installs it on their account or an organisation and
-  authorizes it. An experiment then names a repository the installation covers, or the platform
-  creates a private one from the experiment template (`git_host.experiment_template_repository`).
+- **`github`**: the platform's GitHub App. An org owner presses Connect GitHub (Settings, GitHub,
+  or when planning an experiment) and authorizes the App on GitHub. Every installation of the App
+  they can reach that the org has not connected is connected; when there is none, GitHub's install
+  page opens and they install it on their account or an organization. Disconnecting an account
+  removes the App from it on GitHub, unless another org still uses it. An experiment then names a
+  repository the installation covers, or the platform creates a private one from the experiment
+  template (`git_host.experiment_template_repository`).
   `hl-admin github connect ORG INSTALLATION_ID` connects one for an operator.
 - **`plain`**: any git server that serves repositories under one root. The platform creates a
   repository by pushing the template's files. `make dev` with `GIT_HOST_PROVIDER=plain` runs one.
@@ -230,15 +248,28 @@ change what CI runs. An installation missing a permission is refused with
 `git_host_permission_missing`, naming it.
 
 Connecting is bound to the person who pressed the button. `POST /orgs/{id}/github-install-states`
-issues a single-use `state` for the org, the person and the page they left from, valid 15 minutes.
-GitHub returns it to the setup URL with a `code` and the `installation_id`, and
-`POST /github/installations` connects the installation when:
+issues a single-use `state` for the org, the person and the page they left from, valid 15 minutes,
+and sends the person to the App's authorization page. GitHub returns the state to the callback URL
+with a `code`, and `POST /github/installations` connects every installation GitHub lists for that
+GitHub user (`GET /user/installations`) that the org has not connected. With none, it issues a new
+state and the tab goes on to GitHub's install page, which returns with a `code` and the
+`installation_id`. Either way an installation is connected only when:
 
 - the state is unused, unexpired and the caller's own,
 - the `code` shows a GitHub user who reaches the installation,
 - the installation exists, is not suspended and granted every permission.
 
-An org's first installation becomes its default for new repositories.
+Starting at the authorization page matters when the App is already installed on an account, for
+example by another org or before a disconnect: GitHub's install page then shows that installation
+and never returns to the platform.
+
+Disconnecting an installation that no other org connected also removes the App from the GitHub
+account (`DELETE /app/installations/{id}`, as the App). One GitHub removed already counts as
+removed. When GitHub fails the removal the installation stays connected and the owner is told to
+try again, so the platform never forgets an installation that is still on GitHub.
+
+An org's first installation becomes its default for new repositories. Disconnecting the default makes
+the oldest remaining installation the default, so an org that has any installation has a default.
 
 To make the App, fill the `REPLACE-WITH-` values of the manifest and post it as
 [GitHub's manifest flow](https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)

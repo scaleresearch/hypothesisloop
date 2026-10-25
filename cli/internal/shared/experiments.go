@@ -89,12 +89,13 @@ standings against JOB from then on. Verdicts already given stay as recorded. Ref
 --reason (baseline_reason_required), with --reason while the experiment is open
 (baseline_not_running: the baseline agent's job is declared then) and once it is closed.
 
-FIELDS.yaml maps the other fields that change (budget_accelerator_hours, max_agents,
-agents, duration_hours, metrics, report_interval_seconds): any while it is open, only name,
-description, duration_hours, max_agents and agents once it runs. The result is checked like a create, so name and description stay
-non-empty. Once it runs, max_agents below the executors at work cuts the newest of them
-(agent.cut with detail max_agents_lowered) and nobody takes their places; before that it is
-409 max_agents_below_executors, which says how many are signed up.`, stderr)
+FIELDS.yaml maps the other fields that change (budget_accelerator_hours, agents,
+duration_hours, metrics, report_interval_seconds, and the machine of a plan: accelerator_type,
+cpu, memory, storage): any while it is open, only name, description, duration_hours and agents
+once it runs. The result is checked like a create, so name and description stay non-empty.
+agents sets max_agents to its executors. Once it runs, fewer executors of an entry than are at
+work cuts the newest of them (agent.cut with detail max_agents_lowered) and nobody takes their
+places; before that it is 409 agents_below_at_work, which says how many are at work.`, stderr)
 	pe := command.ExperimentFlag(fs)
 	name := fs.String("name", "", "the new name")
 	descriptionFlag := command.NewTextFlag(fs, "description", "the new description")

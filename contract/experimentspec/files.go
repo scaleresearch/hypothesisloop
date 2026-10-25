@@ -1,5 +1,7 @@
 package experimentspec
 
+import "bytes"
+
 // The files every experiment's repository holds, at the paths the platform, hl and the agents'
 // briefings name. The experiment template repository holds each of them.
 const (
@@ -14,3 +16,7 @@ const (
 	// Placeholder marks what a file of the template leaves to be filled in.
 	Placeholder = "REPLACE-WITH"
 )
+
+// Unfilled counts the placeholders data still holds: a file made from the template and not yet
+// filled in holds at least one.
+func Unfilled(data []byte) int { return bytes.Count(data, []byte(Placeholder)) }

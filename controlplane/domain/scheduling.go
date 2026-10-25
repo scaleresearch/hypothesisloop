@@ -19,12 +19,17 @@ func DefaultSchedulingWeights() SchedulingWeights {
 // SubmissionWindow is the span QuotaConfig.MaxSubmissionsPerHour counts an agent's submissions over.
 const SubmissionWindow = time.Hour
 
+// DefaultBudgetReference is the accelerator budgets are counted in when the settings name none.
+const DefaultBudgetReference = "H100"
+
 // QuotaConfig holds tunable constants for quota allocation.
 type QuotaConfig struct {
 	// Top3BonusFraction is the fraction of base_share added for top-3 placement in any past experiment.
 	Top3BonusFraction float64 `json:"top3_bonus_fraction"`
 	// BurstFraction is burst_quota = guaranteed * burst_fraction.
 	BurstFraction float64 `json:"burst_fraction"`
+	// BudgetReference names the accelerator an hour of which is one accelerator-hour.
+	BudgetReference string `json:"budget_reference,omitempty"`
 	// DefaultReportIntervalSeconds is the reporting cadence of a platform experiment created
 	// without its own.
 	DefaultReportIntervalSeconds int `json:"default_report_interval_seconds,omitempty"`
@@ -37,9 +42,9 @@ type QuotaConfig struct {
 	MaxRunLength time.Duration `json:"max_run_length,omitempty"`
 	// BaselineLimit is the longest a platform experiment may stay open before the platform
 	// closes it: the time it has to get its baseline declared and its run started. One created
-	// whole has all of it, and an accepted draft the minutes accepted, at most this.
+	// whole has all of it, and a draft the minutes its plan gives, at most this.
 	BaselineLimit time.Duration `json:"baseline_limit,omitempty"`
-	// MinBaseline is the least an accepted draft may give its baseline.
+	// MinBaseline is the least a draft's plan may give its baseline.
 	MinBaseline time.Duration `json:"min_baseline,omitempty"`
 	// AgentsDue is how long a started platform experiment whose executors the platform runs
 	// waits for the first one's machine to be running before the platform closes it: the time

@@ -28,6 +28,7 @@ import { PlatformExperimentSelect } from '@/components/platform-experiment-selec
 import { Pagination } from '@/components/ui/pagination'
 import { formatAccH, formatMetric } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
+import { useBudgetReference } from '@/lib/capacity'
 import { closedWhilePlanned } from '@/lib/phase'
 import { useRouter } from 'next/navigation'
 import { experimentPath, jobPath, projectPath } from '@/lib/routes'
@@ -38,13 +39,14 @@ import type { PlatformExperiment } from '@/types/api'
 
 const PAGE_SIZE = 25
 
-function unitOf(pe: PlatformExperiment): string {
-  return budgetUnit(pe.budget_kind)
+function unitOf(pe: PlatformExperiment, reference: string | undefined): string {
+  return budgetUnit(pe.budget_kind, 'short', reference)
 }
 
 // One agent's compute in one experiment. An agent that is not in the experiment has none, which
 // the API answers 404 and this shows as no row.
 function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: PlatformExperiment; colSpan: number }) {
+  const reference = useBudgetReference()
   const { data: q, error } = useSWR(
     keys.agentQuota(pe.id, agentId),
     () => fetchAgentQuota(pe.id, agentId),
@@ -55,7 +57,7 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
     <tr><td colSpan={colSpan} className="pl-7"><InlineError>Could not load its compute in {pe.name}: {error.message}</InlineError></td></tr>
   )
   if (!q) return null
-  const unit = unitOf(pe)
+  const unit = unitOf(pe, reference)
   const room = q.remaining_guaranteed_accelerator_hours > 0 || q.remaining_burst_accelerator_hours > 0
   return (
     <tr className="bg-surface-inset">
@@ -101,6 +103,7 @@ export function AgentsList({ experimentID }: { experimentID?: string }) {
 }
 
 function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
+  const reference = useBudgetReference()
   const { project } = useTenant()
   const router = useRouter()
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
@@ -218,7 +221,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                 ))}
                 {experimentFilter && (
                   <>
-                    <th className="text-right">Share{selectedPE ? `, ${unitOf(selectedPE)}` : ''}</th>
+                    <th className="text-right">Share{selectedPE ? `, ${unitOf(selectedPE, reference)}` : ''}</th>
                     <th className="text-right">Best {ranking?.metric ?? 'metric'}</th>
                     <th>Jobs</th>
                   </>
@@ -230,8 +233,8 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
               {agents.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="p-0">
-                    <EmptyState>
-                      {experimentFilter ? 'No agents in this experiment.' : 'No agents yet.'}
+                    <EmptyState action={!experimentFilter && <TextLink href={projectPath(project.id, 'experiments')}>Go to Experiments</TextLink>}>
+                      {experimentFilter ? 'No agents in this experiment.' : 'Agents appear here once an experiment starts.'}
                     </EmptyState>
                   </td>
                 </tr>

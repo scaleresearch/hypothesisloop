@@ -13,6 +13,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
+// draftBaseline is the baseline agent a draft is created with.
+func draftBaseline() (*domain.Agent, domain.AgentSignup) {
+	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
+	return agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline"}
+}
+
 func createTestDraft(t *testing.T, pool *Pool) (peID, plannerID string) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -26,7 +32,8 @@ func createTestDraft(t *testing.T, pool *Pool) (peID, plannerID string) {
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
 		InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: "model-1"}
-	if err := NewStore(pool, 3).CreateDraft(context.Background(), pe, planner, signup); err != nil {
+	baseline, baselineSignup := draftBaseline()
+	if err := NewStore(pool, 3).CreateDraft(context.Background(), pe, planner, signup, baseline, baselineSignup); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	if planner.OrgID != "default" {
@@ -63,28 +70,25 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	}
 	listed := false
 	for _, d := range drafts {
-		listed = listed || (d.ID == pe && d.Goal == "a goal, in a sentence" && d.SignupCount == 1)
+		listed = listed || (d.ID == pe && d.Goal == "a goal, in a sentence" && d.SignupCount == 2)
 	}
 	if !listed {
-		t.Fatalf("the draft is not listed by its status with its goal and its one signup")
+		t.Fatalf("the draft is not listed by its status with its goal and its two signups")
 	}
 
-	// A proposal is stored beside the draft, marks it proposed and moves its end.
+	// A decline is stored beside the draft, marks it answered and moves its end.
 	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
-	if err := pes.SetProposal(ctx, pe, 1, []byte(`{"budget_accelerator_hours":6}`), Proposed{WaitUntil: wait}); err != nil {
+	if err := pes.Decline(ctx, pe, 1, "nothing to measure", wait, 0); err != nil {
 		t.Fatal(err)
 	}
 	got, err = pes.GetPlatformExperiment(ctx, pe)
-	if err != nil || got.ProposedAt == nil || string(got.Proposal) == "" || got.ProposalExpiresAt.Sub(wait).Abs() > time.Second || !got.EndsAt.IsZero() || got.Status != domain.PlatformExpDraft {
-		t.Fatalf("proposed: got = %+v, %v", got, err)
-	}
-	if got.BaselineJobID != "" || got.JobEstimatedDurationHours != 0 {
-		t.Fatalf("proposed with baseline %q and a trial's estimate of %g, want neither: a proposal measures nothing", got.BaselineJobID, got.JobEstimatedDurationHours)
+	if err != nil || got.DeclinedAt == nil || got.ProposalExpiresAt.Sub(wait).Abs() > time.Second || !got.EndsAt.IsZero() || got.Status != domain.PlatformExpDraft {
+		t.Fatalf("declined: got = %+v, %v", got, err)
 	}
 	open := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, open, 10)
-	if err := pes.SetProposal(ctx, open, 1, []byte(`{}`), Proposed{WaitUntil: wait}); err != ErrNotDraft {
-		t.Fatalf("proposing an open platform experiment: got = %v, want ErrNotDraft", err)
+	if err := pes.Decline(ctx, open, 1, "r", wait, 0); err != ErrNotDraft {
+		t.Fatalf("declining an open platform experiment: got = %v, want ErrNotDraft", err)
 	}
 
 	// Nobody joins a draft: joining is for an open platform experiment.
@@ -97,7 +101,8 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	now := time.Now().UTC()
 	bad := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, PlanningEndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
-	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, AgentType: "generalist", InAgentSandbox: true}); err == nil {
+	baseline, baselineSignup := draftBaseline()
+	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, AgentType: "generalist", InAgentSandbox: true}, baseline, baselineSignup); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, bad.ID); got != nil {
@@ -119,8 +124,9 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 			MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxAgentSandboxes: 5, RepositoryAccount: "acme"}
 		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
+		baseline, baselineSignup := draftBaseline()
 		if err := pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-			InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: "model-1"}); err != nil {
+			InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: "model-1"}, baseline, baselineSignup); err != nil {
 			t.Fatal(err)
 		}
 		drafts = append(drafts, pe.ID)
@@ -148,8 +154,8 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	if err := pes.GiveRepository(ctx, given.ID, "acme/a-goal", "https://github.com/acme/a-goal.git", "main"); err != nil {
 		t.Fatal(err)
 	}
-	if awaiting(given.ID) || !slices.Equal(wanted(), []string{planner}) {
-		t.Fatalf("a draft given its repository: awaiting %v, planners wanted %v, want its planner", awaiting(given.ID), wanted())
+	if awaiting(given.ID) || len(wanted()) != 2 || !slices.Contains(wanted(), planner) {
+		t.Fatalf("a draft given its repository: awaiting %v, agents wanted %v, want its planner and its baseline agent", awaiting(given.ID), wanted())
 	}
 	if err := pes.GiveRepository(ctx, given.ID, "acme/other", "", "main"); !errors.Is(err, ErrRepositoryNotAwaited) {
 		t.Fatalf("giving a second repository: %v, want ErrRepositoryNotAwaited", err)
@@ -237,7 +243,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	if err := pes.AskInstance(ctx, pe, planner, "machine-1", "launch-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.SetProposal(ctx, pe, 1, []byte(`{}`), Proposed{WaitUntil: wait, KeepPlanner: kept}); err != nil {
+	if err := pes.Decline(ctx, pe, 1, "declined", wait, kept); err != nil {
 		t.Fatal(err)
 	}
 	proposed, err := pes.GetPlatformExperiment(ctx, pe)
@@ -259,7 +265,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	if err := pes.SetGoal(ctx, pe, "it must fit one accelerator", until); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.SetProposal(ctx, pe, 1, []byte(`{}`), Proposed{WaitUntil: wait, KeepPlanner: kept}); err != ErrGoalChanged {
+	if err := pes.Decline(ctx, pe, 1, "declined", wait, kept); err != ErrGoalChanged {
 		t.Fatalf("proposing for the goal before: got = %v, want ErrGoalChanged", err)
 	}
 	revised, err := pes.GetPlatformExperiment(ctx, pe)
@@ -276,7 +282,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 
 	// It answers the new goal, and nobody changes it again: the time passes, its run is over and
 	// its machine winds down, and past that it is no longer asked for.
-	if err := pes.SetProposal(ctx, pe, 2, []byte(`{}`), Proposed{WaitUntil: wait, KeepPlanner: kept}); err != nil {
+	if err := pes.Decline(ctx, pe, 2, "declined", wait, kept); err != nil {
 		t.Fatal(err)
 	}
 	keptUntil(-time.Second)
@@ -310,7 +316,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() + interval '2 minutes' WHERE id = $1`, short); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.SetProposal(ctx, short, 1, []byte(`{}`), Proposed{WaitUntil: wait, KeepPlanner: kept}); err != nil {
+	if err := pes.Decline(ctx, short, 1, "declined", wait, kept); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, short); got.PlannerEndsAt == nil || time.Until(*got.PlannerEndsAt) > 2*time.Minute+time.Second || time.Until(*got.PlannerEndsAt) < time.Minute {
@@ -318,7 +324,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	}
 
 	// Accepted, the experiment is open and then running, and the planner has nothing to do in it.
-	if err := pes.SetProposal(ctx, pe, 3, []byte(`{}`), Proposed{WaitUntil: wait, KeepPlanner: kept}); err != nil {
+	if err := pes.Decline(ctx, pe, 3, "declined", wait, kept); err != nil {
 		t.Fatal(err)
 	}
 	keptUntil(-windDown - time.Second)
@@ -345,7 +351,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	}
 }
 
-func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
+func TestApplyingAProposalOpensTheDraftWithItsRosterOrChangesNothing(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -368,12 +374,9 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &acceptedAt, &domain.Actor{Kind: domain.ActorUser, ID: "u-accepting"}, []string{"32 only."}
 		var agents []*domain.Agent
 		var signups []domain.AgentSignup
-		// The executors, and last the agent that measures the baseline.
-		for i := 0; i <= executors; i++ {
+		// The executors: the agent that measures the baseline came with the draft.
+		for i := 0; i < executors; i++ {
 			role := domain.SignupRoleExecutor
-			if i == executors {
-				role = domain.SignupRoleBaseline
-			}
 			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
 			agents = append(agents, agent)
 			signups = append(signups, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, InAgentSandbox: true, Model: "model-1"})
@@ -388,9 +391,6 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET ends_at = now() - interval '1 second' WHERE id = $1`, id); err != nil {
 			t.Fatal(err)
 		}
-		if err := pes.SetProposal(ctx, id, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().Add(time.Hour)}); err != ErrPlanningOver {
-			t.Fatalf("proposing past the limit: got = %v, want ErrPlanningOver", err)
-		}
 		if err := pes.Decline(ctx, id, 1, "late", time.Now().Add(time.Hour), 0); err != ErrPlanningOver {
 			t.Fatalf("declining past the limit: got = %v, want ErrPlanningOver", err)
 		}
@@ -402,15 +402,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		}
 	}
 
-	pe, agents, signups := accepted(2)
-	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
-		t.Fatalf("accepting before a proposal: got = %v, want ErrNothingProposed", err)
-	}
-	if err := pes.SetProposal(ctx, id, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().Add(time.Hour)}); err != nil {
-		t.Fatal(err)
-	}
-	// Declined, the draft is answered and has nothing to accept; a change of the goal gives it back
-	// to the planner with the reason kept, and the next proposal clears it.
+	// Declined, the draft is answered; a change of the goal gives it back to the planner with the
+	// reason kept, and the proposal that opens it clears it.
 	if err := pes.Decline(ctx, id, 1, "nothing here can be measured", time.Now().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
@@ -421,46 +414,40 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if wanted := launcherAgentsOf(t, pes, 0, id); len(wanted) != 0 {
 		t.Fatalf("a planner that declined is still asked for: %+v", wanted)
 	}
-	pe, agents, signups = accepted(2)
-	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrNothingProposed {
-		t.Fatalf("accepting a declined draft: got = %v, want ErrNothingProposed", err)
-	}
 	if err := pes.SetGoal(ctx, id, "a goal, in a sentence, by validation loss", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("changing the goal of a declined draft: %v", err)
 	}
 	if revised, _ := pes.GetPlatformExperiment(ctx, id); revised.Answered() || revised.DeclinedReason == "" {
 		t.Fatalf("goal changed after a decline: got = %+v, want it with the planner and the reason kept", revised)
 	}
-	if err := pes.SetProposal(ctx, id, 2, []byte(`{}`), Proposed{WaitUntil: time.Now().Add(time.Hour)}); err != nil {
-		t.Fatal(err)
-	}
-	if proposed, _ := pes.GetPlatformExperiment(ctx, id); proposed.DeclinedReason != "" || proposed.ProposedAt == nil || proposed.DeclinedAt != nil {
-		t.Fatalf("proposed after a decline: got = %+v, want no reason", proposed)
+	pe, agents, signups := accepted(2)
+	if err := pes.ApplyProposal(ctx, pe, 1, []byte(`{}`), agents, signups); err != ErrGoalChanged {
+		t.Fatalf("applying a proposal for the goal before: got = %v, want ErrGoalChanged", err)
 	}
 	if err := pes.Decline(ctx, "pe-none", 1, "r", time.Now(), 0); err != ErrNotDraft {
 		t.Fatalf("declining what is not there: got = %v, want ErrNotDraft", err)
 	}
-	// More machines than the draft may have: nothing of the accept is kept. The draft's limit is
-	// 5, its coordinator is one, its baseline agent another, and the planner is none of them.
+	// More machines than the draft may have: nothing of the proposal is kept. The draft's limit
+	// is 5, its coordinator is one, its baseline agent another, and the planner is none of them.
 	pe, agents, signups = accepted(4)
-	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrMaxAgentSandboxesReached {
+	if err := pes.ApplyProposal(ctx, pe, 2, []byte(`{}`), agents, signups); err != ErrMaxAgentSandboxesReached {
 		t.Fatalf("four executors, a baseline agent and a coordinator in five machines: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
-	if got, _ := pes.GetPlatformExperiment(ctx, id); got.Status != domain.PlatformExpDraft || got.Name == "accepted" {
-		t.Fatalf("a refused accept left %+v", got)
+	if got, _ := pes.GetPlatformExperiment(ctx, id); got.Status != domain.PlatformExpDraft || got.Name == "accepted" || got.ProposedAt != nil || len(got.Proposal) != 0 {
+		t.Fatalf("a refused proposal left %+v", got)
 	}
-	if joined, _ := pes.ListSignups(ctx, id); len(joined) != 1 {
-		t.Fatalf("a refused accept left %d signups, want the planner's alone", len(joined))
+	if joined, _ := pes.ListSignups(ctx, id); len(joined) != 2 {
+		t.Fatalf("a refused proposal left %d signups, want the planner's and the baseline agent's alone", len(joined))
 	}
 
 	pe, agents, signups = accepted(3)
-	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != nil {
-		t.Fatalf("accept: %v", err)
+	if err := pes.ApplyProposal(ctx, pe, 2, []byte(`{}`), agents, signups); err != nil {
+		t.Fatalf("apply: %v", err)
 	}
 	got, err := pes.GetPlatformExperiment(ctx, id)
 	if err != nil || got.Status != domain.PlatformExpOpen || got.Name != "accepted" || got.Description != "the brief" || got.BudgetAcceleratorHours != 6 ||
 		got.MaxAgents != 3 || len(got.Stages) != 2 || len(got.Metrics) != 1 || !got.CoordinatorInAgentSandbox || got.Coordinator == nil ||
-		got.Goal != "a goal, in a sentence, by validation loss" {
+		got.Goal != "a goal, in a sentence, by validation loss" || got.DeclinedReason != "" || got.DeclinedAt != nil {
 		t.Fatalf("accepted: got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
 	if got.StartsAt.IsZero() || time.Since(got.StartsAt) > time.Minute {
@@ -471,8 +458,17 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		got.AcceptedBy == nil || *got.AcceptedBy != (domain.Actor{Kind: domain.ActorUser, ID: "u-accepting"}) || !slices.Equal(got.AcceptedAnswers, []string{"32 only."}) {
 		t.Errorf("accepted: proposal %s proposed at %v, accepted at %v by %+v with %q, want the proposal kept and the accept recorded", got.Proposal, got.ProposedAt, got.AcceptedAt, got.AcceptedBy, got.AcceptedAnswers)
 	}
-	if err := pes.AcceptDraft(ctx, pe, nil, nil); err != ErrNotDraft {
-		t.Fatalf("accepting twice: got = %v, want ErrNotDraft", err)
+	if err := pes.ApplyProposal(ctx, pe, 2, []byte(`{}`), nil, nil); err != ErrNotDraft {
+		t.Fatalf("applying twice: got = %v, want ErrNotDraft", err)
+	}
+	closing, _ := createTestDraft(t, pool)
+	if err := pes.ClosePlatformExperiment(ctx, closing, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	gone, goneAgents, goneSignups := accepted(1)
+	gone.ID = closing
+	if err := pes.ApplyProposal(ctx, gone, 1, []byte(`{}`), goneAgents, goneSignups); err != ErrNotDraft {
+		t.Fatalf("applying to a closed draft: got = %v, want ErrNotDraft", err)
 	}
 
 	// The planner is no participant, though its signup stays in the roster.
@@ -480,19 +476,33 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		t.Fatalf("participants after accept = %v, %v, want the 3 executors and the baseline agent", taking, err)
 	}
 
-	// Accepted, nothing has run. The agent that measures the baseline joined with the accept, so
+	// Applied, nothing has run. The agent that measures the baseline came with the draft, so
 	// the launcher is asked for its machine, for no executor's yet and no longer for the
 	// planner's. It was named by its role, and holds half the budget of 6.
-	baseline := agents[3]
+	joined, err := pes.ListAgentSignups(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var baseline domain.AgentSignup
+	for _, signup := range joined {
+		if signup.Role == domain.SignupRoleBaseline {
+			baseline = signup
+		}
+	}
 	if baseline.Name != "Baseline 1" {
 		t.Fatalf("the baseline agent is named %q, want Baseline 1", baseline.Name)
 	}
 	wanted := launcherAgentsOf(t, pes, time.Minute, id)
-	if len(wanted) != 1 || wanted[0].AgentID != baseline.ID || wanted[0].Ended != "" {
+	if len(wanted) != 1 || wanted[0].AgentID != baseline.AgentID || wanted[0].Ended != "" {
 		t.Fatalf("the launcher is asked for %+v, want the baseline agent alone", wanted)
 	}
-	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 || quota.BurstAcceleratorHours != 0 {
+	if quota, err := pes.GetAgentQuota(ctx, baseline.AgentID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 || quota.BurstAcceleratorHours != 0 {
 		t.Fatalf("the baseline agent's quota = %+v, %v, want 3 guaranteed accelerator-hours", quota, err)
+	}
+	// Its first job brings the executors' machines up, so they are ready when the run starts.
+	queueJob(t, pool, jobOf(baseline.AgentID, id, id, "job-"+uuid.New().String()[:8], ""))
+	if wanted := launcherAgentsOf(t, pes, time.Minute, id); len(wanted) != 4 {
+		t.Fatalf("after the first baseline job the launcher is asked for %d agents, want the baseline agent and the 3 executors", len(wanted))
 	}
 	// Every machine the draft may have is taken, so a second baseline agent has none while the
 	// first holds its own, and takes its place once the first's machine stopped for good.
@@ -501,7 +511,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.SpawnAgent(ctx, id, second, another); err != ErrMaxAgentSandboxesReached {
 		t.Fatalf("a second baseline agent beside the first: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
-	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.AgentID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pes.SpawnAgent(ctx, id, second, another); err != nil || second.Name != "Baseline 2" {
@@ -510,7 +520,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.RemoveAgent(ctx, id, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, false) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, false) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.AgentID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,7 +529,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	started, quotas, err := pes.StartPlatformExperimentTx(ctx, id, time.Hour, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
 		var out []*domain.AgentQuota
 		for _, p := range participants {
-			if p.AgentID == planner || p.AgentID == baseline.ID {
+			if p.AgentID == planner || p.AgentID == baseline.AgentID {
 				t.Errorf("%s takes a share of the run", p.AgentID)
 			}
 			out = append(out, &domain.AgentQuota{ID: uuid.New().String(), AgentID: p.AgentID, PlatformExperimentID: id, GuaranteedAcceleratorHours: 1, CreatedAt: time.Now().UTC()})
@@ -529,7 +539,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err != nil || !started || len(quotas) != 3 {
 		t.Fatalf("start: started %v with %d quotas, %v, want the 3 executors'", started, len(quotas), err)
 	}
-	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
+	if quota, err := pes.GetAgentQuota(ctx, baseline.AgentID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
 		t.Fatalf("the baseline agent's quota after the start = %+v, %v, want the 3 it joined with", quota, err)
 	}
 	if wanted = launcherAgentsOf(t, pes, time.Minute, id); len(wanted) != 4 {
@@ -786,7 +796,7 @@ func TestAChangedGoalIsAnEventOnThePlannersStream(t *testing.T) {
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	draft, planner := createTestDraft(t, pool)
-	if err := pes.SetProposal(ctx, draft, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
+	if err := pes.Decline(ctx, draft, 1, "declined", time.Now().UTC().Add(time.Hour), 10*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	before := cursorNow(t, pool)
@@ -810,133 +820,6 @@ func TestAChangedGoalIsAnEventOnThePlannersStream(t *testing.T) {
 	}
 }
 
-// A baseline machine came up 50 s after the accept that created its agent. The proposal
-// signs the baseline agent up, and its machine is wanted while the platform is to accept the
-// proposal by itself, so it is up by then. A person who holds the proposal to edit it lets the
-// machine go, and the accept gives the agent its quota and its machine again.
-func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *testing.T) {
-	pool := eventsTestDB(t)
-	ctx := context.Background()
-	pes := NewStore(pool, 3)
-	id, planner := createTestDraft(t, pool)
-	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
-	baselineAgent := func() (*domain.Agent, domain.AgentSignup) {
-		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
-		return agent, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline", Model: "model-1", Actor: &by}
-	}
-	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
-	soon := time.Now().UTC().Add(30 * time.Second)
-	agent, signup := baselineAgent()
-	if err := pes.SetProposal(ctx, id, 1, []byte(`{}`), Proposed{WaitUntil: wait, KeepPlanner: time.Minute, AcceptsAt: &soon, Baseline: agent, BaselineSignup: signup}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := pes.GetPlatformExperiment(ctx, id)
-	if err != nil || got.AcceptsAt == nil || got.AcceptsAt.Sub(soon).Abs() > time.Second {
-		t.Fatalf("proposed: accepts_at %v, %v, want %v", got.AcceptsAt, err, soon)
-	}
-	baselineWanted := func() *LauncherAgent {
-		t.Helper()
-		wanted, err := pes.ListLauncherAgents(ctx, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i := range wanted {
-			if wanted[i].AgentID == agent.ID {
-				return &wanted[i]
-			}
-		}
-		return nil
-	}
-	wanted := baselineWanted()
-	if wanted == nil || wanted.Role != domain.SignupRoleBaseline || wanted.Ended != "" {
-		t.Fatalf("while the draft counts down: baseline agent wanted as %+v, want it listed", wanted)
-	}
-	if agent.Name != "Baseline 1" {
-		t.Errorf("the baseline agent is named %q, want Baseline 1", agent.Name)
-	}
-	// A second proposal keeps the agent it signed up.
-	again, againSignup := baselineAgent()
-	if err := pes.SetProposal(ctx, id, 1, []byte(`{}`), Proposed{WaitUntil: wait, AcceptsAt: &soon, Baseline: again, BaselineSignup: againSignup}); err != nil {
-		t.Fatal(err)
-	}
-	if joined, _ := pes.ListSignups(ctx, id); len(joined) != 2 || !slices.Contains(joined, planner) || !slices.Contains(joined, agent.ID) {
-		t.Fatalf("after a second proposal the draft has %v, want its planner and the one baseline agent", joined)
-	}
-	if due, err := pes.DraftsToAccept(ctx); err != nil || slices.Contains(due, id) {
-		t.Fatalf("drafts to accept before accepts_at: %v, %v", due, err)
-	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET accepts_at = now() - interval '1 second' WHERE id = $1`, id); err != nil {
-		t.Fatal(err)
-	}
-	if due, err := pes.DraftsToAccept(ctx); err != nil || !slices.Contains(due, id) {
-		t.Fatalf("drafts to accept past accepts_at: %v, %v, want %s among them", due, err, id)
-	}
-
-	// Held, it waits for a person and its baseline agent has no machine.
-	if err := pes.HoldAccept(ctx, id); err != nil {
-		t.Fatal(err)
-	}
-	if err := pes.HoldAccept(ctx, id); err != nil {
-		t.Fatalf("holding a held draft: %v", err)
-	}
-	if held, _ := pes.GetPlatformExperiment(ctx, id); held.AcceptsAt != nil {
-		t.Fatalf("held: accepts_at %v, want none", held.AcceptsAt)
-	}
-	if due, _ := pes.DraftsToAccept(ctx); slices.Contains(due, id) {
-		t.Fatal("a held draft is among the drafts to accept")
-	}
-	if wanted := baselineWanted(); wanted != nil {
-		t.Fatalf("a held draft's baseline agent is wanted: %+v", wanted)
-	}
-
-	// Accepted, its baseline agent takes its quota from the budget stated and its machine again,
-	// and no second baseline agent is signed up.
-	pe, err := pes.GetPlatformExperiment(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents = "accepted", "the brief", 6, 1
-	pe.Metrics = []domain.MetricDefinition{{Key: "val_loss", Direction: "minimize"}}
-	pe.StartsAt, pe.DurationHours = time.Now().UTC(), 4
-	pe.BaselineDueAt = pe.StartsAt.Add(time.Hour)
-	pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
-	pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{Model: "model-1"}
-	acceptedAt := time.Now().UTC()
-	pe.AcceptedAt = &acceptedAt
-	executor := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
-	if err := pes.AcceptDraft(ctx, pe, []*domain.Agent{executor}, []domain.AgentSignup{{Actor: testActor, AgentID: executor.ID, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1"}}); err != nil {
-		t.Fatal(err)
-	}
-	if quota, err := pes.GetAgentQuota(ctx, agent.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
-		t.Fatalf("the baseline agent's quota once accepted = %+v, %v, want half the budget of 6", quota, err)
-	}
-	if wanted := baselineWanted(); wanted == nil {
-		t.Fatalf("the accepted draft's baseline agent is wanted as %+v, want it listed", wanted)
-	}
-	if got, err := pes.GetPlatformExperiment(ctx, id); err != nil || got.AcceptedAt == nil || got.AcceptedBy != nil || got.AcceptedAnswers != nil || len(got.Proposal) == 0 {
-		t.Fatalf("accepted by the platform: got = %+v, %v, want the proposal kept, accepted_at and no accepted_by", got, err)
-	}
-	if err := pes.HoldAccept(ctx, id); err != ErrNotDraft {
-		t.Fatalf("holding what is no draft: got = %v, want ErrNotDraft", err)
-	}
-
-	// A change of the goal gives the draft back to its planner, and nothing is accepted by itself
-	// until it proposes again.
-	revising, _ := createTestDraft(t, pool)
-	if err := pes.HoldAccept(ctx, revising); err != ErrNotProposed {
-		t.Fatalf("holding a draft with nothing proposed: got = %v, want ErrNotProposed", err)
-	}
-	if err := pes.SetProposal(ctx, revising, 1, []byte(`{}`), Proposed{WaitUntil: wait, AcceptsAt: &soon}); err != nil {
-		t.Fatal(err)
-	}
-	if err := pes.SetGoal(ctx, revising, "smaller", time.Now().UTC().Add(30*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if revised, _ := pes.GetPlatformExperiment(ctx, revising); revised.AcceptsAt != nil {
-		t.Fatalf("goal changed: accepts_at %v, want none", revised.AcceptsAt)
-	}
-}
-
 func plannerAnsweredAt(ctx context.Context, pes *Store, pe, agent string) (*time.Time, error) {
 	standing, err := pes.AgentStanding(ctx, pe, agent)
 	return standing.PlannerAnsweredAt, err
@@ -945,4 +828,96 @@ func plannerAnsweredAt(ctx context.Context, pes *Store, pe, agent string) (*time
 func agentFinishedAt(ctx context.Context, pes *Store, pe, agent string) (*time.Time, error) {
 	standing, err := pes.AgentStanding(ctx, pe, agent)
 	return standing.FinishedAt, err
+}
+
+// A draft's baseline agent is wanted from the start, beside its planner, on the plan the planner
+// drafts: a working plan is stored with nothing answered and told to the draft's agents, a new
+// goal drops it, and a decline lets the baseline agent go.
+func TestADraftsBaselineAgentStartsWithItsPlannerOnTheWorkingPlan(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewStore(pool, 3)
+	draft, planner := createTestDraft(t, pool)
+	roles := func() []domain.SignupRole {
+		var got []domain.SignupRole
+		for _, agent := range launcherAgentsOf(t, pes, 0, draft) {
+			got = append(got, agent.Role)
+		}
+		slices.Sort(got)
+		return got
+	}
+	if got := roles(); !slices.Equal(got, []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRolePlanner}) {
+		t.Fatalf("a new draft: launcher asked for %v, want its baseline agent and its planner", got)
+	}
+
+	before := cursorNow(t, pool)
+	if err := pes.SetWorkingPlan(ctx, draft, 1, []byte(`{"working":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := pes.GetPlatformExperiment(ctx, draft)
+	if err != nil || got.Status != domain.PlatformExpDraft || string(got.Proposal) != `{"working": 1}` || got.ProposedAt != nil {
+		t.Fatalf("a working plan: got = %+v, %v, want it stored on the draft with nothing answered", got, err)
+	}
+	var told []string
+	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: draft}, before) {
+		if e.Kind == platformapi.EventPlatformExperimentProposal {
+			told = append(told, e.Value)
+		}
+	}
+	if !slices.Equal(told, []string{"working"}) {
+		t.Fatalf("proposal events after a working plan: %v, want one working", told)
+	}
+	if err := pes.SetWorkingPlan(ctx, draft, 2, []byte(`{}`)); err != ErrGoalChanged {
+		t.Fatalf("a working plan for a goal the draft never had: got = %v, want ErrGoalChanged", err)
+	}
+
+	if err := pes.SetGoal(ctx, draft, "a goal, by validation loss", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := pes.GetPlatformExperiment(ctx, draft); len(got.Proposal) != 0 {
+		t.Fatalf("after a new goal the working plan is %s, want it dropped", got.Proposal)
+	}
+	if err := pes.Decline(ctx, draft, 2, "nothing to measure", time.Now().UTC().Add(time.Hour), 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := roles(); len(got) != 0 {
+		t.Fatalf("a declined draft: launcher asked for %v, want nobody", got)
+	}
+	_ = planner
+}
+
+// A patch writes the plan's machine into its proposal and tells it as platform_experiment.plan
+// naming machine; a write that carries no proposal keeps the one stored.
+func TestAChangedMachineIsWrittenIntoTheProposalAndTold(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewStore(pool, 3)
+	id := "pe-" + uuid.New().String()[:8]
+	createTestPE(t, pool, id, 10)
+	exec(t, pool, `UPDATE platform_experiments SET proposal = '{"cpu": "8"}' WHERE id = $1`, id)
+	pe, err := pes.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := cursorNow(t, pool)
+	pe.Proposal = []byte(`{"cpu": "4"}`)
+	if err := pes.UpdatePlatformExperiment(ctx, pe, pe.Status, nil); err != nil {
+		t.Fatal(err)
+	}
+	var plans []string
+	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: id}, before) {
+		if e.Kind == platformapi.EventPlatformExperimentPlan {
+			plans = append(plans, e.Detail)
+		}
+	}
+	if got, _ := pes.GetPlatformExperiment(ctx, id); string(got.Proposal) != `{"cpu": "4"}` || !slices.Equal(plans, []string{"machine"}) {
+		t.Fatalf("proposal %s, plan events %v, want the new machine and one event naming it", got.Proposal, plans)
+	}
+	pe.Proposal = nil
+	if err := pes.UpdatePlatformExperiment(ctx, pe, pe.Status, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := pes.GetPlatformExperiment(ctx, id); string(got.Proposal) != `{"cpu": "4"}` {
+		t.Fatalf("a write with no proposal left %s, want it kept", got.Proposal)
+	}
 }

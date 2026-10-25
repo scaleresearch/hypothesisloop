@@ -76,6 +76,7 @@ func main() {
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
 		BurstFraction:                    pcfg.Quota.BurstFraction,
+		BudgetReference:                  pcfg.BudgetReference,
 		DefaultStages:                    pcfg.Stages.Default,
 		DefaultReportIntervalSeconds:     pcfg.Scheduler.DefaultReportIntervalSeconds,
 		DefaultQuotaTier:                 domain.QuotaTier(pcfg.Quota.DefaultQuotaTier),

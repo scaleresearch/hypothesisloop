@@ -25,12 +25,10 @@ const NOTICES = new Map([
 const WORDING = {
   'sign-in': {
     title: 'Sign in',
-    lead: 'Run experiments, watch the agents work, and manage your organization\'s projects, keys and clusters.',
     other: { question: 'New to HypothesisLoop?', label: 'Sign up', mode: 'sign-up' },
   },
   'sign-up': {
     title: 'Create your account',
-    lead: 'Sign up with an account you already have.',
     other: { question: 'Already have an account?', label: 'Sign in', mode: 'sign-in' },
   },
 } as const
@@ -76,8 +74,7 @@ function SignIn() {
   const otherHref = other.toString() ? `${LOGIN_PATH}?${other}` : LOGIN_PATH
 
   return (
-    <Centered head={<NextLink href={LANDING_PATH} className="justify-self-start rounded"><Logo /></NextLink>} title={wording.title}>
-      <Text tone="muted">{wording.lead}</Text>
+    <Centered head={<NextLink href={LANDING_PATH} className="inline-flex rounded"><Logo /></NextLink>} title={wording.title}>
       {notice && <ErrorMessage>{notice}</ErrorMessage>}
       {problem && <ErrorMessage>Sign-in is not configured. {problem}</ErrorMessage>}
       {error && <ErrorMessage>{error}</ErrorMessage>}

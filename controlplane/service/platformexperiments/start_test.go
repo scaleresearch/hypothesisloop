@@ -303,16 +303,17 @@ func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
 			t.Errorf("%s %s: waits_for = %q, want %q", pe.Status, pe.CloseReason, pe.StatusReason.WaitsFor, who)
 		}
 	}
-	// A draft waits for its planner until it answers, and from then for a person. An open one
+	// A draft waits for its planner until it answers, and a declined one for a person. An open one
 	// whose coordinator is a person asks that person for what a sandboxed coordinator would do.
 	answered := now
-	proposed := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpDraft, ProposedAt: &answered}
+	declined := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpDraft, DeclinedReason: "nothing to measure"}
+	declined.SetAnswered(&answered, false)
 	for name, c := range map[string]struct {
 		pe  *domain.PlatformExperiment
 		who domain.Waiter
 	}{
 		"a draft being planned":             {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpDraft}, domain.WaitsForPlatform},
-		"a draft with a proposal":           {proposed, domain.WaitsForOwner},
+		"a declined draft":                  {declined, domain.WaitsForOwner},
 		"an open one a person coordinates":  {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen}, domain.WaitsForOwner},
 		"an open one with its coordinator":  {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, CoordinatorInAgentSandbox: true}, domain.WaitsForCoordinator},
 		"an open one with nobody to run it": {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, CoordinatorInAgentSandbox: true, BaselineJobID: "job-1"}, domain.WaitsForOwner},

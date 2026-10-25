@@ -256,10 +256,12 @@ type unstartedStore struct {
 	poolOnlyStore
 	status domain.PlatformExperimentStatus
 	signup *domain.AgentSignup
+	// proposal is the plan the platform experiment was opened on, none for one created whole.
+	proposal []byte
 }
 
 func (s unstartedStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: s.status, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", Image: testExperimentImage}, nil
+	return &domain.PlatformExperiment{ID: id, Status: s.status, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", Image: testExperimentImage, Proposal: s.proposal}, nil
 }
 
 func (s unstartedStore) GetAgentSignup(context.Context, string, string) (*domain.AgentSignup, error) {
@@ -309,6 +311,23 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline}, hypotheses: oneHypothesis{}}
 	if err := s.Submit(context.Background(), baselineSubmission()); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("the baseline agent of an open platform experiment: got = %v, want its job taken through every check a running one's is", err)
+	}
+}
+
+// A person changed the plan's machine while the baseline was measured: a baseline job sized for
+// the machine before is refused, saying the plan's, and one on it taken.
+func TestABaselineJobIsMeasuredOnThePlansMachine(t *testing.T) {
+	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}
+	plan := []byte(`{"accelerator_type": "` + string(h100) + `", "cpu": "2", "memory": "1Gi", "storage": "1Gi"}`)
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: baseline, proposal: plan}, hypotheses: oneHypothesis{}}
+	var refused *AdmissionError
+	if err := s.Submit(context.Background(), baselineSubmission()); !errors.As(err, &refused) || refused.Reason != ReasonNotThePlansMachine || !strings.Contains(refused.Message, "cpu 2") {
+		t.Fatalf("a baseline job of 1 core on a plan of 2: got = %v, want %s naming the plan's machine", err, ReasonNotThePlansMachine)
+	}
+	exp := baselineSubmission()
+	exp.Job.CPU = "2"
+	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("a baseline job on the plan's machine: got = %v, want it taken", err)
 	}
 }
 

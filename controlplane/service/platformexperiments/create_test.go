@@ -16,7 +16,7 @@ import (
 )
 
 // platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.
-var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute, AutoAccept: 30 * time.Second}
+var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute}
 
 // reaching has the org of every project reach the given accelerator types and no other.
 func reaching(svc *Service, types ...domain.AcceleratorType) *Service {
@@ -207,5 +207,17 @@ func TestARunThatContinuesAnotherKeepsItsMetric(t *testing.T) {
 			!strings.Contains(refused.Error(), "latency_ms (minimize), val_loss (minimize)") {
 			t.Errorf("%s: got %v, want 422 invalid_metrics naming both runs' metrics", name, err)
 		}
+	}
+}
+
+// A team states its executors, so a create that states the team need not state max_agents too.
+func TestMaxAgentsIsTheTeamsExecutorsWhereTheCreateLeavesItOut(t *testing.T) {
+	svc := &Service{cfg: domain.QuotaConfig{DefaultReportIntervalSeconds: 30}}
+	spec := svc.withSettings(experimentspec.Spec{Agents: []experimentspec.AgentPoolEntry{{AgentType: "generalist", Count: 3}, {AgentType: domain.ResearcherAgentType, Count: 1}}})
+	if spec.MaxAgents != 3 {
+		t.Fatalf("max_agents = %d, want the 3 executors of the team", spec.MaxAgents)
+	}
+	if stated := svc.withSettings(experimentspec.Spec{MaxAgents: 5, Agents: spec.Agents}); stated.MaxAgents != 5 {
+		t.Fatalf("a stated max_agents became %d, want it kept", stated.MaxAgents)
 	}
 }

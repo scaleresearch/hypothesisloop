@@ -127,8 +127,8 @@ const (
 	// coordinator, whichever acts on it now. A pointer like the description event: the goal is
 	// read from the platform experiment.
 	EventPlatformExperimentGoal = "platform_experiment.goal"
-	// EventPlatformExperimentProposal says a draft's planner answered its goal, with a proposal
-	// or a decline. Nobody acts on it but a person.
+	// EventPlatformExperimentProposal says a draft's planner stored its working plan, which the
+	// draft's baseline agent builds from, or answered its goal with a proposal or a decline.
 	EventPlatformExperimentProposal = "platform_experiment.proposal"
 	// EventPlatformExperimentPlan says a person changed fields of the plan that no other kind
 	// tells, named in its detail.

@@ -14,6 +14,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec/templatetest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -252,10 +254,10 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 	}
 	// While it is open, what a run costs and how it is judged can still change.
 	code, out, stored := patch(domain.PlatformExpOpen, map[string]any{
-		"budget_accelerator_hours": 8, "max_agents": 6, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "duration_hours": 36,
+		"budget_accelerator_hours": 8, "max_concurrent_accelerators": 4, "report_interval_seconds": 60, "duration_hours": 36,
 		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
 	})
-	if code != http.StatusOK || stored.BudgetAcceleratorHours != 8 || stored.MaxAgents != 6 || *stored.MaxConcurrentAccelerators != 4 || stored.ReportIntervalSeconds != 60 ||
+	if code != http.StatusOK || stored.BudgetAcceleratorHours != 8 || *stored.MaxConcurrentAccelerators != 4 || stored.ReportIntervalSeconds != 60 ||
 		stored.Metrics[0].Key != "val_accuracy" || !stored.StartsAt.Equal(starts) || stored.DurationHours != 36 || !stored.BaselineDueAt.Equal(ends) || !stored.EndsAt.IsZero() || stored.Description != "the brief agents work from" {
 		t.Errorf("an open experiment's fields: got = %d %v, stored %+v", code, out, stored)
 	}
@@ -267,7 +269,7 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		reason, says string
 	}{
 		"nothing":                       {domain.PlatformExpOpen, map[string]any{}, 422, "nothing_to_change", ""},
-		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "starts_at": "2030-01-02T00:00:00Z", "max_agents": 9, "duration_hours": 9}, 409, "not_editable", "budget_accelerator_hours, starts_at can't change while it is running."},
+		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "starts_at": "2030-01-02T00:00:00Z", "duration_hours": 9}, 409, "not_editable", "budget_accelerator_hours, starts_at can't change while it is running."},
 		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "not_editable", "is closed"},
 		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "not_editable", "comes from its planner"},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},
@@ -359,6 +361,26 @@ func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.
 	repos.files["prj-a"] = "nmae: typo\n"
 	if rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model&branch=main", nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_experiment_file") {
 		t.Fatalf("a file with an unknown key: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A repository made from the experiment template and not yet filled in holds a placeholder in
+// budget_accelerator_hours, which a form showed as a YAML type error. It is answered as unfilled,
+// which a form takes for a file with nothing to fill in, and read once its placeholders are.
+func TestATemplateExperimentFileNotYetFilledInIsAnsweredUnfilled(t *testing.T) {
+	repos := &fakeRepositories{files: map[string]string{"prj-a": templatetest.Read(experimentspec.ExperimentFile)}}
+	_, call, _ := repoAPI(t, ownerOfA, repos)
+	rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model&branch=main", nil)
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if rec.Code != http.StatusUnprocessableEntity || out["reason"] != "experiment_file_unfilled" || !strings.Contains(rec.Body.String(), "still has 7 "+experimentspec.Placeholder+" to fill in") {
+		t.Fatalf("the template's file: %d %s, want 422 experiment_file_unfilled with the count left", rec.Code, rec.Body)
+	}
+	repos.files["prj-a"] = templatetest.FillExperiment("matmul-throughput", "tflops")
+	rec = call("GET", "/projects/prj-a/experiment-file?repository=acme/model&branch=main", nil)
+	out = map[string]any{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || out["name"] != "matmul-throughput" || out["budget_accelerator_hours"] != float64(10) {
+		t.Fatalf("the template filled in: %d %s, want what it states", rec.Code, rec.Body)
 	}
 }
 

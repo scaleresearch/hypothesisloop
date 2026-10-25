@@ -34,7 +34,7 @@ const DESTINATIONS: (Omit<CommandItem, 'action'> & { section: Section; staffOnly
   { id: 'nav-pe',   section: 'experiments', label: 'Experiments',       sub: 'Go to page', icon: FlaskConical, keywords: 'experiments campaigns' },
   { id: 'nav-hyp',  section: 'hypotheses',  label: 'Hypotheses',        sub: 'Go to page', icon: Lightbulb,    keywords: 'hypothesis graph claims findings' },
   { id: 'nav-jobs', section: 'jobs',        label: 'Jobs',              sub: 'Go to page', icon: ListTree,     keywords: 'jobs runs workloads' },
-  { id: 'nav-clu',  section: 'clusters',    label: 'Compute Resources', sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
+  { id: 'nav-clu',  section: 'clusters',    label: 'Compute', sub: 'Go to page', icon: Server,       keywords: 'clusters compute accelerator' },
   { id: 'nav-stat', section: 'statistics',  label: 'Statistics',        sub: 'Go to page', icon: LineChart,    keywords: 'dashboard scheduler quality evictions completion rate', staffOnly: true },
   { id: 'nav-set',  section: 'settings',    label: 'Settings',          sub: 'Go to page', icon: Settings,     keywords: 'settings members invites api keys github agent types organization' },
 ]

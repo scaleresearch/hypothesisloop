@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -817,8 +818,8 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Status != domain.PlatformExpDraft {
 		t.Fatalf("a draft whose planner is being restarted: got = %+v, %v, want it a draft still", got, err)
 	}
-	if wanted := launcherAgentsOf(t, pes, time.Minute, draft); len(wanted) != 1 || wanted[0].AgentID != planner {
-		t.Fatalf("the launcher is asked for %+v, want the planner again", wanted)
+	if wanted := launcherAgentsOf(t, pes, time.Minute, draft); len(wanted) != 2 || !slices.ContainsFunc(wanted, func(a LauncherAgent) bool { return a.AgentID == planner }) {
+		t.Fatalf("the launcher is asked for %+v, want the planner again beside the baseline agent", wanted)
 	}
 	if after := die(draft, planner, 1); !after.Stopped {
 		t.Fatalf("one machine more: got = %+v, want the planner stopped", after)
@@ -829,14 +830,14 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	}
 
 	answered, answering := createTestDraft(t, pool)
-	if err := pes.SetProposal(ctx, answered, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
+	if err := pes.Decline(ctx, answered, 1, "declined", time.Now().UTC().Add(time.Hour), 10*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if after := die(answered, answering, maxRestarts+1); !after.Stopped {
 		t.Fatalf("got = %+v, want the planner stopped", after)
 	}
-	if got, err := pes.GetPlatformExperiment(ctx, answered); err != nil || got.Status != domain.PlatformExpDraft || got.ProposedAt == nil {
-		t.Fatalf("a draft whose planner stopped after it proposed: got = %+v, %v, want its proposal still waiting", got, err)
+	if got, err := pes.GetPlatformExperiment(ctx, answered); err != nil || got.Status != domain.PlatformExpDraft || got.DeclinedAt == nil {
+		t.Fatalf("a draft whose planner stopped after it declined: got = %+v, %v, want its answer still waiting", got, err)
 	}
 }
 
@@ -926,7 +927,7 @@ func TestWhatASandboxedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *tes
 		t.Fatalf("a coordinator asked for on a new machine: got = %+v, want none", got)
 	}
 	// Released with its draft's answer, the planner's machine says nothing either.
-	if err := pes.SetProposal(ctx, draft, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour)}); err != nil {
+	if err := pes.Decline(ctx, draft, 1, "declined", time.Now().UTC().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := pes.ReleaseInstances(ctx, 0, 0); err != nil {

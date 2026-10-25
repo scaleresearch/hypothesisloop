@@ -163,7 +163,7 @@ func newAccountsWorld(t *testing.T) *world {
 	}
 	router := authtest.Router(tokens{w})
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
-	registerAccounts(doc, accounts.NewService(w.store, w.store, liveness{connected: map[string]bool{w.clusterA: true}, contacts: func() map[string]metricsdb.ClusterContact { return w.contacts }}, time.Minute, testSigningSecret, testRuntimeAddresses, []string{testPlatformCluster}, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(w.store, w.store, liveness{connected: map[string]bool{w.clusterA: true}, contacts: func() map[string]metricsdb.ClusterContact { return w.contacts }}, time.Minute, testSigningSecret, testRuntimeAddresses, map[string]string{testPlatformCluster: "vast"}, testLimits, doc.Access, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleExecutor, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
@@ -924,6 +924,33 @@ func TestAPlatformClusterIsListedToEveryOrgWithoutItsOwnerOrItsSettingsKey(t *te
 	}
 }
 
+// A cluster the control plane runs itself is listed with the provider it rents on, so a person
+// reads which vendor it is, and one run by its own agent with none.
+func TestAPlatformRunClusterIsListedWithItsProvider(t *testing.T) {
+	w := newAccountsWorld(t)
+	if _, err := w.store.RegisterCluster(context.Background(), testPlatformCluster, w.orgA); err != nil {
+		t.Fatal(err)
+	}
+	rec := w.call("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: got = %d %s, want = 200", rec.Code, rec.Body)
+	}
+	var listed struct {
+		Clusters []accounts.ListedCluster `json:"clusters"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	providers := map[string]string{}
+	for _, c := range listed.Clusters {
+		providers[c.Name] = c.Provider
+	}
+	want := map[string]string{testPlatformCluster: "vast", w.clusterA: "", w.clusterB: ""}
+	if !maps.Equal(providers, want) {
+		t.Fatalf("providers: got = %v, want = %v", providers, want)
+	}
+}
+
 func TestAnOrgThatDoesNotExistIsNotFoundForStaffToo(t *testing.T) {
 	w := newAccountsWorld(t)
 	for _, c := range []struct {
@@ -1010,7 +1037,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	w := newAccountsWorld(t)
 	router := authtest.Router(tokens{w})
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
-	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, liveness{err: errors.New("metrics store at 10.0.0.7 refused the connection")}, time.Minute, testSigningSecret, testRuntimeAddresses, []string{testPlatformCluster}, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, liveness{err: errors.New("metrics store at 10.0.0.7 refused the connection")}, time.Minute, testSigningSecret, testRuntimeAddresses, map[string]string{testPlatformCluster: "vast"}, testLimits, doc.Access, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)

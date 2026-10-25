@@ -28,20 +28,26 @@ const navItems: { section: Section; label: string; icon: typeof Settings; staffO
   { section: 'experiments', label: 'Experiments', icon: FlaskConical },
   { section: 'hypotheses', label: 'Hypotheses', icon: Lightbulb },
   { section: 'jobs', label: 'Jobs', icon: ListTree },
-  { section: 'clusters', label: 'Compute Resources', icon: Server },
+  { section: 'clusters', label: 'Compute', icon: Server },
   { section: 'statistics', label: 'Statistics', icon: LineChart, staffOnly: true },
   { section: 'settings', label: 'Settings', icon: Settings },
 ]
 
 // Checking is no state of the clusters yet: it pulses in the quiet colour until one is known.
-function StatusLine({ tone, label, sub }: { tone: Tone | 'idle'; label: string; sub?: string }) {
+function StatusLine({ tone, label, sub, title }: { tone: Tone | 'idle'; label: string; sub?: string; title?: string }) {
+  const { project } = useTenant()
   return (
-    <div className="rounded border bg-surface px-3 py-2">
+    <Link
+      href={sectionPath('clusters', project)}
+      aria-label={`${label}${sub ? `, ${sub}` : ''}. Open Compute`}
+      title={title ?? sub}
+      className="block rounded border bg-surface px-3 py-2 transition-colors hover:bg-hover"
+    >
       <StatusLabel tone={tone === 'idle' ? 'neutral' : tone} pulse={tone === 'idle'} className="w-full">
         <span className="truncate">{label}</span>
       </StatusLabel>
-      {sub && <Text variant="meta" tone="subtle" className="truncate pl-3" title={sub}>{sub}</Text>}
-    </div>
+      {sub && <Text variant="meta" tone="subtle" className="truncate pl-3">{sub}</Text>}
+    </Link>
   )
 }
 
@@ -56,9 +62,9 @@ function SystemStatus() {
   // What the org's jobs can run on: its own clusters and the platform's it uses.
   const { used, online, whose } = clustersInUse(data)
   const tone = used === 0 ? 'idle' : online === used ? 'success' : online > 0 ? 'warning' : 'danger'
-  const label = used === 0 ? 'No cluster in use' : online === used ? 'All clusters online' : online > 0 ? 'Some clusters offline' : 'All clusters offline'
+  const label = used === 0 ? 'No clusters in use' : online === used ? 'All clusters online' : online > 0 ? 'Some clusters offline' : 'All clusters offline'
 
-  return <StatusLine tone={tone} label={label} sub={`${online}/${used} clusters online${whose ? ` · ${whose}` : ''}`} />
+  return <StatusLine tone={tone} label={label} sub={used > 0 ? `${online} of ${used} online` : undefined} title={whose || undefined} />
 }
 
 function Account() {

@@ -189,7 +189,7 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 		reason string
 	}{
 		"a budget one run apiece no longer fits": {map[string]any{"budget_accelerator_hours": 0.3}, "budget_below_baseline"},
-		"more executors than the budget fits":    {map[string]any{"max_agents": 40}, "budget_below_baseline"},
+		"more executors than the budget fits":    {map[string]any{"agents": []map[string]any{{"agent_type": "generalist", "count": 40}}}, "budget_below_baseline"},
 		"a metric the baseline never reported":   {map[string]any{"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}}}, "baseline_missing_metric"},
 	} {
 		store, patch := declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
@@ -203,7 +203,7 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 		t.Errorf("a budget the baseline fits: got = %d %v, want 200 and the baseline kept", code, out)
 	}
 
-	// max_agents counts the executors that joined, so it is never set under them.
+	// The team counts the executors that joined, so it is never set under them before the start.
 	// What a declared experiment still waits for is read on it.
 	store, patch = declareAPI(t, declared(), measuredBaseline(), auth.Principal(ownerOfA))
 	if code, out := patch(map[string]any{"budget_accelerator_hours": 8}); code != http.StatusOK || out["status_reason"].(map[string]any)["reason"] != "no_executors" {
@@ -213,10 +213,10 @@ func TestAnOpenExperimentIsHeldToItsDeclaredBaselineAndStartsOnceNothingIsMissin
 		t.Errorf("a brief that drops what the platform wrote: got = %d, brief %q, %d starts, want the block kept and no start", code, store.created[0].Description, store.started)
 	}
 	store.agentIDs = []string{"ag-1", "ag-2"}
-	if code, out := patch(map[string]any{"max_agents": 1}); code != http.StatusConflict || out["reason"] != "max_agents_below_executors" || store.created[0].MaxAgents != 2 {
-		t.Errorf("max_agents under the executors that joined: got = %d %v, want 409 max_agents_below_executors and nothing changed", code, out)
+	if code, out := patch(map[string]any{"agents": []map[string]any{{"agent_type": "generalist", "count": 1}}}); code != http.StatusConflict || out["reason"] != "agents_below_at_work" || store.created[0].MaxAgents != 2 {
+		t.Errorf("a team under the executors that joined: got = %d %v, want 409 agents_below_at_work and nothing changed", code, out)
 	}
-	if code, out := patch(map[string]any{"max_agents": 3}); code != http.StatusOK || store.created[0].MaxAgents != 3 || store.started != 1 ||
+	if code, out := patch(map[string]any{"agents": []map[string]any{{"agent_type": "generalist", "count": 3}}}); code != http.StatusOK || store.created[0].MaxAgents != 3 || store.started != 1 ||
 		out["status"] != "running" || out["status_reason"].(map[string]any)["reason"] != "running" {
 		t.Errorf("a stored change with its baseline and its executors: got = %d %v, %d starts, want 200 and the run started in this request", code, out, store.started)
 	}

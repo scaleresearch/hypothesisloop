@@ -5,13 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentsPage } from '@/lib/api/agents'
 import { fetchOrgClusters } from '@/lib/api/clusters'
 import { createExperimentDraft, deleteExperimentDraft, fetchExperimentDraft, fetchExperimentDrafts } from '@/lib/api/drafts'
-import { fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
+import { beginGitHubInstall, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
 import { fetchExperimentStats } from '@/lib/api/jobs'
-import { createPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
+import { checkRepository, createPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { ApiError, apiSend } from '@/lib/api/request'
+import { takeReturn } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
-import type { ExperimentDraft, Me, PlatformExperiment } from '@/types/api'
+import type { ExperimentDraft, Me, OrgGitHubInstallation, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '' }))
 
@@ -34,7 +35,7 @@ vi.mock('@/lib/api/drafts', async importActual => ({
 }))
 vi.mock('@/lib/api/github', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/github')>()),
-  fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
+  beginGitHubInstall: vi.fn(), fetchGitHubApp: vi.fn(), fetchGitHubInstallations: vi.fn(), fetchGitHubRepositories: vi.fn(),
 }))
 vi.mock('@/lib/api/jobs', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/jobs')>()),
@@ -42,7 +43,7 @@ vi.mock('@/lib/api/jobs', async importActual => ({
 }))
 vi.mock('@/lib/api/platform-experiments', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/platform-experiments')>()),
-  createPlatformExperiment: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
+  checkRepository: vi.fn(), createPlatformExperiment: vi.fn(), fetchPlatformExperimentsPage: vi.fn(),
 }))
 vi.mock('@/lib/api/request', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/request')>()),
@@ -58,13 +59,16 @@ const me: Me = {
   orgs: [{ id: 'org_a', name: 'Lab', role: 'member', created_at: at, actions: ['create_api_key'] }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
+const owner: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'owner', actions: ['edit', 'create_api_key'] }] }
+const app = { slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' }
+const account: OrgGitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: '2026-01-01T00:00:00Z', default: false }
 const experiment = (id: string, more: Partial<PlatformExperiment> = {}) => ({ id, project_id: 'prj_1', name: id, shared: false, ...more }) as PlatformExperiment
 
 let own: PlatformExperiment[]
 let shared: PlatformExperiment[]
 
-function show() {
-  const resolved = resolveTenant(me, '')
+function show(as: Me = me) {
+  const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
@@ -91,8 +95,9 @@ beforeEach(() => {
   vi.mocked(fetchOrgClusters).mockResolvedValue([])
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
   vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 0 })
-  vi.mocked(fetchGitHubApp).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
-  vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(fetchGitHubApp).mockReset().mockResolvedValue(app)
+  vi.mocked(fetchGitHubInstallations).mockReset().mockResolvedValue({ items: [account], total: 1 })
+  vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
   vi.mocked(fetchGitHubRepositories).mockResolvedValue({ items: [{ repository: 'acme/widgets', installation_id: 7, private: true }], total: 1 })
   vi.mocked(fetchPlatformExperimentsPage).mockImplementation(async params => {
     const all = params?.shared === false ? own : [...own, ...shared]
@@ -113,9 +118,9 @@ describe('the experiments page', () => {
       const { unmount } = show()
       expect(screen.queryByText(/New experiment in/)).toBeNull()
       expect(screen.queryByPlaceholderText('e.g. Q3 Vision Benchmark')).toBeNull()
-      if (existing.length === 0) expect(await screen.findByText('No experiments yet.')).toBeTruthy()
-      await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
-      await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+      if (existing.length === 0) expect(await screen.findByText('Start your first experiment')).toBeTruthy()
+      await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'Is a cosine schedule better?')
+      await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
       expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' })
       await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-draft'))
       expect(createPlatformExperiment).not.toHaveBeenCalled()
@@ -126,7 +131,7 @@ describe('the experiments page', () => {
   it('plans on Enter as the button does, keeps Shift+Enter for a new line, and plans nothing from an empty box', async () => {
     vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
     show()
-    const goal = screen.getByLabelText('What do you want to find out?')
+    const goal = screen.getByLabelText('Describe the goal of your experiment')
     await userEvent.type(goal, '  {Enter}')
     expect(apiSend).not.toHaveBeenCalled()
     await userEvent.clear(goal)
@@ -138,39 +143,41 @@ describe('the experiments page', () => {
     await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-draft'))
   })
 
-  // Planners proposed on readings of what a win is or what is held equal that the person never
-  // stated, and agents then guessed the rest from the code.
-  it('says, folded until asked for, what a goal should state, and plans the goal as typed', async () => {
-    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
+  it('says beside the box that a goal is needed, keeps the button pressable, and clears the message on typing', async () => {
+    vi.mocked(apiSend).mockReset()
     show()
-    expect(screen.queryByText('What to compare against')).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'What makes a good experiment goal?' }))
-    expect(screen.getByText('What to compare against')).toBeTruthy()
-    expect(screen.getByText('What must stay the same')).toBeTruthy()
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Does Lion beat AdamW? 1% lower val loss over 3 seeds')
-    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Does Lion beat AdamW? 1% lower val loss over 3 seeds' })
+    const plan = screen.getByRole('button', { name: 'Plan experiment' })
+    expect(plan).toHaveProperty('disabled', false)
+    await userEvent.click(plan)
+    const goal = screen.getByLabelText('Describe the goal of your experiment')
+    expect(screen.getByText('Describe what the experiment should achieve.')).toBeTruthy()
+    expect(goal.getAttribute('aria-invalid')).toBe('true')
+    expect(document.activeElement).toBe(goal)
+    expect(apiSend).not.toHaveBeenCalled()
+    await userEvent.type(goal, 'D')
+    expect(screen.queryByText('Describe what the experiment should achieve.')).toBeNull()
+    expect(goal.getAttribute('aria-invalid')).toBeNull()
   })
 
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
     vi.mocked(apiSend).mockRejectedValue(new Error('agentsandbox_not_configured: this deployment has no sandbox provider to run agent sandboxes on'))
     show()
     expect(await screen.findByText(/^No compute is online yet\./)).toBeTruthy()
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
-    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal')
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
     expect(await screen.findByText(/no sandbox provider to run agent sandboxes on/)).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
   })
 
-  it('keeps the full form behind Configure it myself: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
+  it('keeps the full form behind Set up manually: Cancel creates nothing, a refusal stays, a created experiment opens', async () => {
     show()
-    await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Set up manually' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(createPlatformExperiment).not.toHaveBeenCalled()
 
     vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new Error('the org has reached its limit of platform experiments'))
-    await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Set up manually' }))
     const dialog = within(screen.getByRole('dialog'))
     await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
     await userEvent.type(dialog.getByLabelText('Experiment goal'), 'The brief')
@@ -224,24 +231,128 @@ describe('the experiments page', () => {
     vi.mocked(fetchPlatformExperimentsPage).mockRejectedValue(new Error('API unreachable'))
     show()
     expect(await screen.findByText('Could not load the experiments of default: API unreachable')).toBeTruthy()
-    expect(screen.getByLabelText('What do you want to find out?')).toBeTruthy()
+    expect(screen.getByLabelText('Describe the goal of your experiment')).toBeTruthy()
   })
 })
 
-// The page explained GitHub permissions in a paragraph and named no repository to start from.
+// A new person met a repository picker, a branch and a settings link before anything was planned.
 describe('the repository of a planned experiment', () => {
-  const app = { slug: 'hl', client_id: 'c', install_url: 'https://github.test/install', authorize_url: 'https://github.test/authorize', new_repository_url: 'https://github.test/new' }
+  const unconnected = () => vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+  let opened: { location: { href: string }; close: () => void }
+  beforeEach(() => {
+    opened = { location: { href: '' }, close: vi.fn() }
+    vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    vi.mocked(beginGitHubInstall).mockReset().mockResolvedValue({ state: 's-1', install_url: 'https://github.test/install?state=s-1', expires_at: at })
+  })
 
-  it('says in one line who installs the GitHub App while GitHub is not connected, and the button says why it waits', async () => {
-    vi.mocked(fetchGitHubApp).mockResolvedValue(app)
+  it('is a new repository unless the person picks theirs beside Plan, and is no input on a GitHub host', async () => {
+    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
     show()
-    expect(await screen.findByText('An owner of Lab installs the GitHub App to start.')).toBeTruthy()
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'Is a cosine schedule better?')
-    const plan = screen.getByRole('button', { name: 'Plan it' })
-    expect(plan).toHaveProperty('disabled', true)
-    expect(plan.closest('[title]')!.getAttribute('title')).toBe('Install the GitHub App to start')
-    expect(screen.queryByText(/permission|select one only/i)).toBeNull()
-    await userEvent.type(screen.getByLabelText('What do you want to find out?'), '{Enter}')
+    await screen.findByText('Start your first experiment')
+    expect(screen.queryByRole('combobox')).toBeNull()
+    const control = await screen.findByRole('button', { name: 'Repository: acme / new repository' })
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal')
+    await userEvent.click(control)
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Repository' }))
+    await userEvent.click(await screen.findByRole('option', { name: /acme\/widgets/ }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Repository: acme/widgets' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'goal', repository: 'acme/widgets', branch: 'main' })
+  })
+
+  it('has no repository control when GitHub is not connected', async () => {
+    unconnected()
+    show()
+    await waitFor(() => expect(fetchGitHubInstallations).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: /^Repository/ })).toBeNull()
+  })
+
+  it('points the refusal about several accounts at the control', async () => {
+    vi.mocked(apiSend).mockReset().mockRejectedValue(new ApiError(422, 'several', 'repository_account_required'))
+    show()
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal{Enter}')
+    expect(await screen.findByText('Several GitHub accounts are connected. Choose where the repository goes.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Choose' }))
+    expect(await screen.findByRole('dialog', { name: 'Repository' })).toBeTruthy()
+  })
+
+  it('is not an input of the box on a GitHub host', async () => {
+    show()
+    await screen.findByText('Start your first experiment')
+    expect(screen.queryByRole('textbox', { name: 'Repository' })).toBeNull()
+    expect(screen.queryByLabelText('Branch')).toBeNull()
+    expect(screen.queryByRole('link', { name: /settings/i })).toBeNull()
+  })
+
+  it('asks an owner to connect GitHub in a dialog when none is connected, and plans the typed goal once it is', async () => {
+    unconnected()
+    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
+    show(owner)
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'Is a cosine schedule better?')
+    await waitFor(() => expect(fetchGitHubInstallations).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Connect GitHub' }))
+    expect(dialog.getByText('Your experiment gets its own private repository. Connect GitHub so we can create it for you.')).toBeTruthy()
     expect(apiSend).not.toHaveBeenCalled()
+    await userEvent.click(dialog.getByRole('button', { name: 'Connect GitHub' }))
+    expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/')
+    expect(opened.location.href).toBe('https://github.test/install?state=s-1')
+    expect(await dialog.findByText('Finish connecting in the GitHub tab.')).toBeTruthy()
+
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [account], total: 1 })
+    await takeReturn('installation_id=7&setup_action=install&state=s-1', async () => ({ org_id: 'org_a', return_to: '/', installation: account }))
+    await waitFor(() => expect(apiSend).toHaveBeenCalledWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'Is a cosine schedule better?' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-draft'))
+  })
+
+  it('closes the dialog on Cancel and plans nothing', async () => {
+    unconnected()
+    show(owner)
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal')
+    await waitFor(() => expect(fetchGitHubInstallations).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(apiSend).not.toHaveBeenCalledWith('POST', '/platform-experiments/drafts', expect.anything())
+  })
+
+  it('tells a member to ask an owner', async () => {
+    unconnected()
+    show()
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal')
+    await waitFor(() => expect(fetchGitHubInstallations).toHaveBeenCalled())
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Connect GitHub' }))
+    expect(dialog.getByText('Ask an owner of your organization to connect GitHub.')).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Connect GitHub' })).toBeNull()
+    expect(dialog.getByRole('button', { name: 'Close' })).toBeTruthy()
+  })
+
+  it('says GitHub is no longer connected when the platform finds the account gone, with the way to connect it again', async () => {
+    vi.mocked(apiSend).mockReset().mockRejectedValue(new ApiError(422, 'the GitHub App is no longer installed on acme', 'installation_gone'))
+    show(owner)
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal{Enter}')
+    expect(await screen.findByText('GitHub is no longer connected.')).toBeTruthy()
+    expect(screen.queryByText(/no longer installed on acme/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
+  })
+
+  it('is named in the box on a plain git host, which creates none by itself', async () => {
+    vi.mocked(fetchGitHubApp).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
+    vi.mocked(apiSend).mockReset().mockResolvedValue(experiment('pe-draft'))
+    show()
+    await userEvent.type(screen.getByLabelText('Describe the goal of your experiment'), 'goal')
+    const field = await screen.findByRole('textbox', { name: 'Repository' })
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
+    expect(screen.getByText('Name the repository.')).toBeTruthy()
+    expect(document.activeElement).toBe(field)
+    expect(apiSend).not.toHaveBeenCalled()
+    await userEvent.type(field, 'sweep.git{Enter}')
+    expect(screen.queryByText('Name the repository.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan experiment' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/drafts', { project_id: 'prj_1', goal: 'goal', repository: 'sweep.git', branch: 'main' })
   })
 })

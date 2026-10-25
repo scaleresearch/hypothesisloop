@@ -31,7 +31,7 @@ branch: experiment        # the branch agents start from, never under hl/
 name: my-platform-experiment
 description: what this research program investigates
 budget_accelerator_hours: 10
-max_agents: 2             # executors at work at once
+max_agents: 2             # executors at work at once; left out, the executors of agents
 agents:                   # optional: the team the platform starts and keeps at work
   - agent_type: researcher        # takes the coordinator's model unless it or its type names one
     count: 1
@@ -63,8 +63,8 @@ Every agent has one role.
 | Reviewer | Verifies other agents' claims by running their jobs again. Uses an executor's agent types. | yes | no |
 | Executor | Implements experiments, runs their jobs, reports accurately. May propose hypotheses. | yes | yes |
 
-Only executors count against `max_agents`. The platform runs a coordinator for an accepted draft
-and for `coordinator_in_agentsandbox: true`. Otherwise the experiment's creator steers with their
+Only executors count against `max_agents`. The platform runs a coordinator for a draft whose plan
+applied and for `coordinator_in_agentsandbox: true`. Otherwise the experiment's creator steers with their
 own token, as the coordinator [prompt](../controlplane/domain/agenttypes/builtin/coordinator.md)
 describes.
 
@@ -75,7 +75,9 @@ role.
 
 `agents` in the experiment file is the team to keep at work: entries of `{agent_type, model,
 hyperparameters, count}`. The agent type `researcher` makes researchers, any other makes
-executors, at most `max_agents` in all. Where the platform runs the team it fills the place of an
+executors, at most `max_agents` in all. A change of the team (`PATCH` with `agents`) sets
+`max_agents` to its executors, and fewer executors of an entry while it runs cuts the newest of
+them. Where the platform runs the team it fills the place of an
 agent that finished or lost its machine with a new one of the same type, model and
 hyperparameters, a researcher's place like an executor's. It does so while the time and budget
 left hold a trial. A stage cut lowers the counts, so nobody takes a cut executor's place.
@@ -136,26 +138,26 @@ not exist or already holds `DIR`, and never forces. The same request is `POST
 
 **From a sentence.** Type what you want to find out on the Experiments page, or call `POST
 /platform-experiments/drafts {project_id, goal}`. The platform creates a **draft** and runs a
-planner, which proposes an experiment (`hl platform-experiments propose`) within
-`planning.limit_minutes` (30) or declines with a reason (`decline`). The baseline agent's machine
-starts while the proposal waits.
+planner and a baseline agent, whose machines start at once. The planner's first command drafts a
+whole plan from the goal and `hl capacity` (`propose --working`): it is checked as a proposal is,
+shown on the page marked Draft, and the baseline agent starts building the image and the harness
+from it. The planner then proposes (`hl platform-experiments propose`) within
+`planning.limit_minutes` (30) or declines with a reason (`decline`).
 
-A proposal is accepted as it is after `planning.auto_accept_seconds` (30). Before that a person
-can:
+A proposal applies as it is checked: the draft opens with its plan, team and baseline agent in
+the same write, and nobody accepts it. `questions` are decisions the goal left open, each with the
+planner's answer: the run starts on those answers as assumptions, and each question and answer
+joins the description. The planner stays up `planning.planner_kept_minutes` (10) after it answers.
 
-- accept it (`POST /platform-experiments/{id}/accept`),
-- hold it to edit (`POST .../hold`),
-- change the goal (`PATCH /platform-experiments/{id}` with `goal` alone), which plans again,
-- close the draft.
-
-A proposal with `questions` (decisions the goal left open, each with the planner's answer) waits
-for a person, who confirms or changes the answers on accept. Each question and answer joins the
-description. The planner stays up `planning.planner_kept_minutes` (10) after it answers.
-
-A draft's `status_reason` says where it stands (`planning`, `revising`, `accepting`, `proposed`,
-`declined`) and `waits_for` says whose move it is (`owner`, `coordinator`, `platform`). After
-acceptance the owner can still change the description and duration
-(`PATCH /platform-experiments/{id}`).
+While planning, a person can change the goal (`PATCH /platform-experiments/{id}` with `goal`
+alone), which plans again, or close the draft. A draft's `status_reason` says where it stands
+(`planning`, `revising`, `declined`) and `waits_for` says whose move it is (`owner`, `coordinator`,
+`platform`). Once open, the owner changes the plan with `PATCH /platform-experiments/{id}`; the
+experiment page has one Edit for it. While it is open that includes the machine
+(`accelerator_type`, `cpu`, `memory`, `storage`): a change measures the baseline again on the new
+machine in a fresh window, the baseline jobs still on the old machine are cancelled, a baseline job
+on another machine is refused and never declared, and a
+change between an accelerator and CPU cores states the budget again in its new unit.
 
 **Carrying a run on.** A closed experiment of the same project and repository that ran is a prior
 run of the next one, listed as `prior_runs` with its best value on the primary metric. Agents read
@@ -169,8 +171,9 @@ metric and states what the earlier run established and refuted.
 No experiment runs without a declared baseline. The experiment is `open` until then, and only
 baseline jobs run.
 
-1. A baseline agent joins: a draft's proposal adds it, so does `coordinator_in_agentsandbox: true`,
-   or the owner runs `agents add --role baseline`.
+1. A baseline agent joins: a draft has one from its start, `coordinator_in_agentsandbox: true` adds
+   one, or the owner runs `agents add --role baseline`. A draft's baseline agent builds its image
+   and branch while the plan is drafted, and submits once the experiment is open.
 2. It builds the harness the description names, measures the control with a real job and files
    what it measured.
 3. The baseline is declared. With exactly one completed job reporting the ranked metric, the
@@ -183,12 +186,13 @@ results into the description. The job's run time plus a half becomes the default
 later jobs. The budget must cover one such job per executor (`budget_below_baseline`), and what
 the baseline spent comes out of the budget before the executors' shares.
 
-The run starts once the baseline is declared, an executor has joined and `starts_at` (if set) has
+The executors' machines start with the first baseline job, so they are up and have read the code
+when the run starts; no job of theirs is taken before. The run starts once the baseline is declared, an executor has joined and `starts_at` (if set) has
 passed. `ends_at` is `duration_hours` later. While open, `status_reason` names what the start waits
 for (`baseline_required`, `baseline_measuring`, `baseline_undeclared`, `no_executors`,
 `starts_at_ahead`) and the next step. An experiment not running by `baseline_due_at` closes with
-`baseline_limit_reached`. A draft's baseline gets the minutes its planner estimated, at most
-`planning.baseline_limit_minutes` (90).
+`baseline_limit_reached`. A draft's baseline gets the minutes its planner estimated, at least
+`planning.min_baseline_minutes` (15) and at most `planning.baseline_limit_minutes` (60).
 
 Once running, an experiment whose executors have all ended reads `executors_done`. The coordinator
 adds executors while time and budget remain, or writes the summary and closes it. An experiment

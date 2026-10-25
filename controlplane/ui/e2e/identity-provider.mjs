@@ -105,6 +105,8 @@ export function startIdentityProvider({ port, keyPath, ui }) {
       const back = new URL('/settings/repository', ui)
       back.searchParams.set('installation_id', '4242')
       back.searchParams.set('setup_action', 'install')
+      if (url.searchParams.has('state')) back.searchParams.set('state', url.searchParams.get('state'))
+      back.searchParams.set('code', randomUUID())
       return res.writeHead(302, { Location: back.toString() }).end()
     }
     if (route === 'GET /github/authorize') {

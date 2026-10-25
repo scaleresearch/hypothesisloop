@@ -259,8 +259,8 @@ describe('an org\'s GitHub accounts', () => {
   })
 
   it('carry the API\'s reason for a refusal of the install', async () => {
-    fetchMock().mockResolvedValue(answer(422, { reason: 'install_state_invalid', message: 'press Install GitHub App again' }))
-    await expect(finishGitHubInstall('forged', 'c-1', 7)).rejects.toMatchObject({ status: 422, reason: 'install_state_invalid', message: 'press Install GitHub App again' })
+    fetchMock().mockResolvedValue(answer(422, { reason: 'install_state_invalid', message: 'press Connect GitHub again' }))
+    await expect(finishGitHubInstall('forged', 'c-1', 7)).rejects.toMatchObject({ status: 422, reason: 'install_state_invalid', message: 'press Connect GitHub again' })
   })
 
   it('are disconnected by a call that answers with no body', async () => {

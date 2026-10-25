@@ -59,7 +59,7 @@ func TestAProviderTheBinaryWasNotBuiltWithIsRefusedWithTheOnesItHas(t *testing.T
 }
 
 // shippedSections is every section of a provider the shipped example of a settings section holds,
-// by the provider's name, with each placeholder filled in.
+// in any of its entries, by the provider's name, with each placeholder filled in.
 func shippedSections(t *testing.T, path, key string) map[string]yaml.Node {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -71,17 +71,20 @@ func shippedSections(t *testing.T, path, key string) map[string]yaml.Node {
 		t.Fatal(err)
 	}
 	section := document[key]
+	entries := []*yaml.Node{&section}
 	if section.Kind == yaml.SequenceNode {
-		section = *section.Content[0]
-	}
-	var keys map[string]yaml.Node
-	if err := section.Decode(&keys); err != nil {
-		t.Fatal(err)
+		entries = section.Content
 	}
 	sections := map[string]yaml.Node{}
-	for _, name := range Names() {
-		if node, found := keys[name]; found {
-			sections[name] = node
+	for _, entry := range entries {
+		var keys map[string]yaml.Node
+		if err := entry.Decode(&keys); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range Names() {
+			if node, found := keys[name]; found {
+				sections[name] = node
+			}
 		}
 	}
 	return sections

@@ -1,0 +1,71 @@
+# The experiment spec: one platform experiment, keyed like the body of POST /platform-experiments.
+# Fill in each placeholder in capitals. hl repo check counts those left, and the file parses once
+# none is.
+# Each optional key is commented out. Uncomment one to state it, else the platform's default holds.
+# repository_account, continues and starts_at belong to the create request and are refused here.
+#
+# Where the platform created this repository, its baseline agent writes the spec that
+# `hl platform-experiments get` answers into this file. A person runs
+# `hl platform-experiments start DIR`, which checks the file, pushes DIR to the branch when the
+# branch does not exist and creates the experiment.
+
+# Where the experiment is. hl platform-experiments start needs all three. Leave them out where the
+# platform created the repository: it is worked on at its default branch.
+# project_id: ...                       # the project the experiment belongs to
+# repository: owner/name                # created from this template when it does not exist
+# branch: experiment                    # the branch agents start from, never under hl/
+
+name: REPLACE-WITH-A-FEW-WORDS          # one line
+description: |                          # at most 32768 bytes
+  REPLACE-WITH the text every agent works from: the goal, the metric and why it is the goal,
+  what to vary, the gate, how to run a trial, when to stop, and
+  BASELINE
+    config:    the exact configuration
+    trial:     how one trial runs
+  The platform adds the baseline job, its code_ref and its values once the baseline is declared.
+
+metrics:                                # at least one of role ranking
+  - key: REPLACE-WITH-THE-RANKED-METRIC # the name a job reports the value under
+    direction: REPLACE-WITH-MAXIMIZE-OR-MINIMIZE
+    role: ranking                       # the default: counts for stage cuts and standings
+    # target_vs_baseline: 0.5           # the goal, +50% over the baseline (negative to minimize)
+    # deterministic: true               # the same code and data give the same value on any machine
+  # - key: the_gate                     # constraint: a job that breaks the bound or reports no
+  #   direction: minimize               # value ranks nowhere
+  #   role: constraint
+  #   bound: 0
+  # - key: a_fact                       # attribute: reported and shown, never ranked
+  #   direction: maximize
+  #   role: attribute
+  # - key: outside_system               # reference: an outside system the goal compares against,
+  #   direction: maximize               # shown beside the standings, never ranked
+  #   role: reference
+
+budget_accelerator_hours: REPLACE-WITH-HOURS   # the cap on all the run spends, in H100-hours (H100-equivalent accelerator hours), core-hours on CPU
+duration_hours: REPLACE-WITH-HOURS      # from the start of the run, at most 30 days (quota.max_platform_experiment_days)
+
+# The team. An entry of agent_type researcher makes researchers: they own the hypothesis graph and
+# run no job. Any other agent type makes executors, which run the jobs and are ranked: generalist,
+# hyperparameter-search, architecture-search, data-search or one of the org. The executors in all
+# are how many may be at work at once. The baseline agent is not part of the team.
+# A model is <provider>/<model id>, as `hl models` lists it. Left out, it is the agent type's,
+# else, for a researcher, coordinator_model, else the platform's default.
+agents:
+  - agent_type: researcher
+    count: 1
+  - agent_type: generalist
+    # model: anthropic/claude-sonnet-5
+    count: REPLACE-WITH-A-COUNT
+
+# coordinator_in_agentsandbox: true     # the platform runs the coordinator and a baseline agent
+# coordinator_model: anthropic/claude-opus-5-5   # needs coordinator_in_agentsandbox
+# report_interval_seconds: 10           # how often a job reports
+# stages:                               # the elimination ladder. length_pct sums to 100, the
+#   - length_pct: 40                    # last evict_pct is 0, and more than one stage needs
+#     evict_pct: 75                     # at least 5 executors.
+#     max_job_hours: 0.5                # caps a job while the stage runs, 0 for none
+#   - length_pct: 60
+#     evict_pct: 0
+# default_quota_tier: guaranteed        # or burst_only, for signups that state none
+# max_concurrent_accelerators: 4        # accelerators in flight at once
+# agent_image: registry.example.com/team/agent:1   # built FROM the platform's agent image

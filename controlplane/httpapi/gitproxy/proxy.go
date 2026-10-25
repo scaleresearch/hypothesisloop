@@ -148,15 +148,15 @@ func (p *Proxy) authorize(ctx context.Context, pe string, write bool) (*grant, e
 	if principal.Kind != auth.KindAgent {
 		return nil, readOnly("a " + string(principal.Kind) + " reads the repository of its platform experiment")
 	}
-	if draft {
-		return nil, readOnly("platform experiment " + pe + " is a draft")
-	}
 	signup, err := p.store.GetAgentSignup(ctx, pe, principal.AgentID)
 	if err != nil {
 		return nil, err
 	}
 	if signup == nil {
 		return nil, readOnly("agent " + principal.AgentID + " is not signed up to platform experiment " + pe)
+	}
+	if draft && signup.Role != domain.SignupRoleBaseline {
+		return nil, readOnly("platform experiment " + pe + " is a draft, whose baseline agent alone pushes")
 	}
 	if !signup.Role.SubmitsJobs() {
 		return nil, readOnly("a " + string(signup.Role) + " reads the repository and pushes nothing")

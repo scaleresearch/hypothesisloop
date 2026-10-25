@@ -210,8 +210,7 @@ type LauncherAgent struct {
 
 // launcherAgentsFrom selects the sandboxed agents the launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
-// baseline of an open one, since no machine of the team is rented before there is a baseline to
-// start from, and those
+// baseline of an open one, its executors once a baseline job is submitted, and those
 // whose experiment closed, who were cut or who finished less than $1 seconds ago. A stopped agent is among them: it is asked for again
 // once what it is started with changes. Both moments and the comparison are on the database's
 // clock.
@@ -219,14 +218,12 @@ type LauncherAgent struct {
 // None of them has anything to do while the platform still creates the repository they clone
 // (awaitsRepository).
 //
-// A draft's baseline agent, which its planner's proposal signed up, has something to do while the
-// platform is to accept that proposal by itself (accepts_at): its machine starts then, so that it
-// is up once the draft is accepted. A draft that waits for a person keeps no machine of it.
-//
-// A draft's planner is the other way round. It has something to do while the draft is a draft
-// and nothing is proposed, which a change of the goal makes true again. After its answer it is
+// An open one's executors start once its first baseline job is submitted, so their machines are up
+// and they have read the code by the time the run starts. A draft's baseline agent starts with its planner, on the planner's working plan, and has
+// nothing to do once the planner declined. A draft's planner has something to do while the draft
+// is a draft and nothing is proposed, which a change of the goal makes true again. After its answer it is
 // kept until the draft's planner_ends_at, for a goal changed soon, and then let wind down for $1
-// seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
+// seconds, as it is after the draft closed. Once the draft opened it has nothing left to
 // do, in an experiment that is then open or running.
 //
 // An agent the platform replaced has nothing left to do either: one whose machine stopped
@@ -239,7 +236,8 @@ LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_ex
 WHERE s.in_agentsandbox AND NOT (` + awaitsRepository + `)
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $1)
        OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
-       OR s.role = '` + string(domain.SignupRoleBaseline) + `' AND pe.status = 'draft' AND pe.accepts_at IS NOT NULL
+       OR s.role = '` + string(domain.SignupRoleBaseline) + `' AND pe.status = 'draft' AND pe.proposed_at IS NULL
+       OR s.role = '` + string(domain.SignupRoleExecutor) + `' AND pe.status = 'open' AND EXISTS (SELECT 1 FROM experiments j WHERE j.platform_experiment_id = pe.id)
        OR s.role = '` + string(domain.SignupRolePlanner) + `' AND pe.status = 'draft' AND (pe.planner_ends_at IS NULL OR pe.planner_ends_at > now() - make_interval(secs => $1)))
   AND (c.agent_id IS NULL OR c.cut_at > now() - make_interval(secs => $1))
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $1))

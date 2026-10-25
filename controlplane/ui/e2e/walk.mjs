@@ -104,10 +104,10 @@ async function main() {
     await page.goto(`${UI}/orgs/${org.id}/clusters`)
     await page.waitForLoadState('networkidle')
     for (const cluster of off) {
-      const use = page.getByRole('switch', { name: `Use ${cluster} for the jobs of ${org.name}` })
-      if (await use.count() === 0) { note(`Compute Resources lists no switch for ${cluster}`); continue }
+      const use = page.getByRole('switch', { name: `Use ${cluster} for jobs` })
+      if (await use.count() === 0) { note(`Compute lists no switch for ${cluster}`); continue }
       if (await use.isChecked()) await use.click()
-      await page.waitForFunction(label => document.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-checked') === 'false', `Use ${cluster} for the jobs of ${org.name}`)
+      await page.waitForFunction(label => document.querySelector(`[aria-label="${label}"]`)?.getAttribute('aria-checked') === 'false', `Use ${cluster} for jobs`)
     }
     passed('compute-resources')
     await page.goto(`${UI}/projects/${project.id}/experiments`)

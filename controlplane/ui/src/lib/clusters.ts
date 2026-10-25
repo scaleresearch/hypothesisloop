@@ -16,3 +16,13 @@ export function clustersInUse(clusters: ListedCluster[]) {
     whose: parts.join(', '),
   }
 }
+
+const providerNames: Record<string, string> = { vast: 'Vast.ai', runpod: 'RunPod' }
+
+/**
+ * The name a person reads a cluster by: the vendor's of a cluster the platform rents machines on,
+ * or its own name.
+ */
+export function clusterLabel(cluster: Pick<ListedCluster, 'name' | 'provider'>): string {
+  return (cluster.provider && providerNames[cluster.provider]) || cluster.name
+}

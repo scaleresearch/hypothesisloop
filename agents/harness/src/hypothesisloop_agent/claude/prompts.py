@@ -107,7 +107,7 @@ async def told(setup: core.RunSetup, store: Store, running: Running, events: lis
 async def opening(setup: core.RunSetup, store: Store, resume_id: str | None, initial_prompt: str | None) -> str:
     """What opens a connection: for a resumed session the changed goal that brought a planner back,
     else a handoff, that it goes on, or for a session that starts fresh what its role reads first:
-    a planner's opening reads, a baseline agent's goal with the planner's map of the repository.
+    a planner's opening reads, a baseline agent's goal.
     A wait for the model provider's limit and a new machine are said before it."""
     if resume_id and not initial_prompt and (draft := await core.revising(setup)):
         return _goal_prompt(setup, store, draft)
@@ -116,7 +116,7 @@ async def opening(setup: core.RunSetup, store: Store, resume_id: str | None, ini
     elif resume_id:
         body = "Continue where you left off."
     elif config.measures_baseline(setup.cfg):
-        body = seed.baseline(await core.repo_map(setup))
+        body = seed.BASELINE_OPENING
     elif config.plans(setup.cfg):
         body = "\n\n".join(part for part in ("Begin.", await asyncio.to_thread(seed.planner, setup.workdir)) if part)
     else:

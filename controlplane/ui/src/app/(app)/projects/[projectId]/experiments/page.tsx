@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { clustersInUse } from '@/lib/clusters'
@@ -8,7 +8,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useQueryParam } from '@/lib/query-state'
 import { experimentPath, orgPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
-import { fetchAgentsPage } from '@/lib/api/agents'
 import { fetchOrgClusters } from '@/lib/api/clusters'
 import { fetchExperimentDraft } from '@/lib/api/drafts'
 import { fetchExperimentStats } from '@/lib/api/jobs'
@@ -21,7 +20,8 @@ import { PlatformExperimentCard } from '@/components/platform-experiment-card'
 import { Dot } from '@/components/ui/dot'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
-import { Text } from '@/components/ui/text'
+import { Heading, Text } from '@/components/ui/text'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { TextLink } from '@/components/ui/link'
@@ -43,24 +43,16 @@ const SORT_OPTIONS = [
   { value: '-name', label: 'Name (Z–A)' },
 ]
 
-const PLAN = 'Plan it for me'
-const CONFIGURE = 'Configure it myself'
-
-/** The project's running jobs and the agents that ran in it, each only while there are some, as the subtitle of the page. */
+/** The project's running jobs, only while there are some, as the subtitle of the page. */
 function useLiveCounts(): ReactNode {
   const { project } = useTenant()
-  // Both counts are server-side totals, not the length of a fetched page: see
-  // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
   const { data: stats, error: statsError } = useSWR(keys.projectJobStats(project.id), () => fetchExperimentStats({ project_id: project.id }))
-  const { data: agents, error: agentsError } = useSWR(keys.agentCount(project.id), () => fetchAgentsPage({ project_id: project.id, limit: 1 }))
 
   // A status no job holds is absent from the answer.
   const running = stats?.by_status?.RUNNING ?? 0
   const items = [
     statsError ? { key: 'jobs', text: 'Jobs running unknown', tone: 'danger' as const, title: statsError.message }
       : running > 0 && { key: 'jobs', text: `${running} ${running === 1 ? 'job' : 'jobs'} running`, tone: 'success' as const, title: undefined },
-    agentsError ? { key: 'agents', text: 'Agents unknown', tone: 'danger' as const, title: agentsError.message }
-      : (agents?.total ?? 0) > 0 && { key: 'agents', text: `${agents!.total} ${agents!.total === 1 ? 'agent' : 'agents'} ran`, tone: 'neutral' as const, title: 'Every agent that signed up to an experiment of this project, running or ended' },
   ].filter(item => !!item)
   if (items.length === 0) return null
 
@@ -100,8 +92,6 @@ function PlatformExperimentsPageContent() {
   const [sort, setSort] = useQueryParam('sort', '-starts_at')
   const [page, setPage] = useState(0)
   const [dialog, setDialog] = useState<{ editing: PlatformExperiment | null; draft?: ExperimentDraft } | null>(null)
-  const configuring = dialog !== null && dialog.editing === null
-  const planning = useRef<HTMLDivElement>(null)
 
   // ?draft opens that draft once and leaves the address.
   const pathname = usePathname()
@@ -143,19 +133,14 @@ function PlatformExperimentsPageContent() {
   const total = data?.total ?? 0
   const statuses = ['', 'open', 'running', 'draft', 'closed']
   const live = useLiveCounts()
+  // A project with no experiment yet has nothing to filter, so the page is the goal box.
+  const first = !!data && total === 0 && !statusFilter && !search
 
   return (
     <Page
       title="Experiments"
       description={live}
-      actions={(
-        <Segmented
-          label="How to start"
-          options={[{ value: 'plan', label: PLAN }, { value: 'configure', label: CONFIGURE }]}
-          value={configuring ? 'configure' : 'plan'}
-          onChange={way => way === 'configure' ? setDialog({ editing: null }) : planning.current?.querySelector('textarea')?.focus()}
-        />
-      )}
+      actions={<Button onClick={() => setDialog({ editing: null })}>Set up manually</Button>}
     >
       {draftError && <ErrorMessage>Could not open the draft: {draftError}</ErrorMessage>}
       {dialog && (
@@ -168,19 +153,20 @@ function PlatformExperimentsPageContent() {
         />
       )}
 
+      {first && (
+        <Heading level={2}>Start your first experiment</Heading>
+      )}
       {/* The box draws no edge of its own; the card is its edge, and darkens while the box has focus. */}
       <Card className="mb-7 transition-colors focus-within:border-border-control">
-        <div ref={planning}>
-          <GoalInput projectID={project.id} onCreated={open} onConfigure={draft => setDialog({ editing: null, draft })} />
-        </div>
+        <GoalInput large={first} projectID={project.id} onCreated={open} onConfigure={draft => setDialog({ editing: null, draft })} />
         {clusters && clustersInUse(clusters).online === 0 && (
           <Text variant="note" className="border-t px-6 py-3">
-            No compute is online yet. <TextLink inline href={orgPath(org.id, 'clusters')}>Compute resources</TextLink>
+            No compute is online yet. <TextLink inline href={orgPath(org.id, 'clusters')}>Go to Compute</TextLink>
           </Text>
         )}
       </Card>
 
-      <Inline gap="md">
+      {!first && <Inline gap="md">
         <Segmented
           label="Status"
           size="sm"
@@ -197,14 +183,14 @@ function PlatformExperimentsPageContent() {
           placeholder="Search"
         />
         <Select fieldSize="sm" aria-label="Sort" value={sort} onChange={v => { setSort(v); setPage(0) }} options={SORT_OPTIONS} />
-      </Inline>
+      </Inline>}
 
       {(statusFilter === '' || statusFilter === 'draft') && !search && <ExperimentDrafts onOpen={draft => setDialog({ editing: null, draft })} />}
 
       {error && <ErrorMessage>Could not load the experiments of {project.name}: {error.message}</ErrorMessage>}
       {!data && !error && <Loading />}
 
-      {data && experiments.length === 0 && (
+      {data && experiments.length === 0 && !first && (
         <EmptyState framed>
           {statusFilter || search
             ? `No experiments match${search ? ` "${search}"` : ' this filter'}.`

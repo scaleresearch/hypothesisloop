@@ -23,6 +23,9 @@ export function fetchPlatformExperimentTimeseries(
 /** The reason the API gives for a repository that brings no experiment file. */
 export const NO_EXPERIMENT_FILE = 'no_experiment_file'
 
+/** The reason the API gives for an experiment file left as the experiment template holds it, its placeholders not yet filled in. */
+export const EXPERIMENT_FILE_UNFILLED = 'experiment_file_unfilled'
+
 /** The reason the API gives for an experiment file that places the experiment in another project, repository or branch. */
 export const EXPERIMENT_FILE_ELSEWHERE = 'experiment_file_elsewhere'
 

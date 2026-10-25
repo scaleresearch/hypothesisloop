@@ -7,7 +7,7 @@ import "testing"
 // already waiting for them. Each reason names one actor.
 func TestEveryStatusReasonNamesWhoActs(t *testing.T) {
 	for reason, want := range map[string]Waiter{
-		"proposed": WaitsForOwner, "declined": WaitsForOwner, "planning": WaitsForPlatform,
+		"declined": WaitsForOwner, "planning": WaitsForPlatform,
 		"budget_below_baseline": WaitsForOwner, "baseline_breaks_constraint": WaitsForOwner, "no_executors": WaitsForOwner, "budget_spent": WaitsForOwner,
 		"baseline_required": WaitsForCoordinator, "baseline_undeclared": WaitsForCoordinator, "baseline_missing_metric": WaitsForCoordinator, "executors_done": WaitsForCoordinator,
 		"baseline_measuring": WaitsForPlatform, "starts_at_ahead": WaitsForPlatform, "starting": WaitsForPlatform, "agents_starting": WaitsForPlatform,

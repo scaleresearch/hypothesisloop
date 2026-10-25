@@ -37,19 +37,22 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 	}, a.app)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-github-install-state", Method: "POST", Path: "/orgs/{id}/github-install-states", DefaultStatus: http.StatusCreated,
-		Summary: "Start installing the platform's GitHub App for an org", Tags: []string{"github"},
-		Description: "For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. " +
-			"The person installs the App there on their own GitHub account or an organisation, or changes the repositories of an installation they made before. " +
-			"GitHub has them authorize the App and sends them to the App's callback URL with state, code, installation_id and setup_action, and POST /github/installations connects the installation. " +
+		Summary: "Start connecting the platform's GitHub App to an org", Tags: []string{"github"},
+		Description: "For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's authorization page of the App carrying it. " +
+			"The person authorizes the App there and GitHub sends them to the App's callback URL with state and code, which POST /github/installations takes without installation_id: " +
+			"it connects the installations of the App the person may reach on GitHub, or, with none, answers GitHub's install page with a new state. " +
+			"There the person installs the App on their own GitHub account or an organisation; GitHub has them authorize it and returns to the callback URL with state, code, installation_id and setup_action, which POST /github/installations connects. " +
 			"return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.",
 	}, a.beginInstall)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-github-installation", Method: "POST", Path: "/github/installations", DefaultStatus: http.StatusCreated,
-		Summary: "Connect the GitHub App installation an install made or changed", Tags: []string{"github"},
-		Description: "For the user or API key that started the install, while still an owner of its org. state, code and installation_id are what GitHub handed back to the callback URL. " +
-			"The state is taken once whatever the outcome. code is exchanged with GitHub for the token of the GitHub user who finished the install, and the installation must be one GitHub lists for that user; " +
+		Summary: "Connect the GitHub App installations a person authorized or installed", Tags: []string{"github"},
+		Description: "For the user or API key that started the connect, while still an owner of its org. state, code and installation_id are what GitHub handed back to the callback URL. " +
+			"The state is taken once whatever the outcome. code is exchanged with GitHub for the token of the GitHub user who returned, and the installation must be one GitHub lists for that user; " +
 			"the token is used for nothing else and kept nowhere. The installation is then asked of GitHub as the App: it must exist, not be suspended and have granted every permission the App asks for. " +
 			"An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. " +
+			"Without installation_id, as GitHub returns from its authorization page, every installation GitHub lists for that user that the org has not connected is connected, and installation is the first; " +
+			"one GitHub refuses is left out, and is the refusal when every one is. With none to connect, nothing is and install holds GitHub's install page of the App with a new state, for the person to install it there. " +
 			"account_type says whether the account is a person's own (User) or an organisation. " +
 			"422 install_state_invalid (made up, used, expired or another person's), github_authorization_invalid (code used or expired), installation_not_authorized (not one the GitHub user may reach), " +
 			"installation_gone, installation_suspended, git_host_permission_missing naming each permission missing as name:level. 502 git_host_failed, 503 github_not_configured.",
@@ -67,15 +70,16 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 		Summary: "Disconnect a GitHub App installation from an org", Tags: []string{"github"},
 		Description: "For an owner of the org. No git credential is minted through it from then on: a platform experiment that names a repository of " +
 			"it keeps running, its agents and jobs can no longer clone, fetch or push once the credential they hold runs out, within the hour, and " +
-			"their next credential call answers 409 installation_not_connected. The App stays installed on GitHub: removing it there is the account " +
-			"owner's own step. 404 not_found when the org had not connected it.",
+			"their next credential call answers 409 installation_not_connected. When no other org connected it, the App is first removed from the GitHub account, " +
+			"so it no longer reaches the account's repositories; one GitHub had removed already counts as removed. Should GitHub fail that, nothing changes and the answer is 502 github_uninstall_failed. " +
+			"When it was the org's default, the oldest remaining installation becomes the default. 404 not_found when the org had not connected it.",
 	}, a.disconnect)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "make-github-installation-default", Method: "PUT", Path: "/orgs/{id}/github-installations/{installation_id}/default", DefaultStatus: http.StatusNoContent,
 		Summary: "Make a GitHub installation where an org's new repositories are created", Tags: []string{"github"},
 		Description: "For an owner of the org. A platform experiment or draft that names neither repository nor repository_account has its repository created on this installation's account, " +
-			"in place of the default before. With one installation connected that one is used whether or not it is the default; with several and none the default, " +
-			"such a create is refused 422 repository_account_required. Disconnecting the default leaves none. 404 not_found when the org has not connected it.",
+			"in place of the default before. The org's first installation is its default, and disconnecting the default makes the oldest remaining one the default. " +
+			"Such a create is refused 422 repository_account_required only when the default is removed or lacks a permission and several others work. 404 not_found when the org has not connected it.",
 	}, a.makeDefault)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check",

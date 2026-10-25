@@ -13,24 +13,24 @@ import { AgentSandboxNotice } from '@/components/agentsandbox-notice'
 import { Button } from '@/components/ui/button'
 import { Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
-import { Steps } from '@/components/ui/steps'
 import { Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
 import type { JoinedAgent, PlatformExperiment } from '@/types/api'
 
 
-const STEPS = [
-  { key: 'starting', label: 'Starting the planner' },
-  { key: 'planning', label: 'Planning' },
-  { key: 'proposal', label: 'Plan ready for you' },
-]
+/** How many times the platform restarts a planner that dies (domain.MaxAgentInstanceRestarts). */
+const MAX_RESTARTS = 3
 
 /** What is happening right now, in a few words, from the draft's reason, its planner's machine and what the planner last said. */
-function nowDoing(pe: PlatformExperiment, planner: JoinedAgent | undefined): { step: 'starting' | 'planning'; text: string } {
-  if (reasonOf(pe).reason === 'repository_creating') return { step: 'starting', text: 'Creating your repository…' }
+function nowDoing(pe: PlatformExperiment, planner: JoinedAgent | undefined): string {
+  if (reasonOf(pe).reason === 'repository_creating') return 'Creating your repository…'
   const instance = planner?.instance
-  if (instance?.state !== 'running') return { step: 'starting', text: instance && instance.restarts > 0 ? 'Restarting the planner…' : 'Starting the planner…' }
-  return { step: 'planning', text: pe.activity?.text ?? 'The planner is reading your repository…' }
+  if (instance?.state !== 'running') {
+    if (!instance || instance.restarts === 0) return 'Starting the planner…'
+    const attempt = `Trying again (${Math.min(instance.restarts, MAX_RESTARTS)} of ${MAX_RESTARTS}).`
+    return instance.exit_reason ? `The planner stopped at start: ${instance.exit_reason}. ${attempt}` : `Restarting the planner. ${attempt}`
+  }
+  return pe.activity?.text ?? 'The planner is reading your repository…'
 }
 
 /** Keeps the draft's goal as a draft of the full form and opens it there. */
@@ -52,7 +52,7 @@ function SetUpMyself({ pe }: { pe: PlatformExperiment }) {
   }
   return (
     <>
-      <Button size="sm" loading={moving} onClick={() => void go()}>Set it up myself</Button>
+      <Button size="sm" loading={moving} onClick={() => void go()}>Set up manually</Button>
       {error && <InlineError>{error}</InlineError>}
     </>
   )
@@ -85,16 +85,14 @@ export function PlanningProgress({ pe, planner }: { pe: PlatformExperiment; plan
     )
   }
 
-  const now = nowDoing(pe, planner)
   return (
     <Stack gap="sm">
-      <Steps label="Planning" steps={STEPS} current={now.step} live />
       <Text className="text-base font-medium" role="status" aria-live="polite">
-        {revising ? 'Updating the plan with your change. ' : ''}{now.text}
+        {revising ? 'Updating the plan with your change. ' : ''}{nowDoing(pe, planner)}
       </Text>
       {!revising && (
         <Text variant="note">
-          <span className="tabular-nums">{elapsed}</span> so far.
+          <span className="tabular-nums">{elapsed}</span> so far. You can leave this page.
         </Text>
       )}
     </Stack>

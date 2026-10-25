@@ -37,11 +37,12 @@ interface ModelPickerProps {
   coordinator?: boolean
   fieldSize?: FieldSize
   className?: string
+  disabled?: boolean
   'aria-label'?: string
 }
 
 /** Picks the model an agent or coordinator runs on, of those the platform serves, searched by reference and name. */
-export function ModelPicker({ value, onChange, inherited, inheritedFrom = "Type's model", coordinator, fieldSize = 'default', className, 'aria-label': ariaLabel }: ModelPickerProps) {
+export function ModelPicker({ value, onChange, inherited, inheritedFrom = "Type's model", coordinator, fieldSize = 'default', className, disabled, 'aria-label': ariaLabel }: ModelPickerProps) {
   const { data, error } = useModels()
   const platformDefault = coordinator ? data?.coordinator_model : data?.default_model
   const empty = inherited
@@ -56,6 +57,7 @@ export function ModelPicker({ value, onChange, inherited, inheritedFrom = "Type'
         className={className ?? 'w-full min-w-0'}
         value={value}
         onChange={onChange}
+        disabled={disabled}
         allLabel={empty}
         limit={SHOWN}
         options={byProvider(data?.models ?? []).map(m => ({

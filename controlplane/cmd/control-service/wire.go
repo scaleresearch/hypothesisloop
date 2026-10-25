@@ -72,13 +72,13 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
 		PlannerKept: time.Duration(pcfg.Planning.PlannerKeptMinutes) * time.Minute,
-		AutoAccept:  time.Duration(pcfg.Planning.AutoAcceptSeconds) * time.Second,
 	}).
 		WithGitProxy(pcfg.GitProxyURL()).
 		WithLiveCapacity(connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(launch)
 
 	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, imageRegistry, pool, store, graph, peSvc, quotaCfg, pcfg, metrics, dataStore, logger)
+	peSvc.WithJobCancel(jobs)
 	registrySvc := registry.New(store, graph, store, logger, metrics, dataStore)
 	// The change stream: one LISTEN for this process wakes whatever /watch streams are open, and
 	// each reads the changes table from its own cursor.
@@ -155,12 +155,12 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 	return graph, nil
 }
 
-func platformClusters(pcfg *hypothesisloopcfg.ControlService) []string {
-	names := make([]string, 0, len(pcfg.CloudCompute))
+func platformClusters(pcfg *hypothesisloopcfg.ControlService) map[string]string {
+	providers := make(map[string]string, len(pcfg.CloudCompute))
 	for _, cc := range pcfg.CloudCompute {
-		names = append(names, cc.ClusterName)
+		providers[cc.ClusterName] = cc.Provider
 	}
-	return names
+	return providers
 }
 
 // modelProviders is the model providers the platform serves, those whose credential is set, as the

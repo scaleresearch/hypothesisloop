@@ -139,6 +139,8 @@ type GitHubAddresses struct {
 	InstallURL string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. Connecting goes through POST /orgs/{id}/github-install-states, whose install_url carries the state GitHub hands back."`
 	// NewRepositoryURL is GitHub's own form for a new repository.
 	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
+	// AuthorizeURL is where a person authorizes the App; connecting starts there.
+	AuthorizeURL string `json:"-"`
 }
 
 // GitHubInstallation is one installation of the App, on the GitHub account AccountLogin.

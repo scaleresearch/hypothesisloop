@@ -63,7 +63,7 @@ describe('the setup URL GitHub returns the install tab to', () => {
 
   it('stays open on a plain visit', async () => {
     arrive('', { view: 'nothing' })
-    expect(await screen.findByText('This page finishes an install of the GitHub App. Nothing was connected.')).toBeTruthy()
+    expect(await screen.findByText('This page finishes connecting GitHub. Nothing was connected.')).toBeTruthy()
     expect(close).not.toHaveBeenCalled()
   })
 })

@@ -135,17 +135,39 @@ ORDER BY connected_at DESC LIMIT 1`, orgID, accountLogin), in)
 	return in, nil
 }
 
-// DisconnectGitHubInstallation takes an installation away from an org.
+// GitHubInstallationConnectedElsewhere says whether an org other than orgID connected the installation.
+func (s *Store) GitHubInstallationConnectedElsewhere(ctx context.Context, orgID string, installationID int64) (bool, error) {
+	var elsewhere bool
+	err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM org_github_installations WHERE installation_id = $2 AND org_id <> $1)`, orgID, installationID).Scan(&elsewhere)
+	if err != nil {
+		return false, fmt.Errorf("accounts_store.GitHubInstallationConnectedElsewhere: %w", err)
+	}
+	return elsewhere, nil
+}
+
+// DisconnectGitHubInstallation takes an installation away from an org. When it was the default the
+// org's oldest remaining installation becomes the default, so an org has one while it has any.
 // ErrGitHubInstallationNotFound when the org had not connected it.
 func (s *Store) DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error {
-	tag, err := s.pool.pool.Exec(ctx, `DELETE FROM org_github_installations WHERE org_id = $1 AND installation_id = $2`, orgID, installationID)
-	if err != nil {
-		return fmt.Errorf("accounts_store.DisconnectGitHubInstallation: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrGitHubInstallationNotFound
-	}
-	return nil
+	return s.write(ctx, func(tx *Write) error {
+		var wasDefault bool
+		err := tx.QueryRow(ctx, `DELETE FROM org_github_installations WHERE org_id = $1 AND installation_id = $2 RETURNING is_default`, orgID, installationID).Scan(&wasDefault)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGitHubInstallationNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("accounts_store.DisconnectGitHubInstallation: %w", err)
+		}
+		if !wasDefault {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `
+UPDATE org_github_installations SET is_default = true
+WHERE org_id = $1 AND installation_id = (SELECT installation_id FROM org_github_installations WHERE org_id = $1 ORDER BY connected_at, installation_id LIMIT 1)`, orgID); err != nil {
+			return fmt.Errorf("accounts_store.DisconnectGitHubInstallation: promote the oldest: %w", err)
+		}
+		return nil
+	})
 }
 
 // ErrGitHubInstallStateInvalid reports an install state that is not one this store issued to the

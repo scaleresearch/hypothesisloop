@@ -134,7 +134,7 @@ function unshare(platformExperimentID) {
 
 // A project's list of platform experiments with none of the project's own in it: the empty
 // state, or on a stack whose owner shares some, those and nothing else.
-function noneOfItsOwn(page, emptyState = 'No experiments yet.') {
+function noneOfItsOwn(page, emptyState = 'Start your first experiment') {
   return page.getByText(emptyState).or(page.getByText('Shared · read only').first()).first()
 }
 
@@ -257,6 +257,8 @@ async function choose(page, field, option) {
 // Walks a new experiment's form from What to its last step, Budget and rules: the name and the
 // experiment goal, then on Measure one metric from Add a metric. `form` is where the form is shown.
 async function fillNewExperiment(page, form, name) {
+  // A plain git host creates no repository unnamed: the form asks for one.
+  if (!sandbox.installation) await form.getByRole('textbox', { name: 'Repository' }).fill(sandbox.repository)
   await form.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
   await form.getByLabel('Experiment goal', { exact: true }).fill(`The goal of ${name}.`)
   await form.getByRole('button', { name: 'Next', exact: true }).click()
@@ -464,9 +466,10 @@ async function scenarios(browser) {
   await findSandbox(await tokenOf(ada))
   if (sandbox.installation) hlAdmin('github', 'connect', adaHome.orgs[0].id, sandbox.installation)
   await page.goto(`${UI}/projects/${adaHome.projects[0].id}/experiments`)
-  await page.getByLabel('What do you want to find out?').waitFor()
-  await page.getByText('No experiments yet.').waitFor()
-  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the full form is behind Configure it myself')
+  await page.getByLabel('Describe the goal of your experiment').waitFor()
+  await page.getByText('Start your first experiment').waitFor()
+  await page.getByRole('list', { name: 'Getting started' }).waitFor()
+  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the full form is behind Set up manually')
   await page.locator('.wa-nav-tenant').getByRole('combobox').first().waitFor()
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').first().inputValue(), 'Default org')
   assert.equal(await page.locator('.wa-nav-tenant').getByRole('combobox').nth(1).inputValue(), 'Default project')
@@ -474,7 +477,7 @@ async function scenarios(browser) {
   await noneOfItsOwn(page).waitFor()
 
   section('creating a platform experiment in the selected project')
-  await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
+  await page.getByRole('button', { name: 'Set up manually', exact: true }).click()
   const experimentName = `ui-e2e-${run}`
   await fillNewExperiment(page, page.getByRole('dialog'), experimentName)
   const created = page.waitForRequest(r => r.url() === `${API}/platform-experiments` && r.method() === 'POST')
@@ -584,12 +587,12 @@ async function scenarios(browser) {
   await agentRows.filter({ hasText: 'ag-sandboxed-new' }).getByText('not reported yet').waitFor()
   await page.unroute(agentsAPI)
 
-  section('home: Configure it myself opens the full form in a dialog, the new experiment is created there, and nothing starts it before its baseline')
+  section('home: Set up manually opens the full form in a dialog, the new experiment is created there, and nothing starts it before its baseline')
   await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
   await page.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
   await page.getByText(experimentName).first().waitFor()
-  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Configure it myself')
-  await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
+  assert.equal(await page.getByPlaceholder('e.g. Q3 Vision Benchmark').count(), 0, 'the form is behind Set up manually')
+  await page.getByRole('button', { name: 'Set up manually', exact: true }).click()
   const homeDialog = page.getByRole('dialog')
   const homeExperimentName = `ui-e2e-home-${run}`
   await fillNewExperiment(page, homeDialog, homeExperimentName)
@@ -648,7 +651,7 @@ async function scenarios(browser) {
   // Fills the form in the home dialog with a repository and the max executors, and creates it.
   async function createAndRunFromHome(name, executors) {
     await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
-    await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
+    await page.getByRole('button', { name: 'Set up manually', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Repository').click()
     await page.getByRole('option', { name: 'acme/widgets' }).click()
@@ -719,12 +722,15 @@ async function scenarios(browser) {
     return json([])
   })
   await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
-  await page.getByLabel('What do you want to find out?').fill(draftGoal)
-  await page.getByRole('button', { name: 'Plan it', exact: true }).click()
+  await page.getByLabel('Describe the goal of your experiment').fill(draftGoal)
+  // A plain git host creates no repository unnamed: the box asks for one there.
+  const draftRepository = sandbox.installation ? {} : { repository: sandbox.repository, branch: 'main' }
+  if (!sandbox.installation) await page.getByRole('textbox', { name: 'Repository' }).fill(sandbox.repository)
+  await page.getByRole('button', { name: 'Plan experiment', exact: true }).click()
   await page.waitForURL(u => u.pathname === `/experiments/${draftID}`)
-  assert.deepEqual(draftWrites, [{ path: '/platform-experiments/drafts', body: { project_id: adaMe.projects[0].id, goal: draftGoal } }], 'the sentence and the project, and nothing else')
+  assert.deepEqual(draftWrites, [{ path: '/platform-experiments/drafts', body: { project_id: adaMe.projects[0].id, goal: draftGoal, ...draftRepository } }], 'the sentence and the project, and on a plain git host the repository')
   await page.getByRole('status').filter({ hasText: 'Planning your experiment.' }).waitFor()
-  assert.equal(await page.getByRole('button', { name: 'Accept and run' }).count(), 0, 'nothing to accept while it is planned')
+  assert.equal(await page.getByRole('button', { name: 'Start experiment' }).count(), 0, 'nothing to accept while it is planned')
 
   // A proposal that arrives on a page that watched it being planned is accepted by itself after
   // a countdown. Here each proposal is stored while no page is open and met by a page loaded
@@ -734,7 +740,7 @@ async function scenarios(browser) {
     await page.goto('about:blank')
     draftNow = { ...draftNow, ...more, proposed_at: new Date().toISOString(), status_reason: { reason: 'proposed', message: '', waits_for: 'owner' } }
     await page.goto(draftURL)
-    await page.getByRole('heading', { name: 'Proposed experiment' }).waitFor()
+    await page.getByRole('heading', { name: 'Review the plan' }).waitFor()
     assert.equal(await page.getByRole('timer').count(), 0, 'a proposal already there on load does not count down')
   }
 
@@ -756,7 +762,7 @@ async function scenarios(browser) {
   draftWrites.length = 0
   await page.getByLabel('Budget (accelerator-hours)').fill('3')
   const draftAccepted = page.waitForResponse(response => response.url().endsWith(`/platform-experiments/${draftID}/accept`) && response.request().method() === 'POST')
-  await page.getByRole('button', { name: 'Accept and run' }).click()
+  await page.getByRole('button', { name: 'Start experiment' }).click()
   await draftAccepted
   assert.deepEqual(draftWrites, [
     { path: `/platform-experiments/${draftID}/accept`, body: { name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [{ agent_type: 'hyperparameter-search' }, {}] } },
@@ -857,8 +863,8 @@ async function scenarios(browser) {
 
   section('compute: adding a cluster shows its start command, which can be shown again')
   const clusterName = `ui-e2e-${run}`
-  await page.getByRole('link', { name: 'Compute Resources' }).first().click()
-  await page.getByRole('heading', { name: 'Compute Resources' }).waitFor()
+  await page.getByRole('link', { name: 'Compute', exact: true }).first().click()
+  await page.getByRole('heading', { name: 'Compute', exact: true }).waitFor()
   await page.getByLabel('Cluster name').fill(clusterName)
   await page.getByRole('button', { name: 'Add cluster' }).click()
   const command = await page.getByTestId('secret').innerText()
@@ -928,7 +934,7 @@ async function scenarios(browser) {
   assert.equal((await api(await tokenOf(ada), `/clusters/${clusterID}/settings`)).status, 404, 'no settings are served under the id a runtime reports')
   const capacityRead = page.waitForRequest(r => r.url().startsWith(`${API}/resource-catalog/capacity`))
   await page.reload()
-  await page.getByRole('heading', { name: 'Compute Resources' }).waitFor()
+  await page.getByRole('heading', { name: 'Compute', exact: true }).waitFor()
   assert.equal(new URL((await capacityRead).url()).searchParams.get('org_id'), adaMe.orgs[0].id, 'capacity is read for the selected org')
   await page.getByRole('cell', { name: new RegExp(clusterName) }).first().waitFor()
   assert.equal(await page.getByText('staff only').count(), 0, 'no staff view for a customer')
@@ -949,80 +955,46 @@ async function scenarios(browser) {
   const githubCard = page.locator('#github')
   assert.equal((await installationsRead).status(), 200)
   assert.deepEqual(await (await installationsRead).json(), [], 'a new org has connected no GitHub account')
-  await githubCard.getByText(`No GitHub account is connected to ${ada.name} Lab, and an experiment needs one: it keeps its code in a repository there.`).waitFor()
+  await githubCard.getByText('No GitHub account connected.').waitFor()
   const stackHasGitHub = (await appRead).status() === 200
   if (stackHasGitHub) {
     await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
   } else {
     assert.equal((await (await appRead).json()).reason, 'github_not_configured')
-    await githubCard.getByText('This deployment has no GitHub App configured, so no GitHub account can be connected.').waitFor()
+    await githubCard.getByText('GitHub isn\'t available on this installation.').waitFor()
     assert.equal(await githubCard.getByRole('button', { name: 'Connect GitHub' }).count(), 0)
   }
 
-  section('github: connecting leaves for GitHub once and returns to the card, with the real API\'s answer')
+  section('github: Connect opens GitHub in a new tab, and the tab GitHub returns to finishes it with the real API\'s answer')
+  const cors = { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count' }
   await page.route(`${API}/github/app`, route => route.fulfill({
     headers: { 'access-control-allow-origin': UI },
     json: { slug: 'hl-e2e', client_id: 'Iv1.e2e', install_url: `${IDP}/github/install`, authorize_url: `${IDP}/github/authorize?client_id=Iv1.e2e`, new_repository_url: `${IDP}/github/new` },
   }))
-  const connects = []
-  const returns = []
-  const authorizes = []
-  page.on('request', request => {
-    const url = new URL(request.url())
-    if (request.url().startsWith(installationsAPI) && request.method() === 'POST') connects.push(request)
-    if (request.url().startsWith(`${UI}/settings/repository`) && (url.searchParams.has('code') || url.searchParams.has('error'))) returns.push(request.url())
-    if (request.url().startsWith(`${IDP}/github/authorize`)) authorizes.push(url)
+  // Starting a connect is stood in for: the real API would send the tab to github.com. The state
+  // it issues is unknown to the real API, which refuses the return that carries it.
+  const installStatesAPI = `${API}/orgs/${orgID}/github-install-states`
+  const begins = []
+  await page.route(installStatesAPI, route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    begins.push(route.request())
+    const state = `e2e-state-${begins.length}`
+    const authorize = new URL(`${IDP}/github/authorize`)
+    authorize.search = new URLSearchParams({ client_id: 'Iv1.e2e', redirect_uri: `${UI}/settings/repository`, state }).toString()
+    return route.fulfill({ status: 201, headers: cors, json: { state, install_url: authorize.href, expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
   })
-  const landed = `${settingsPage}#github`
-  await page.reload()
-  await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
-  await githubCard.getByRole('button', { name: 'Connect GitHub' }).dblclick()
-  await page.waitForURL(landed)
-  assert.equal(authorizes.length, 1, 'a double click left for GitHub once')
-  assert.equal(authorizes[0].searchParams.get('redirect_uri'), `${UI}/settings/repository`, 'the way back is this UI\'s own origin, at the address the App has registered')
-  assert.equal(new URL(returns[0]).searchParams.get('state'), authorizes[0].searchParams.get('state'))
-  assert.equal(connects.length, 1)
-  const githubCode = (await idpState()).githubCodes.at(-1)
-  assert.deepEqual(connects[0].postDataJSON(), { code: githubCode, redirect_uri: `${UI}/settings/repository` }, 'no installation is named: the API finds the one the person reaches')
-  // No GitHub knows this code: a stack without an App answers 503, one with an App is refused the code.
-  const refusedConnect = await connects[0].response()
-  assert.equal(refusedConnect.status(), stackHasGitHub ? 422 : 503)
-  assert.equal((await refusedConnect.json()).reason, stackHasGitHub ? 'code_rejected' : 'github_not_configured')
-  await githubCard.locator('.error-banner', { hasText: 'GitHub was not connected:' }).waitFor()
-
-  section('github: a replayed return, a forged one and Back do nothing')
-  await page.goto(returns[0])
-  await page.waitForURL(landed)
-  await githubCard.locator('.error-banner', { hasText: 'This return from GitHub does not belong to a connect started in this tab' }).waitFor()
-  await page.goto(`${UI}/settings/repository?code=stolen&state=forged`)
-  await page.waitForURL(landed)
-  await githubCard.locator('.error-banner', { hasText: 'This return from GitHub does not belong to a connect started in this tab' }).waitFor()
-  assert.equal(connects.length, 1, 'neither return was sent to the API')
-  // Leaving for GitHub replaces the page, so Back from the return is never GitHub or a return with a code in it.
-  await page.goBack()
-  assert.ok(!new URL(page.url()).searchParams.has('code'), 'Back does not lead to a return')
-  assert.equal(authorizes.length, 1, 'and asked GitHub nothing')
-  await page.goto(settingsPage)
-
-  section('github: GitHub declined')
-  await configure({ githubDeclines: true })
-  await githubCard.getByRole('button', { name: 'Connect GitHub' }).click()
-  await page.waitForURL(landed)
-  await githubCard.locator('.error-banner', { hasText: 'GitHub did not authorise the App: The user has denied your application access.' }).waitFor()
-  assert.equal(connects.length, 1, 'a refusal by GitHub is not sent to the API')
-  await configure({ githubDeclines: false })
-
-  section('github: the App installed nowhere, several accounts to choose from, then connected, listed and disconnected')
-  // The API is stood in for from here: no real GitHub account stands behind the stand-in's codes.
-  const cors = { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count' }
+  // What finishing a connect is answered, in turn; once spent, the real API answers.
+  const finishAPI = `${API}/github/installations`
+  const finishAnswers = []
+  await page.context().route(finishAPI, route => {
+    const answer = route.request().method() === 'POST' ? finishAnswers.shift() : undefined
+    if (!answer) return route.fallback()
+    if (answer.installation) connected = [answer.installation]
+    return route.fulfill({ status: 201, headers: cors, json: answer.body })
+  })
   let connected = []
-  let connectAnswer = { status: 422, json: { reason: 'app_not_installed', message: 'the GitHub account reaches no installation of the App' } }
   await page.route(url => url.href.startsWith(installationsAPI), route => {
     const request = route.request()
-    if (request.method() === 'POST') {
-      if (connectAnswer.status === 201) connected = [connectAnswer.json]
-      return route.fulfill({ status: connectAnswer.status, headers: cors, json: connectAnswer.json })
-    }
     if (request.method() === 'DELETE') {
       connected = []
       return route.fulfill({ status: 204, headers: cors })
@@ -1030,52 +1002,91 @@ async function scenarios(browser) {
     if (request.method() === 'GET') return route.fulfill({ headers: { ...cors, 'X-Total-Count': String(connected.length) }, json: connected })
     return route.fallback()
   })
-  await githubCard.getByRole('button', { name: 'Connect GitHub' }).click()
-  await page.waitForURL(landed)
-  await githubCard.locator('.error-banner', { hasText: 'Your GitHub account reaches no installation of the App.' }).waitFor()
-
-  // Installing the App returns with the installation it made and no state: the tab that left to
-  // install goes on to authorise, and the connect names that installation.
-  connectAnswer = {
-    status: 201,
-    json: { org_id: orgID, installation_id: 4242, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
+  const finishes = []
+  const finishStatuses = []
+  const authorizes = []
+  const installPages = []
+  page.context().on('request', request => {
+    if (request.url() === finishAPI && request.method() === 'POST') finishes.push(request)
+    if (request.url().startsWith(`${IDP}/github/authorize`)) authorizes.push(new URL(request.url()))
+    if (request.url().startsWith(`${IDP}/github/install`)) installPages.push(request.url())
+  })
+  page.context().on('response', response => {
+    if (response.url() === finishAPI && response.request().method() === 'POST') finishStatuses.push(response.status())
+  })
+  // Connect opens the GitHub tab; the tab closes itself once it has told this one how it went.
+  async function connectInTab() {
+    const opened = page.context().waitForEvent('page')
+    await githubCard.getByRole('button', { name: 'Connect GitHub' }).click()
+    const tab = await opened
+    await tab.waitForEvent('close')
   }
-  const authorizesBeforeInstall = authorizes.length
-  await githubCard.getByRole('button', { name: 'Install the App on an account' }).click()
-  await page.waitForURL(landed)
-  assert.equal(authorizes.length, authorizesBeforeInstall + 1, 'the return from installing went on to authorise, once')
-  assert.equal(connects.at(-1).postDataJSON().installation_id, 4242, 'for the installation GitHub returned')
-  await githubCard.getByText('Connected acme.').waitFor()
+  const refusedText = stackHasGitHub ? 'This return from GitHub does not match an install you started' : 'this deployment has no GitHub App configured'
+  await page.reload()
+  await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
+  await connectInTab()
+  assert.equal(begins.length, 1)
+  assert.deepEqual(begins[0].postDataJSON(), { return_to: `/orgs/${orgID}/settings#github` }, 'the connect returns to the GitHub card')
+  assert.equal(authorizes.length, 1, 'GitHub was asked to authorise once')
+  assert.equal(authorizes[0].searchParams.get('redirect_uri'), `${UI}/settings/repository`, 'the way back is this UI\'s own origin, at the address the App has registered')
+  assert.equal(authorizes[0].searchParams.get('state'), 'e2e-state-1')
+  const githubCode = (await idpState()).githubCodes.at(-1)
+  assert.equal(finishes.length, 1)
+  assert.deepEqual(finishes[0].postDataJSON(), { state: 'e2e-state-1', code: githubCode, installation_id: 0 }, 'no installation is named: the API connects the ones the person reaches')
+  assert.equal(finishStatuses[0], stackHasGitHub ? 422 : 503)
+  await githubCard.getByText(refusedText, { exact: false }).waitFor()
+
+  section('github: a replayed return and a forged one are refused, and a visit connects nothing')
+  await page.goto(`${UI}/settings/repository?state=e2e-state-1&code=${githubCode}`)
+  await page.getByText(refusedText, { exact: false }).waitFor()
+  await page.goto(`${UI}/settings/repository?code=stolen&state=forged`)
+  await page.getByText(refusedText, { exact: false }).waitFor()
+  assert.equal(finishes.length, 3, 'each return was sent to the API, which refused it')
+  await page.goto(`${UI}/settings/repository`)
+  await page.getByText('This page finishes connecting GitHub. Nothing was connected.').waitFor()
+  assert.equal(finishes.length, 3, 'a visit sends nothing')
+  await page.goto(settingsPage)
+
+  section('github: GitHub declined')
+  await configure({ githubDeclines: true })
+  await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
+  await connectInTab()
+  await githubCard.getByText('GitHub returned without an installation, so nothing was connected. Try again.').waitFor()
+  assert.equal(finishes.length, 3, 'a refusal by GitHub is not sent to the API')
+  await configure({ githubDeclines: false })
+
+  section('github: the App installed nowhere sends the tab on to GitHub\'s install page, then the account is connected, listed and disconnected')
+  const acme = { org_id: orgID, installation_id: 4242, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }
+  finishAnswers.push(
+    { body: { org_id: orgID, return_to: `/orgs/${orgID}/settings#github`, install: { state: 'e2e-install-1', install_url: `${IDP}/github/install?state=e2e-install-1`, expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } } },
+    { installation: acme, body: { org_id: orgID, return_to: `/orgs/${orgID}/settings#github`, installation: acme } },
+  )
+  await githubCard.getByRole('button', { name: 'Connect GitHub' }).waitFor()
+  await connectInTab()
+  assert.equal(finishes.length, 5, 'the authorisation was finished, then the return from installing')
+  assert.equal(installPages.length, 1, 'the tab went on to GitHub\'s install page once')
+  assert.equal(finishes[3].postDataJSON().installation_id, 0)
+  assert.equal(finishes[4].postDataJSON().state, 'e2e-install-1', 'the install continues under the state the API issued for it')
+  assert.equal(finishes[4].postDataJSON().installation_id, 4242, 'for the installation GitHub returned')
+  await githubCard.getByText('acme is connected.').waitFor()
   const accountRow = githubCard.getByRole('row', { name: /acme/ })
   await accountRow.getByText(ada.name).waitFor()
 
   await accountRow.getByRole('button', { name: 'Disconnect' }).click()
-  await page.getByRole('dialog').getByText(`Disconnect acme from ${ada.name} Lab?`).waitFor()
+  await page.getByRole('dialog').getByText('Disconnect acme?').waitFor()
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
   await accountRow.waitFor()
   await accountRow.getByRole('button', { name: 'Disconnect' }).click()
   await confirmWith(page, 'Disconnect')
-  await githubCard.getByText('No GitHub account is connected to').waitFor()
+  await githubCard.getByText('No GitHub account connected.').waitFor()
 
-  connectAnswer = {
-    status: 409,
-    json: {
-      reason: 'installation_choice_required', message: 'the GitHub account reaches several installations: name one',
-      installations: [{ installation_id: 4242, account_login: 'acme', account_type: 'Organization' }, { installation_id: 4343, account_login: 'ada-personal', account_type: 'User' }],
-    },
-  }
-  await githubCard.getByRole('button', { name: 'Connect GitHub' }).click()
-  await page.waitForURL(landed)
-  const choice = githubCard.getByRole('group', { name: 'GitHub account to connect' })
-  await choice.getByRole('button', { name: 'acme', exact: true }).waitFor()
-  connectAnswer = {
-    status: 201,
-    json: { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', account_type: 'User', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() },
-  }
-  await choice.getByRole('button', { name: 'ada-personal' }).click()
-  await page.waitForURL(landed)
-  assert.equal(connects.at(-1).postDataJSON().installation_id, 4343, 'the second authorisation connects the account that was chosen')
-  await githubCard.getByText('Connected ada-personal.').waitFor()
+  section('github: an account that had the App installed is connected without GitHub\'s install page')
+  const personal = { org_id: orgID, installation_id: 4343, account_login: 'ada-personal', account_type: 'User', connected_actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, connected_at: new Date().toISOString() }
+  finishAnswers.push({ installation: personal, body: { org_id: orgID, return_to: `/orgs/${orgID}/settings#github`, installation: personal } })
+  await connectInTab()
+  await githubCard.getByText('ada-personal is connected.').waitFor()
+  assert.equal(installPages.length, 1, 'GitHub\'s install page was not opened again')
+  assert.equal(finishes.at(-1).postDataJSON().installation_id, 0)
 
   section('creating an experiment offers the repositories of the connected accounts, and the agent image under More settings')
   const repositoriesAPI = `${API}/orgs/${orgID}/github-repositories`
@@ -1090,14 +1101,13 @@ async function scenarios(browser) {
     return route.fulfill({ headers: { ...cors, 'X-Total-Count': String(found.length) }, json: found })
   })
   await page.getByRole('link', { name: 'Experiments', exact: true }).click()
-  await page.getByRole('button', { name: 'Configure it myself', exact: true }).click()
+  await page.getByRole('button', { name: 'Set up manually', exact: true }).click()
   const repositoryField = page.getByLabel('Repository').last()
   await repositoryField.click()
   assert.equal(await page.getByRole('option', { name: /ada-personal\/widgets/ }).innerText().then(t => t.replace(/\s+/g, ' ')), 'ada-personal/widgets private')
-  // The one connected account is a personal one, where the platform creates as on an organisation,
-  // and the way to a repository of the person's own is offered beside it.
-  assert.equal(await page.getByRole('option', { name: 'A new private repository' }).count(), 1)
-  await page.getByRole('link', { name: 'create it on GitHub' }).last().waitFor()
+  // The one connected account is a personal one, where the platform creates as on an organisation.
+  assert.equal(await page.getByRole('option', { name: 'New repository' }).count(), 1)
+  await page.getByText('A new repository starts from the experiment template.').waitFor()
   await repositoryField.fill('wid')
   await page.getByRole('option', { name: /ada-personal\/open/ }).waitFor({ state: 'detached' })
   assert.ok(searches.includes('wid') && !searches.includes('w'), 'the search waited for typing to pause')
@@ -1111,6 +1121,8 @@ async function scenarios(browser) {
   await page.unroute(url => url.href.startsWith(repositoriesAPI))
   await page.unroute(url => url.href.startsWith(installationsAPI))
   await page.unroute(`${API}/github/app`)
+  await page.unroute(installStatesAPI)
+  await page.context().unroute(finishAPI)
 
   section('a person in two orgs switches between them, and each shows its own work')
   await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
@@ -1227,7 +1239,7 @@ async function scenarios(browser) {
     const card = otherPage.locator('[role="link"]', { hasText: sharedName })
     await card.getByText('Shared · read only').waitFor()
     assert.equal(await card.getByRole('button', { name: 'Edit' }).count(), 0, 'a shared experiment of another org offers no edit')
-    await otherPage.getByRole('button', { name: 'Configure it myself', exact: true }).waitFor()
+    await otherPage.getByRole('button', { name: 'Set up manually', exact: true }).waitFor()
 
     section('shared: it opens on the experiment page from the reader\'s own project, with nothing to change')
     await card.click()
@@ -1286,7 +1298,7 @@ async function scenarios(browser) {
 
     section('shared: it does not count as the reader\'s own, and the pickers offer it')
     await otherPage.goto(`${UI}/projects/${bobProjects[0]}/experiments`)
-    await otherPage.getByLabel('What do you want to find out?').waitFor()
+    await otherPage.getByLabel('Describe the goal of your experiment').waitFor()
     await otherPage.getByRole('heading', { name: 'Experiments', exact: true }).waitFor()
     await otherPage.goto(`${UI}/projects/${bobProjects[0]}/jobs`)
     await otherPage.getByRole('heading', { name: 'Jobs', exact: true, level: 1 }).waitFor()
@@ -1439,11 +1451,11 @@ async function scenarios(browser) {
   assert.equal((await api(await tokenOf(bob), '/invites/accept', 'POST', { token: bobInviteToken })).status, 201)
   try {
     await otherPage.goto(`${UI}/orgs/${labID}/settings`)
-    await otherPage.getByText(`You are a member of ${ada.name} Lab. Only an owner can`).waitFor()
+    await otherPage.getByRole('heading', { name: 'Members' }).waitFor()
     assert.equal(await otherPage.getByLabel('Organization name').count(), 0)
     assert.equal(await otherPage.getByRole('button', { name: 'Create API key' }).count(), 0)
     assert.equal(await otherPage.getByRole('button', { name: '+ New project' }).count(), 0)
-    await otherPage.getByRole('link', { name: 'Compute Resources' }).first().click()
+    await otherPage.getByRole('link', { name: 'Compute', exact: true }).first().click()
     const memberRow = otherPage.getByRole('row', { name: new RegExp(clusterName) })
     await memberRow.getByRole('switch').and(otherPage.locator(':disabled')).waitFor()
     assert.equal(await otherPage.getByRole('button', { name: 'Add cluster' }).count(), 0)
@@ -1476,8 +1488,8 @@ async function scenarios(browser) {
   hlAdmin('user', 'staff', bob.id, 'on')
   try {
     await otherPage.goto(`${UI}/orgs/${bobMe.orgs[0].id}/clusters`)
-    await otherPage.getByText(`Where the jobs of Default org run`).waitFor()
-    await otherPage.getByText('All Clusters · every org · staff only').waitFor()
+    await otherPage.getByRole('heading', { name: 'Clusters', exact: true }).waitFor()
+    await otherPage.getByText('All clusters · every org · staff only').waitFor()
     await otherPage.getByRole('columnheader', { name: 'Autoscaler' }).waitFor()
     await otherPage.goto(`${UI}/projects/${bobProjects[0]}/statistics`)
     await otherPage.getByRole('heading', { name: 'Scheduler quality' }).waitFor()

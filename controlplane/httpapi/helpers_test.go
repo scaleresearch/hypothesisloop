@@ -101,7 +101,7 @@ func registerPlatformExperimentsAndBudget(doc *Doc, peh *platformexperiments.Ser
 }
 
 // platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.
-var testPlanning = platformexperiments.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute, AutoAccept: 30 * time.Second}
+var testPlanning = platformexperiments.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute}
 
 // reaching has the org of every project reach the given accelerator types and no other.
 func reaching(svc *platformexperiments.Service, types ...domain.AcceleratorType) *platformexperiments.Service {

@@ -103,3 +103,20 @@ func (c *Client) Repositories(ctx context.Context, installationID int64) ([]Repo
 		}
 	}
 }
+
+// Uninstall removes an installation of the App from its GitHub account, as the App itself. One
+// GitHub no longer has is removed already.
+func (c *Client) Uninstall(ctx context.Context, installationID int64) error {
+	jwt, err := c.appJWT()
+	if err != nil {
+		return err
+	}
+	switch err := c.call(ctx, http.MethodDelete, "/app/installations/"+strconv.FormatInt(installationID, 10), jwt, nil, nil); {
+	case err == nil, errors.Is(err, errNotFound):
+		return nil
+	case errors.Is(err, errUnauthorized):
+		return ErrAppCredentials
+	default:
+		return failedFor(installationID, err)
+	}
+}

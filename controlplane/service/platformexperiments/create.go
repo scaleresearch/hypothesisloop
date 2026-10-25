@@ -34,11 +34,14 @@ func (s *Service) checkLength(durationHours float64) error {
 }
 
 // withSettings returns spec with the platform's settings in the fields a request may leave to
-// them: scheduler.default_report_interval_seconds, stages.default as a run of max_agents
+// them: scheduler.default_report_interval_seconds, max_agents as the executors of agents, stages.default as a run of max_agents
 // executors has it (domain.RunStages) and quota.default_quota_tier.
 func (s *Service) withSettings(spec experimentspec.Spec) experimentspec.Spec {
 	if spec.ReportIntervalSeconds == 0 {
 		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
+	}
+	if spec.MaxAgents == 0 {
+		spec.MaxAgents = spec.Executors()
 	}
 	if len(spec.Stages) == 0 {
 		spec.Stages = domain.RunStages(s.cfg.DefaultStages, spec.MaxAgents)
@@ -93,7 +96,7 @@ func CheckCreate(req CreatePlatformExperimentRequest) error {
 }
 
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
-// planner's proposal, the person accepting one or a patch of an existing one. The spec's own rules
+// planner's proposal or a patch of an existing one. The spec's own rules
 // come first (experimentspec.Spec.Validate), then those of the platform's settings. Its agents are
 // checked against the catalog where they are resolved (resolvedPool, proposedPool). It
 // returns req as it is stored, trimmed and with the platform's settings where it leaves a field to

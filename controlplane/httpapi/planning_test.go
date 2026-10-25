@@ -30,7 +30,9 @@ func measuredBaseline() *platformexperiments.Baseline {
 	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
 	return &platformexperiments.Baseline{
 		Job: &domain.Experiment{ID: "job-1", AgentID: "ag-baseline", PlatformExperimentID: "pe-1", Branch: "hl/pe-1/baseline", Status: domain.StatusCompleted, CodeRef: "git://seed@abc", Image: "registry.test/image@sha256:aa",
-			AcceleratorType: "h100", AcceleratorCount: 2, EstimatedDurationHours: 5},
+			AcceleratorType: "h100", AcceleratorCount: 2, EstimatedDurationHours: 5,
+			// The machine aProposal plans on.
+			Job: domain.JobSpec{AcceleratorType: "rtx-4090", AcceleratorCount: 1, CPU: "8", Memory: "32Gi", Storage: "100Gi"}},
 		OwnerRole: domain.SignupRoleBaseline, Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, ObservedHours: 0.2,
 	}
 }
@@ -115,11 +117,15 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	if pe.Actor == nil || *pe.Actor != (domain.Actor{Kind: domain.ActorUser, ID: "u-1", Name: "Ada"}) {
 		t.Errorf("actor = %+v, want the person who asked", pe.Actor)
 	}
-	// Its one agent is the planner, which the platform runs and never ranks or cuts.
+	// Its agents are the planner and the baseline agent, which the platform runs at once and
+	// never ranks or cuts: the baseline agent starts on the planner's working plan.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
 	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.InAgentSandbox ||
-		signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
-		t.Errorf("planner %+v signed up as %+v, want a sandboxed planner of role baseline on the platform's model", planner, signup)
+		signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(2) {
+		t.Errorf("planner %+v signed up as %+v, want a sandboxed planner of role planner on the platform's model", planner, signup)
+	}
+	if len(store.baselines) != 1 || store.baselines[0].Role != domain.SignupRoleBaseline || !store.baselines[0].InAgentSandbox || store.baselines[0].AgentType != "baseline" {
+		t.Errorf("baseline agents %+v, want one sandboxed of role baseline", store.baselines)
 	}
 	// A draft has a repository: the one named, or a new one the repository pass makes after the
 	// create answered.
@@ -315,15 +321,49 @@ type draftStore struct {
 
 	acceptedAgents  []*domain.Agent
 	acceptedSignups []domain.AgentSignup
+
+	// active are the QUEUED, SUBMITTED and RUNNING jobs, and cancelled the ones cancelled.
+	active    []*domain.Experiment
+	cancelled []string
 }
 
-func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
+func (s *draftStore) ListActiveByPlatformExperiment(_ context.Context, id string) ([]*domain.Experiment, error) {
+	var active []*domain.Experiment
+	for _, job := range s.active {
+		if job.PlatformExperimentID == id {
+			active = append(active, job)
+		}
+	}
+	return active, nil
+}
+
+func (s *draftStore) CancelExperiment(_ context.Context, id string) error {
+	s.cancelled = append(s.cancelled, id)
+	return nil
+}
+
+func (s *draftStore) CreateDraft(_ context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup, _ *domain.Agent, baseline domain.AgentSignup) error {
 	if s.planners == nil {
 		s.planners, s.signups = map[string]*domain.Agent{}, map[string]domain.AgentSignup{}
 	}
 	s.created = append(s.created, pe)
 	s.planners[pe.ID], s.signups[pe.ID] = planner, signup
+	baseline.Name = "Baseline 1"
+	s.baselines = append(s.baselines, baseline)
 	return nil
+}
+
+func (s *draftStore) SetWorkingPlan(_ context.Context, id string, goalVersion int, proposal []byte) error {
+	for _, pe := range s.created {
+		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
+			if pe.GoalVersion != goalVersion {
+				return db.ErrGoalChanged
+			}
+			pe.Proposal, pe.DeclinedReason = proposal, ""
+			return nil
+		}
+	}
+	return db.ErrNotDraft
 }
 
 func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, agentID string) (*domain.AgentSignup, error) {
@@ -341,57 +381,38 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	return nil, nil
 }
 
-func (s *draftStore) SetProposal(_ context.Context, id string, goalVersion int, proposal []byte, p db.Proposed) error {
-	for _, pe := range s.created {
-		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
-			if pe.GoalVersion != goalVersion {
-				return db.ErrGoalChanged
-			}
-			now := time.Now().UTC()
-			kept := now.Add(p.KeepPlanner)
-			pe.Proposal, pe.DeclinedReason, pe.PlannerEndsAt, pe.AcceptsAt = proposal, "", &kept, p.AcceptsAt
-			pe.SetAnswered(&now, true)
-			pe.SetClosesAt(p.WaitUntil)
-			if p.Baseline != nil && len(s.baselines) == 0 {
-				signup := p.BaselineSignup
+func (s *draftStore) ApplyProposal(_ context.Context, pe *domain.PlatformExperiment, goalVersion int, proposal []byte, create []*domain.Agent, signups []domain.AgentSignup) error {
+	for i, stored := range s.created {
+		if stored.ID != pe.ID {
+			continue
+		}
+		if stored.Status != domain.PlatformExpDraft {
+			return db.ErrNotDraft
+		}
+		if stored.GoalVersion != goalVersion {
+			return db.ErrGoalChanged
+		}
+		applied := *pe
+		now := time.Now().UTC()
+		applied.Status, applied.Proposal, applied.DeclinedReason = domain.PlatformExpOpen, proposal, ""
+		applied.SetAnswered(&now, true)
+		s.created[i] = &applied
+		s.acceptedAgents, s.acceptedSignups = create, signups
+		for _, signup := range signups {
+			if signup.Role == domain.SignupRoleBaseline {
 				name, err := domain.AgentName(signup.Role, func(string) bool { return false })
 				if err != nil {
 					return err
 				}
 				signup.Name = name
 				s.baselines = append(s.baselines, signup)
+				continue
 			}
-			return nil
+			s.agentIDs = append(s.agentIDs, signup.AgentID)
 		}
-	}
-	return db.ErrNotDraft
-}
-
-func (s *draftStore) HoldAccept(_ context.Context, id string) error {
-	for _, pe := range s.created {
-		if pe.ID != id {
-			continue
-		}
-		if pe.Status != domain.PlatformExpDraft {
-			return db.ErrNotDraft
-		}
-		if pe.ProposedAt == nil {
-			return db.ErrNotProposed
-		}
-		pe.AcceptsAt = nil
 		return nil
 	}
 	return db.ErrNotDraft
-}
-
-func (s *draftStore) DraftsToAccept(context.Context) ([]string, error) {
-	var due []string
-	for _, pe := range s.created {
-		if pe.Status == domain.PlatformExpDraft && pe.ProposedAt != nil && pe.AcceptsAt != nil && !pe.AcceptsAt.After(time.Now()) {
-			due = append(due, pe.ID)
-		}
-	}
-	return due, nil
 }
 
 // aProposal is one the check takes, with more laid over it.
@@ -450,25 +471,12 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		stored.CPU != "8" || stored.Memory != "32Gi" || stored.Storage != "100Gi" {
 		t.Fatalf("stored %s, %v", pe.Proposal, err)
 	}
-	if pe.ProposedAt == nil || out["proposed_at"] == nil || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
-		t.Errorf("the draft is not marked proposed: %+v", pe)
+	if pe.ProposedAt == nil || out["proposed_at"] == nil || out["proposal"] == nil || pe.Status != domain.PlatformExpOpen {
+		t.Errorf("the proposal did not open the draft: %+v", pe)
 	}
-	// From now on it waits for a person, far longer than the planner was given.
-	if wait := pe.ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
-		t.Errorf("a proposed draft ends in %v, want %v", wait, testPlanning.ProposedFor)
-	}
-	// A goal changed right after the proposal waited for a machine to boot: the planner's is kept
-	// for the setting's time, and the draft says until when.
-	if pe.PlannerEndsAt == nil || out["planner_ends_at"] == nil || pe.PlannerEndsAt.Sub(before) < testPlanning.PlannerKept-time.Minute || pe.PlannerEndsAt.Sub(before) > testPlanning.PlannerKept+time.Minute {
-		t.Errorf("the planner's machine is kept until %v (%v answered), want %v from the proposal", pe.PlannerEndsAt, out["planner_ends_at"], testPlanning.PlannerKept)
-	}
-	if out["proposal_expires_at"] != pe.ProposalExpiresAt.Format(time.RFC3339Nano) || out["ends_at"] != nil || out["planning_ends_at"] != nil {
-		t.Errorf("a proposed draft reads proposal_expires_at %v, ends_at %v, planning_ends_at %v: want how long the proposal waits under that name alone", out["proposal_expires_at"], out["ends_at"], out["planning_ends_at"])
-	}
-	// The draft itself is unchanged: nothing of a proposal takes effect until a person accepts,
-	// and nothing was measured, so it has no baseline.
-	if pe.Name != "" || len(pe.Metrics) != 0 || pe.BudgetAcceleratorHours != 0 || pe.BaselineJobID != "" || pe.JobEstimatedDurationHours != 0 {
-		t.Errorf("the proposal changed the draft before it was accepted: %+v", pe)
+	// It opens with the proposal's experiment, and nothing was measured, so it has no baseline.
+	if pe.Name != "Cosine or constant" || len(pe.Metrics) != 1 || pe.BudgetAcceleratorHours != 6 || pe.BaselineJobID != "" || pe.JobEstimatedDurationHours != 0 || pe.StartsAt.Before(before) {
+		t.Errorf("opened %+v, want the proposal's experiment and no baseline", pe)
 	}
 
 	experiment := func(more map[string]any) map[string]any {
@@ -532,38 +540,6 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	}
 }
 
-func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
-	for i, stored := range s.created {
-		if stored.ID != pe.ID {
-			continue
-		}
-		if stored.Status != domain.PlatformExpDraft {
-			return db.ErrNotDraft
-		}
-		if stored.ProposedAt == nil {
-			return db.ErrNothingProposed
-		}
-		accepted := *pe
-		accepted.Status, accepted.AcceptsAt = domain.PlatformExpOpen, nil
-		s.created[i] = &accepted
-		s.acceptedAgents, s.acceptedSignups = create, signups
-		for _, signup := range signups {
-			if signup.Role == domain.SignupRoleBaseline {
-				name, err := domain.AgentName(signup.Role, func(string) bool { return false })
-				if err != nil {
-					return err
-				}
-				signup.Name = name
-				s.baselines = append(s.baselines, signup)
-				continue
-			}
-			s.agentIDs = append(s.agentIDs, signup.AgentID)
-		}
-		return nil
-	}
-	return db.ErrNotDraft
-}
-
 // FinishAgent finishes a baseline agent of an open experiment, as the store does.
 func (s *draftStore) FinishAgent(_ context.Context, _, agentID, reason string) error {
 	for i, signup := range s.baselines {
@@ -576,136 +552,95 @@ func (s *draftStore) FinishAgent(_ context.Context, _, agentID, reason string) e
 	return domain.ErrNotSignedUp
 }
 
-// A person accepts in one call, and what the run costs is what they state: the proposal's own
-// numbers were written with an agent's token.
-func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *testing.T) {
+// A person who accepted 10 s after the proposal still waited 30 minutes for the set-up, and one
+// away from the page held the run up. A proposal opens the draft in the write that stores it, at
+// its own cost and team, owned by the person who created the draft.
+func TestAProposalOpensTheDraftAsProposed(t *testing.T) {
 	store := draftWithPlanner()
+	creator := domain.Actor{Kind: domain.ActorUser, ID: "u-creator"}
+	store.created[0].Actor = &creator
 	_, propose := planningRouter(t, store, thePlanner)
-	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
-		t.Fatalf("propose: %d %v", code, out)
-	}
-	_, call := planningRouter(t, store, planner)
 	before := time.Now()
-	code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{
-		"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 25, "agents": []map[string]any{{"agent_type": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}, {}},
-	})
+	code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{
+		"agents": []map[string]any{{"agent_type": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}},
+	}))
 	if code != http.StatusOK {
-		t.Fatalf("accept: got = %d %v, want 200", code, out)
+		t.Fatalf("propose: got = %d %v, want 200", code, out)
 	}
-	// The answer says what the open experiment waits for, as every later read of it does.
 	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_measuring" {
-		t.Errorf("accept: status_reason = %v, want baseline_measuring", out["status_reason"])
+		t.Errorf("propose: status_reason = %v, want baseline_measuring", out["status_reason"])
 	}
 	pe := store.created[0]
 	if pe.Status != domain.PlatformExpOpen || out["status"] != "open" || pe.Name != "Cosine or constant" || !strings.HasPrefix(pe.Description, "Train the small transformer") ||
 		len(pe.Metrics) != 1 || pe.Metrics[0].Key != "val_loss" || pe.ReportIntervalSeconds != 30 || len(pe.Stages) != 1 || pe.Goal != "g" {
-		t.Fatalf("accepted %+v, want the proposal's experiment", pe)
+		t.Fatalf("opened %+v, want the proposal's experiment", pe)
 	}
-	if pe.BudgetAcceleratorHours != 3 || pe.MaxAgents != 3 {
-		t.Errorf("budget %v for %d agents, want what the person stated (3 and 3), not the proposal's 6 and 2", pe.BudgetAcceleratorHours, pe.MaxAgents)
+	if pe.BudgetAcceleratorHours != 6 || pe.MaxAgents != 2 || pe.DurationHours != 4 {
+		t.Errorf("budget %v, %d executors, %v hours, want the proposal's 6, 2 and 4", pe.BudgetAcceleratorHours, pe.MaxAgents, pe.DurationHours)
 	}
-	// The baseline has the minutes the person stated, not the proposal's 30, and the run's two
-	// hours count from its start: until then it has no end.
-	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(25*time.Minute)) {
-		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours with no end yet and the baseline due 25 minutes after the accept", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
+	// The run's hours count from its start: until then it has no end, and the baseline is due the
+	// proposal's 30 minutes after the proposal.
+	if pe.StartsAt.Before(before) || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(30*time.Minute)) {
+		t.Errorf("starts %v ending %v, baseline due %v: want no end yet and the baseline due 30 minutes after the proposal", pe.StartsAt, pe.EndsAt, pe.BaselineDueAt)
 	}
 	if !pe.CoordinatorInAgentSandbox || pe.Coordinator == nil || pe.Coordinator.Model != "" {
 		t.Errorf("coordinator %+v, want one the platform hosts on its type's model", pe.Coordinator)
 	}
-	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
-	// anything was measured: the proposal signed it up, and the accept signs up the executors.
 	if len(store.acceptedAgents) != 3 || len(store.acceptedSignups) != 3 || len(store.baselines) != 1 {
-		t.Fatalf("signed up %d agents with %d signups beside %d baseline agents, want the 3 executors beside the one the proposal signed up", len(store.acceptedAgents), len(store.acceptedSignups), len(store.baselines))
+		t.Fatalf("signed up %d agents with %d signups and %d baseline agents, want the 2 executors and the baseline agent", len(store.acceptedAgents), len(store.acceptedSignups), len(store.baselines))
 	}
-	for i, signup := range store.acceptedSignups {
+	for i, signup := range store.acceptedSignups[:2] {
 		agent := store.acceptedAgents[i]
 		if agent.Name != "" || signup.AgentID != agent.ID || !signup.InAgentSandbox || signup.Role != domain.SignupRoleExecutor || signup.Model != "" ||
-			signup.Actor == nil || signup.Actor.ID != "u-1" {
-			t.Errorf("agent %d: %+v signed up as %+v, want a sandboxed executor added by the person who accepted", i, agent, signup)
+			signup.Actor == nil || signup.Actor.ID != "u-creator" {
+			t.Errorf("agent %d: %+v signed up as %+v, want a sandboxed executor added for the person who created the draft", i, agent, signup)
 		}
 	}
 	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.InAgentSandbox || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
 		t.Errorf("the baseline agent runs as %+v, want a sandboxed one of the built-in baseline type and no hyperparameters", measures)
 	}
 	if first := store.acceptedSignups[0]; first.AgentType != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].AgentType != domain.DefaultAgentType {
-		t.Errorf("signups %+v, want the agent types and hyperparameters the person stated", store.acceptedSignups)
+		t.Errorf("signups %+v, want the agent types and hyperparameters proposed", store.acceptedSignups)
 	}
-
-	// Accepting is refused by state, so a second press and a lost answer do no harm.
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Errorf("accepting twice: got = %d %v, want 409 invalid_transition", code, out)
+	// The proposal stays to be read, with when it was applied and no person named as accepting.
+	_, call := planningRouter(t, store, planner)
+	_, out = call("GET", "/platform-experiments/pe-draft", nil)
+	if proposal, _ := out["proposal"].(map[string]any); proposal["experiment"] == nil || out["accepted_at"] == nil || out["accepted_by"] != nil {
+		t.Errorf("read after the proposal: proposal %v, accepted_at %v, accepted_by %v, want the proposal and accepted_at without accepted_by", out["proposal"], out["accepted_at"], out["accepted_by"])
 	}
-
-	unproposed := draftWithPlanner()
-	_, call = planningRouter(t, unproposed, planner)
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Errorf("accepting before anything is proposed: got = %d %v, want 409 invalid_transition", code, out)
-	}
-
-	for name, c := range map[string]struct {
-		body   map[string]any
-		reason string
-	}{
-		"no budget":         {map[string]any{"budget_accelerator_hours": 0, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}, "invalid_cost"},
-		"too long":          {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 31 * 24, "baseline_minutes": 30, "agents": []map[string]any{{}}}, "run_too_long"},
-		"nobody":            {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{}}, "invalid_agents"},
-		"too many machines": {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
-		"under the floor":   {map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 19, "agents": []map[string]any{{}}}, "invalid_baseline_minutes"},
-	} {
-		store := draftWithPlanner()
-		_, propose := planningRouter(t, store, thePlanner)
-		propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-		_, call := planningRouter(t, store, planner)
-		if code, out := call("POST", "/platform-experiments/pe-draft/accept", c.body); code != http.StatusUnprocessableEntity || out["reason"] != c.reason || store.created[0].Status != domain.PlatformExpDraft {
-			t.Errorf("%s: got = %d %v, want 422 %s and still a draft", name, code, out, c.reason)
-		}
+	// A second proposal is refused by state, so a retried one does no harm.
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusConflict || out["reason"] != "not_a_draft" {
+		t.Errorf("proposing twice: got = %d %v, want 409 not_a_draft", code, out)
 	}
 
 	// A planner gave its baseline 25 minutes, and building its environment alone took 17.
 	// A window under the platform's floor is refused with the floor and why it is there.
 	short := draftWithPlanner()
 	_, propose = planningRouter(t, short, thePlanner)
-	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	_, accept := planningRouter(t, short, planner)
-	code, out = accept("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 19, "agents": []map[string]any{{}}})
-	if message, _ := out["message"].(string); code != http.StatusUnprocessableEntity || !strings.Contains(message, "from 20 (planning.min_baseline_minutes) to 90") || !strings.Contains(message, "build its environment") {
-		t.Errorf("a window under the floor: got = %d %v, want 422 naming the floor and why", code, out)
-	}
-
-	// The planner proposes and a person accepts: its own token is of no kind that may.
-	store = draftWithPlanner()
-	_, propose = planningRouter(t, store, thePlanner)
-	propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	if code, _ := propose("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}); code != http.StatusForbidden || store.created[0].Status != domain.PlatformExpDraft {
-		t.Errorf("the planner accepting its own proposal: got = %d, want 403", code)
+	code, out = propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"baseline_minutes": 19}))
+	if message, _ := out["message"].(string); code != http.StatusUnprocessableEntity || !strings.Contains(message, "from 20 (planning.min_baseline_minutes) to 90") || short.created[0].Status != domain.PlatformExpDraft {
+		t.Errorf("a window under the floor: got = %d %v, want 422 naming the floor and the draft left a draft", code, out)
 	}
 }
 
 // A planner ran the baseline itself, which took most of its 16 to 20 minutes, and a proposal
 // was refused unless that job held it up. A proposal defines the experiment and runs nothing:
 // it names no job, and the fields the platform used to read from one are no fields of it.
-// The team a person accepts is one list: a researcher in it is signed up as a researcher, and
-// max_agents is its executors.
-func TestAcceptingADraftSignsUpTheResearchersOfItsTeam(t *testing.T) {
+// The team is one list: a researcher in it is signed up as a researcher, and max_agents is its
+// executors.
+func TestAProposalSignsUpTheResearchersOfItsTeam(t *testing.T) {
 	store := draftWithPlanner()
 	_, propose := planningRouter(t, store, thePlanner)
-	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"agents": []map[string]any{{"agent_type": domain.ResearcherAgentType}, {}}})); code != http.StatusOK {
 		t.Fatalf("propose: %d %v", code, out)
-	}
-	_, call := planningRouter(t, store, planner)
-	code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{
-		"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 25, "agents": []map[string]any{{"agent_type": domain.ResearcherAgentType}, {}},
-	})
-	if code != http.StatusOK {
-		t.Fatalf("accept: got = %d %v, want 200", code, out)
 	}
 	pe := store.created[0]
 	if pe.MaxAgents != 1 || len(pe.Agents) != 2 || !pe.Agents[0].Key().Researches() || pe.Agents.Executors() != 1 {
 		t.Errorf("max_agents %d and agents %+v, want one executor counted and the researcher in the team", pe.MaxAgents, pe.Agents)
 	}
-	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].Role != domain.SignupRoleResearcher || store.acceptedSignups[0].AgentType != domain.ResearcherAgentType ||
+	if len(store.acceptedSignups) != 3 || store.acceptedSignups[0].Role != domain.SignupRoleResearcher || store.acceptedSignups[0].AgentType != domain.ResearcherAgentType ||
 		store.acceptedSignups[1].Role != domain.SignupRoleExecutor {
-		t.Errorf("signups %+v, want a researcher and an executor", store.acceptedSignups)
+		t.Errorf("signups %+v, want a researcher, an executor and the baseline agent", store.acceptedSignups)
 	}
 }
 
@@ -818,7 +753,7 @@ func (s *draftStore) SetGoal(_ context.Context, id, goal string, planUntil time.
 		pe.Goal, pe.GoalVersion = goal, pe.GoalVersion+1
 		if pe.Status == domain.PlatformExpDraft {
 			pe.SetAnswered(nil, false)
-			pe.PlannerEndsAt, pe.AcceptsAt = nil, nil
+			pe.PlannerEndsAt = nil
 			pe.SetClosesAt(planUntil)
 		}
 		return nil
@@ -835,16 +770,12 @@ func (s *draftStore) NameActors(_ context.Context, actors []*domain.Actor) error
 
 func (s *draftStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }
 
-// A person who reads a proposal and wants it otherwise changes what they asked, and the draft
-// goes back to the planner with the proposal still there to read. A proposal for the goal before
-// is never stored.
+// A person who sees the plan going the wrong way changes what they asked, and the draft goes back
+// to the planner. A proposal for the goal before is never applied.
 func TestChangingTheGoalGivesADraftBackToItsPlanner(t *testing.T) {
 	store := draftWithPlanner()
 	_, propose := planningRouter(t, store, thePlanner)
 	_, call := planningRouter(t, store, planner)
-	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
-		t.Fatalf("propose: %d %v", code, out)
-	}
 	for name, c := range map[string]struct {
 		body   map[string]any
 		code   int
@@ -855,8 +786,8 @@ func TestChangingTheGoalGivesADraftBackToItsPlanner(t *testing.T) {
 		"the goal it has":    {map[string]any{"goal": " g "}, 422, "nothing_to_change"},
 		"with another field": {map[string]any{"goal": "smaller", "name": "n"}, 422, "goal_alone"},
 	} {
-		if code, out := call("PATCH", "/platform-experiments/pe-draft", c.body); code != c.code || out["reason"] != c.reason || store.created[0].ProposedAt == nil {
-			t.Errorf("%s: got = %d %v, want %d %s and the proposal left standing", name, code, out, c.code, c.reason)
+		if code, out := call("PATCH", "/platform-experiments/pe-draft", c.body); code != c.code || out["reason"] != c.reason || store.created[0].GoalVersion != 1 {
+			t.Errorf("%s: got = %d %v, want %d %s and the goal left as it was", name, code, out, c.code, c.reason)
 		}
 	}
 	before := time.Now()
@@ -865,9 +796,9 @@ func TestChangingTheGoalGivesADraftBackToItsPlanner(t *testing.T) {
 		t.Fatalf("change the goal: got = %d %v, want 200", code, out)
 	}
 	pe := store.created[0]
-	if pe.ProposedAt != nil || out["proposed_at"] != nil || out["planner_ends_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft ||
+	if pe.ProposedAt != nil || out["proposed_at"] != nil || out["planner_ends_at"] != nil || pe.Status != domain.PlatformExpDraft ||
 		out["goal"] != "It must fit one RTX 4090." || out["goal_version"] != float64(2) || out["status_reason"].(map[string]any)["reason"] != "revising" {
-		t.Errorf("goal changed: got %v, want the new goal at version 2, revising, no proposed_at, no planner_ends_at and the proposal kept", out)
+		t.Errorf("goal changed: got %v, want the new goal at version 2, revising, no proposed_at and no planner_ends_at", out)
 	}
 	if left := pe.PlanningEndsAt.Sub(before); left < testPlanning.Limit-time.Minute || left > testPlanning.Limit+time.Minute {
 		t.Errorf("the planner has %v to propose again, want the planning limit", left)
@@ -875,19 +806,19 @@ func TestChangingTheGoalGivesADraftBackToItsPlanner(t *testing.T) {
 	if editable, _ := out["editable"].([]any); len(editable) != 1 || editable[0] != "goal" {
 		t.Errorf("a draft's editable: got %v, want goal alone", out["editable"])
 	}
-	// A proposal for the goal before is refused, one for the new goal waits for the person again.
+	// A proposal for the goal before is refused, one for the new goal opens it.
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusConflict || out["reason"] != "goal_changed" || store.created[0].ProposedAt != nil {
 		t.Fatalf("proposing for the goal before: got = %d %v, want 409 goal_changed and nothing stored", code, out)
 	}
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal?check=true", aProposal(nil)); code != http.StatusConflict || out["reason"] != "goal_changed" {
 		t.Fatalf("checking a proposal for the goal before: got = %d %v, want 409 goal_changed", code, out)
 	}
-	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"goal_version": 2, "budget_accelerator_hours": 4})); code != http.StatusOK || store.created[0].ProposedAt == nil {
-		t.Fatalf("proposing for the new goal: %d %v", code, out)
-	}
 	// The planner changes no goal, and a closed draft takes none.
 	if code, _ := propose("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "m"}); code != http.StatusForbidden {
 		t.Errorf("the planner changing the goal: got = %d, want 403", code)
+	}
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"goal_version": 2, "budget_accelerator_hours": 4})); code != http.StatusOK || store.created[0].Status != domain.PlatformExpOpen {
+		t.Fatalf("proposing for the new goal: %d %v", code, out)
 	}
 	store.created[0].Status = domain.PlatformExpClosed
 	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "m"}); code != http.StatusConflict || out["reason"] != "not_editable" {
@@ -903,7 +834,7 @@ func (s *draftStore) Decline(_ context.Context, id string, goalVersion int, reas
 			}
 			now := time.Now().UTC()
 			kept := now.Add(keepPlanner)
-			pe.DeclinedReason, pe.Proposal, pe.PlannerEndsAt, pe.AcceptsAt = reason, nil, &kept, nil
+			pe.DeclinedReason, pe.Proposal, pe.PlannerEndsAt = reason, nil, &kept
 			pe.SetAnswered(&now, false)
 			pe.SetClosesAt(waitUntil)
 			return nil
@@ -912,15 +843,34 @@ func (s *draftStore) Decline(_ context.Context, id string, goalVersion int, reas
 	return db.ErrNotDraft
 }
 
+// The planner's working plan is checked as a proposal and stored on the draft for its baseline
+// agent to start from, and opens nothing.
+func TestAWorkingPlanIsCheckedAndStoredAndOpensNothing(t *testing.T) {
+	store := draftWithPlanner()
+	_, call := planningRouter(t, store, thePlanner)
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal?working=true", aProposal(map[string]any{"budget_accelerator_hours": -1})); code != http.StatusUnprocessableEntity {
+		t.Fatalf("a working plan that does not hold: got = %d %v, want 422", code, out)
+	}
+	code, out := call("PUT", "/platform-experiments/pe-draft/proposal?working=true", aProposal(nil))
+	if code != http.StatusOK || out["status"] != "draft" {
+		t.Fatalf("a working plan: got = %d %v, want 200 and the draft", code, out)
+	}
+	pe := store.created[0]
+	var stored platformexperiments.Proposal
+	if err := json.Unmarshal(pe.Proposal, &stored); err != nil || stored.BudgetAcceleratorHours != 6 || pe.Status != domain.PlatformExpDraft || pe.ProposedAt != nil || len(store.acceptedAgents) != 0 {
+		t.Fatalf("stored %+v (%v) on a draft of status %s answered at %v with %d agents, want the plan stored and nothing opened", stored, err, pe.Status, pe.ProposedAt, len(store.acceptedAgents))
+	}
+	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK || out["status"] != "open" {
+		t.Fatalf("the proposal after a working plan: got = %d %v, want it open", code, out)
+	}
+}
+
 // A goal the planner could not plan ended as a draft that closed at its limit with nothing on
-// its page. The planner says why, and the person answers that as they answer a proposal.
+// its page. The planner says why, and the person answers it by changing the goal.
 func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	store := draftWithPlanner()
 	_, asPlanner := planningRouter(t, store, thePlanner)
 	_, call := planningRouter(t, store, planner)
-	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
-		t.Fatalf("propose: %d %v", code, out)
-	}
 	for name, reason := range map[string]string{"no reason": " ", "an essay": strings.Repeat("x", platformexperiments.MaxDeclineBytes+1)} {
 		if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": reason, "goal_version": 1}); code != http.StatusUnprocessableEntity || store.created[0].DeclinedReason != "" {
 			t.Errorf("%s: got = %d %v, want 422 and nothing stored", name, code, out)
@@ -946,12 +896,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 		t.Errorf("a declined draft read: status_reason = %v, want declined", read["status_reason"])
 	}
 	if wait := store.created[0].ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
-		t.Errorf("a declined draft ends in %v, want it to wait for the person as a proposal does", wait)
-	}
-	// The earlier proposal no longer stands, so nothing is accepted.
-	accept := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusConflict || out["reason"] != "invalid_transition" || !strings.Contains(out["message"].(string), "declined") {
-		t.Errorf("accepting a declined draft: got = %d %v, want 409 invalid_transition that says it declined", code, out)
+		t.Errorf("a declined draft ends in %v, want it to wait for the person", wait)
 	}
 	// The person says what was missing in the goal; the reason stays until the planner answers again.
 	code, out = call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "The small transformer in train.py, by validation loss."})
@@ -984,10 +929,9 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
 		t.Fatalf("propose: %d %v", code, out)
 	}
-	svc, call := planningRouter(t, store, planner)
-	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}}
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK || out["status"] != "open" || out["status_reason"].(map[string]any)["reason"] != "baseline_measuring" {
-		t.Fatalf("accept: got = %d %v, want it open with its baseline agent measuring", code, out)
+	svc, _ := planningRouter(t, store, planner)
+	if out := store.created[0]; out.Status != domain.PlatformExpOpen {
+		t.Fatalf("proposed: %s, want it open with its baseline agent measuring", out.Status)
 	}
 	if len(store.baselines) != 1 || len(store.agentIDs) != 2 {
 		t.Fatalf("accepted with %d baseline agents and %d agents, want 1 and 2", len(store.baselines), len(store.agentIDs))
@@ -1045,11 +989,7 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
 		t.Fatalf("propose: %d %v", code, out)
 	}
-	svc, call := planningRouter(t, store, planner)
-	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}}
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK {
-		t.Fatalf("accept: %d %v", code, out)
-	}
+	svc, _ := planningRouter(t, store, planner)
 	measures := store.baselines[0].AgentID
 	job := func(id, agent string, status domain.ExperimentStatus) *platformexperiments.Baseline {
 		b := measuredBaseline()
@@ -1111,11 +1051,7 @@ func TestABaselineAgentDeclaresNoJobItsOwnJobsBeat(t *testing.T) {
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
 		t.Fatalf("propose: %d %v", code, out)
 	}
-	svc, call := planningRouter(t, store, planner)
-	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}}
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK {
-		t.Fatalf("accept: %d %v", code, out)
-	}
+	svc, _ := planningRouter(t, store, planner)
 	measures := store.baselines[0].AgentID
 	jobs := map[string]*platformexperiments.Baseline{}
 	job := func(id, agent, branch string, valLoss float64) {
@@ -1157,11 +1093,7 @@ func TestAStoredFinishIsAnsweredAsOneWhenItsDeclarationFails(t *testing.T) {
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
 		t.Fatalf("propose: %d %v", code, out)
 	}
-	svc, call := planningRouter(t, store, planner)
-	accept := map[string]any{"budget_accelerator_hours": 6, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK {
-		t.Fatalf("accept: %d %v", code, out)
-	}
+	svc, _ := planningRouter(t, store, planner)
 	measured := measuredBaseline()
 	store.left = []*domain.Experiment{measured.Job}
 	svc.WithBaselineRead(func(context.Context, *domain.PlatformExperiment, string) (*platformexperiments.Baseline, error) {
@@ -1178,236 +1110,44 @@ func TestAStoredFinishIsAnsweredAsOneWhenItsDeclarationFails(t *testing.T) {
 	}
 }
 
-// A person who wanted another name for the experiment had to have the planner propose again and
-// wait for it. The accept takes the name they typed, held to the rule of every name, and nothing
-// else of the proposal's experiment.
-func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
-	proposed := func() (*draftStore, func(method, path string, body any) (int, map[string]any)) {
-		store := draftWithPlanner()
-		_, propose := planningRouter(t, store, thePlanner)
-		if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
-			t.Fatalf("propose: %d %v", code, out)
-		}
-		_, call := planningRouter(t, store, planner)
-		return store, call
-	}
-	accept := func(more map[string]any) map[string]any {
-		body := map[string]any{"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 30, "agents": []map[string]any{{}}}
-		for key, value := range more {
-			body[key] = value
-		}
-		return body
-	}
-
-	store, call := proposed()
-	code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"name": "  Cosine against constant, small transformer \n"}))
-	pe := store.created[0]
-	if code != http.StatusOK || pe.Name != "Cosine against constant, small transformer" || out["name"] != pe.Name {
-		t.Fatalf("accepting under another name: got = %d %v, stored %q, want the name given, trimmed", code, out, pe.Name)
-	}
-	if !strings.HasPrefix(pe.Description, "Train the small transformer") || len(pe.Metrics) != 1 || pe.Metrics[0].Key != "val_loss" {
-		t.Errorf("accepted %+v, want the proposal's brief and metrics unchanged", pe)
-	}
-
-	store, call = proposed()
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(nil)); code != http.StatusOK || store.created[0].Name != "Cosine or constant" {
-		t.Fatalf("accepting with no name: got = %d %v, stored %q, want the proposal's", code, out, store.created[0].Name)
-	}
-
-	for name, given := range map[string]string{"two lines": "Cosine\nor constant", "nothing but spaces": "   "} {
-		store, call = proposed()
-		code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"name": given}))
-		if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_experiment" || store.created[0].Status != domain.PlatformExpDraft {
-			t.Errorf("a name of %s: got = %d %v with the draft %s, want 422 invalid_experiment and the draft left a draft", name, code, out, store.created[0].Status)
-		}
-	}
-	// Nothing else of the experiment is the accept's to change.
-	store, call = proposed()
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(map[string]any{"description": "another brief"})); code != http.StatusUnprocessableEntity || store.created[0].Status != domain.PlatformExpDraft {
-		t.Errorf("an accept that states a brief: got = %d %v, want 422 and nothing accepted", code, out)
-	}
-}
-
-// An owner accepted 10 s after the proposal and its set-up still took 30 minutes, and an
-// owner away from the page held the run up for as long as they were away. A proposal without
-// questions (TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief) is accepted
-// as proposed by itself unless a person acts first: accepts it, holds it to edit it, changes its
-// goal or closes it.
-func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
-	creator := domain.Actor{Kind: domain.ActorUser, ID: "u-creator"}
-	proposed := func(t *testing.T) (*draftStore, *platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
-		t.Helper()
-		store := draftWithPlanner()
-		store.created[0].Actor = &creator
-		_, propose := planningRouter(t, store, thePlanner)
-		code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-		if code != http.StatusOK {
-			t.Fatalf("propose: %d %v", code, out)
-		}
-		svc, call := planningRouter(t, store, planner)
-		handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes})
-		return store, handler, call
-	}
-	due := func(store *draftStore) {
-		past := time.Now().Add(-time.Second)
-		store.created[0].AcceptsAt = &past
-	}
-
-	store, handler, call := proposed(t)
-	_, out := call("GET", "/platform-experiments/pe-draft", nil)
-	why, _ := out["status_reason"].(map[string]any)
-	accepts, _ := time.Parse(time.RFC3339, fmt.Sprint(out["accepts_at"]))
-	if why["reason"] != "accepting" || why["waits_for"] != "platform" || time.Until(accepts) < 25*time.Second || time.Until(accepts) > 35*time.Second {
-		t.Fatalf("proposed: status_reason %v, accepts_at %v, want accepting by the platform in 30 s", why, out["accepts_at"])
-	}
-	// The proposal signed up the agent that measures the baseline, for the person who created the
-	// draft, so that its machine starts while the proposal is read.
-	if len(store.baselines) != 1 || store.baselines[0].Role != domain.SignupRoleBaseline || !store.baselines[0].InAgentSandbox || store.baselines[0].Actor == nil || store.baselines[0].Actor.ID != "u-creator" {
-		t.Fatalf("baseline agents after the proposal: %+v, want one sandboxed, added for the creator", store.baselines)
-	}
-	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
-		t.Fatalf("before accepts_at: %v, status %s, want a draft still", err, store.created[0].Status)
-	}
-	due(store)
-	if err := handler.AcceptDue(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	pe := store.created[0]
-	if pe.Status != domain.PlatformExpOpen || pe.BudgetAcceleratorHours != 6 || pe.DurationHours != 4 || pe.MaxAgents != 2 || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(30*time.Minute)) || pe.AcceptsAt != nil {
-		t.Fatalf("accepted as proposed: got %+v, want open at the proposal's 6 hours of budget, 4 of run, 2 executors and 30 minutes of baseline", pe)
-	}
-	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].AgentType != "hyperparameter-search" || store.acceptedSignups[0].Actor.ID != "u-creator" || len(store.baselines) != 1 {
-		t.Fatalf("executors %+v beside %d baseline agents, want the 2 proposed, added for the creator, and the one baseline agent", store.acceptedSignups, len(store.baselines))
-	}
-	// Accepted by the platform, the proposal stays to be read, with no person named as accepting.
-	_, out = call("GET", "/platform-experiments/pe-draft", nil)
-	if proposal, _ := out["proposal"].(map[string]any); proposal["experiment"] == nil || out["accepted_at"] == nil || out["accepted_by"] != nil {
-		t.Fatalf("read after the platform accepted: proposal %v, accepted_at %v, accepted_by %v, want the proposal and accepted_at without accepted_by", out["proposal"], out["accepted_at"], out["accepted_by"])
-	}
-
-	// Held, it waits for a person and is not accepted by itself.
-	store, handler, call = proposed(t)
-	code, out := call("POST", "/platform-experiments/pe-draft/hold", nil)
-	if why, _ := out["status_reason"].(map[string]any); code != http.StatusOK || why["reason"] != "proposed" || why["waits_for"] != "owner" || out["accepts_at"] != nil {
-		t.Fatalf("hold: got = %d %v, want proposed, waiting for the owner, with no accepts_at", code, out)
-	}
-	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
-		t.Fatalf("a held draft: %v, status %s, want a draft still", err, store.created[0].Status)
-	}
-	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusOK {
-		t.Errorf("holding a held draft: got = %d %v, want 200", code, out)
-	}
-	// The person accepts what they edited.
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{"budget_accelerator_hours": 2, "duration_hours": 1, "baseline_minutes": 45, "agents": []map[string]any{{}}}); code != http.StatusOK || store.created[0].BudgetAcceleratorHours != 2 {
-		t.Fatalf("accepting the edited proposal: got = %d %v", code, out)
-	}
-	_, out = call("GET", "/platform-experiments/pe-draft", nil)
-	if by, _ := out["accepted_by"].(map[string]any); by["id"] != "u-1" || by["name"] != "named u-1" || out["accepted_at"] == nil || out["proposal"] == nil {
-		t.Fatalf("read after a person accepted: accepted_by %v, accepted_at %v, want the person, named, and the proposal kept", out["accepted_by"], out["accepted_at"])
-	}
-	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Errorf("holding what is no draft: got = %d %v, want 409 invalid_transition", code, out)
-	}
-
-	// With its goal changed, nothing is accepted until the planner proposes again.
-	store, handler, call = proposed(t)
-	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "smaller"}); code != http.StatusOK || out["accepts_at"] != nil {
-		t.Fatalf("change the goal: got = %d %v, want no accepts_at", code, out)
-	}
-	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Errorf("holding a draft planned again: got = %d %v, want 409 invalid_transition", code, out)
-	}
-
-	// One the check refuses when its time comes waits for a person, who is told why on accepting.
-	store, handler, _ = proposed(t)
-	store.reachable = map[string][]domain.Cluster{}
-	due(store)
-	if err := handler.AcceptDue(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if pe := store.created[0]; pe.Status != domain.PlatformExpDraft || pe.AcceptsAt != nil {
-		t.Fatalf("a proposal the check refuses: status %s, accepts_at %v, want a draft held for a person", pe.Status, pe.AcceptsAt)
-	}
-}
-
-// A planner listed what the goal left open ("no margin was stated, so I set 1.5x") and the
-// platform accepted the proposal 30 s later, so the agents ran on its guesses. A proposal with
-// questions waits for a person, who answers each on accepting it, and the brief states the answers.
-func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *testing.T) {
+// A planner listed what the goal left open ("no margin was stated, so I set 1.5x") and the run
+// waited for a person to confirm it. The answers are the assumptions the run starts on: the
+// proposal opens with them added to the brief, where a person changes them.
+func TestAProposalWithQuestionsOpensWithItsAnswersInTheBrief(t *testing.T) {
 	questions := []map[string]any{
 		{"question": "How big a win counts?", "answer": "1.5x the control's throughput."},
 		{"question": "Which batch sizes are held equal?", "answer": "32 only."},
 	}
-	proposed := func(t *testing.T) (*draftStore, *platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
-		t.Helper()
-		store := draftWithPlanner()
-		_, propose := planningRouter(t, store, thePlanner)
-		if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"questions": questions})); code != http.StatusOK {
-			t.Fatalf("propose: %d %v", code, out)
-		}
-		svc, call := planningRouter(t, store, planner)
-		handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes})
-		return store, handler, call
+	store := draftWithPlanner()
+	_, propose := planningRouter(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"questions": questions})); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
 	}
-	accept := func(answers any) map[string]any {
-		return map[string]any{"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{}, {}}, "answers": answers}
-	}
-
-	store, handler, call := proposed(t)
-	_, out := call("GET", "/platform-experiments/pe-draft", nil)
-	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "proposed" || why["waits_for"] != "owner" || out["accepts_at"] != nil {
-		t.Fatalf("proposed with questions: status_reason %v, accepts_at %v, want proposed, waiting for the owner, with no accepts_at", why, out["accepts_at"])
-	}
-	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
-		t.Fatalf("auto-accept pass: %v, status %s, want a draft still", err, store.created[0].Status)
-	}
-
-	for name, answers := range map[string]any{"none": nil, "one of two": []string{"1.5x"}, "an empty one": []string{"1.5x", "  "}} {
-		code, out := call("POST", "/platform-experiments/pe-draft/accept", accept(answers))
-		if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_answers" || store.created[0].Status != domain.PlatformExpDraft {
-			t.Errorf("answers %s: got = %d %v, want 422 invalid_answers and the draft left a draft", name, code, out)
-		}
-	}
-
-	code, out := call("POST", "/platform-experiments/pe-draft/accept", accept([]string{"1.5x the control's throughput.", "32 and\n 64."}))
 	pe := store.created[0]
-	if code != http.StatusOK || pe.Status != domain.PlatformExpOpen {
-		t.Fatalf("accepting with answers: got = %d %v, status %s", code, out, pe.Status)
+	if pe.Status != domain.PlatformExpOpen {
+		t.Fatalf("proposed with questions: status %s, want open", pe.Status)
 	}
-	want := "Decisions the owner made before the run:\n- How big a win counts? Answer: 1.5x the control's throughput.\n- Which batch sizes are held equal? Answer: 32 and 64."
+	want := "Assumptions the plan runs on:\n- How big a win counts? Answer: 1.5x the control's throughput.\n- Which batch sizes are held equal? Answer: 32 only."
 	if !strings.HasPrefix(pe.Description, "Train the small transformer") || !strings.HasSuffix(pe.Description, "\n\n"+want) {
-		t.Errorf("accepted brief %q, want the proposal's brief followed by\n%s", pe.Description, want)
+		t.Errorf("brief %q, want the proposal's brief followed by\n%s", pe.Description, want)
+	}
+	if pe.AcceptedBy != nil || pe.AcceptedAt == nil || !slices.Equal(pe.AcceptedAnswers, []string{"1.5x the control's throughput.", "32 only."}) {
+		t.Errorf("applied by %+v at %v with %q, want nobody, now, and the planner's answers", pe.AcceptedBy, pe.AcceptedAt, pe.AcceptedAnswers)
 	}
 
-	// The proposal, its questions with the answers planned on, and the answers given stay to be
-	// read by anyone who reads the experiment, and by nobody of another org.
-	if pe.AcceptedBy == nil || pe.AcceptedBy.ID != "u-1" || pe.AcceptedAt == nil || !slices.Equal(pe.AcceptedAnswers, []string{"1.5x the control's throughput.", "32 and 64."}) {
-		t.Errorf("accept recorded as by %+v at %v with %q, want u-1, now, and the answers as the brief states them", pe.AcceptedBy, pe.AcceptedAt, pe.AcceptedAnswers)
-	}
+	// The proposal and its questions stay to be read by anyone who reads the experiment, and by
+	// nobody of another org.
 	reader := auth.Principal{Kind: auth.KindUser, UserID: "u-reader", OrgIDs: []string{"org-a"}}
 	_, read := planningRouter(t, store, reader)
-	code, out = read("GET", "/platform-experiments/pe-draft", nil)
+	code, out := read("GET", "/platform-experiments/pe-draft", nil)
 	proposal, _ := out["proposal"].(map[string]any)
 	asked, _ := proposal["questions"].([]any)
-	if first, _ := asked[0].(map[string]any); code != http.StatusOK || len(asked) != 2 || first["answer"] != "1.5x the control's throughput." || fmt.Sprint(out["accepted_answers"]) != "[1.5x the control's throughput. 32 and 64.]" {
-		t.Errorf("a reader of the org: got = %d, questions %v, accepted_answers %v, want the proposal's questions and the answers given", code, proposal["questions"], out["accepted_answers"])
+	if first, _ := asked[0].(map[string]any); code != http.StatusOK || len(asked) != 2 || first["answer"] != "1.5x the control's throughput." || fmt.Sprint(out["accepted_answers"]) != "[1.5x the control's throughput. 32 only.]" {
+		t.Errorf("a reader of the org: got = %d, questions %v, accepted_answers %v, want the proposal's questions and the answers", code, proposal["questions"], out["accepted_answers"])
 	}
 	_, foreign := planningRouter(t, store, auth.Principal{Kind: auth.KindUser, UserID: "u-foreign", OrgIDs: []string{"org-b"}})
 	if code, out := foreign("GET", "/platform-experiments/pe-draft", nil); code != http.StatusNotFound || out["proposal"] != nil {
 		t.Errorf("a user of another org: got = %d %v, want 404", code, out)
-	}
-
-	// Without questions an accept that answers some is refused, so no answer is dropped unread.
-	store = draftWithPlanner()
-	_, propose := planningRouter(t, store, thePlanner)
-	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
-		t.Fatalf("propose: %d %v", code, out)
-	}
-	_, call = planningRouter(t, store, planner)
-	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept([]string{"1.5x"})); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_answers" {
-		t.Errorf("answers to no question: got = %d %v, want 422 invalid_answers", code, out)
 	}
 }
 
@@ -1732,5 +1472,99 @@ func TestADeclarationThePlatformIsRefusedWaitsForTheOwnerAndIsMadeByTheirChange(
 	code, out = patch(map[string]any{"budget_accelerator_hours": 8})
 	if code != http.StatusOK || out["status"] != "running" || store.created[0].BaselineJobID != "job-1" || store.started != 1 {
 		t.Fatalf("the owner raising the budget: got = %d %v with baseline %q and %d starts, want job-1 declared and the run started", code, out, store.created[0].BaselineJobID, store.started)
+	}
+}
+
+// A proposal stored while proposals waited for a person, before this release, is applied once
+// when the platform starts, as the platform would have accepted it.
+func TestAStandingProposalIsAppliedOnce(t *testing.T) {
+	store := draftWithPlanner()
+	proposal, err := json.Marshal(aProposal(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	store.created[0].Proposal = proposal
+	store.created[0].SetAnswered(&now, true)
+	svc, _ := planningRouter(t, store, planner)
+	svc.ApplyStanding(context.Background(), time.Minute)
+	if pe := store.created[0]; pe.Status != domain.PlatformExpOpen || pe.BudgetAcceleratorHours != 6 || len(store.baselines) != 1 {
+		t.Fatalf("after the pass: %s with budget %v and %d baseline agents, want it open as proposed", pe.Status, pe.BudgetAcceleratorHours, len(store.baselines))
+	}
+	declined := draftWithPlanner()
+	declined.created[0].DeclinedReason = "nothing to measure"
+	declined.created[0].SetAnswered(&now, false)
+	svc, _ = planningRouter(t, declined, planner)
+	svc.ApplyStanding(context.Background(), time.Minute)
+	if pe := declined.created[0]; pe.Status != domain.PlatformExpDraft {
+		t.Fatalf("a declined draft after the pass: %s, want a draft still", pe.Status)
+	}
+}
+
+// The machine the planner chose is the plan's, which the person changes while the experiment is
+// open: checked as a proposal's is, a change between an accelerator and CPU cores states the
+// budget in its new unit, and the baseline is measured again in a fresh window.
+func TestThePlansMachineChangesWhileItIsOpen(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningRouter(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	_, call := planningRouter(t, store, planner)
+	if code, out := call("GET", "/platform-experiments/pe-draft", nil); code != http.StatusOK || !slices.Contains(out["editable"].([]any), "cpu") || slices.Contains(out["editable"].([]any), "max_agents") {
+		t.Fatalf("editable of the open experiment: %d %v, want the machine and no max_agents", code, out["editable"])
+	}
+	due := store.created[0].BaselineDueAt
+	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"cpu": "4"}); code != http.StatusOK {
+		t.Fatalf("a machine of fewer cores: %d %v", code, out)
+	}
+	machine, ok := domain.PlanMachine(store.created[0].Proposal)
+	if !ok || machine.CPU != "4" || machine.AcceleratorType != "rtx-4090" || !store.created[0].BaselineDueAt.After(due) {
+		t.Fatalf("after the change: machine %+v, baseline_due_at %v from %v, want 4 cores on the same type and a later window", machine, store.created[0].BaselineDueAt, due)
+	}
+	for name, c := range map[string]struct {
+		body   map[string]any
+		reason string
+	}{
+		"CPU cores with the budget unstated": {map[string]any{"accelerator_type": ""}, "budget_unit_changed"},
+		"a type nobody has":                  {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
+		"memory that is no quantity":         {map[string]any{"memory": "lots"}, "invalid_resources"},
+	} {
+		if code, out := call("PATCH", "/platform-experiments/pe-draft", c.body); code != http.StatusUnprocessableEntity || out["reason"] != c.reason {
+			t.Errorf("%s: %d %v, want 422 %s", name, code, out, c.reason)
+		}
+	}
+	store.reachable[string(domain.CPUType)] = []domain.Cluster{{Name: "rented"}}
+	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"accelerator_type": "", "budget_accelerator_hours": 40}); code != http.StatusOK || out["budget_kind"] != "cpu" {
+		t.Errorf("CPU cores with a budget of core-hours: %d %v, want 200 and a budget of cpu", code, out)
+	}
+}
+
+// A change of the plan's machine cancels the baseline jobs that ask for the machine before, so
+// nobody pays for work that can no longer count. An executor's job and a baseline job already
+// on the new machine keep running.
+func TestAMachineChangeCancelsTheBaselineJobsOnTheMachineBefore(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningRouter(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	baseline := store.baselines[0].AgentID
+	on := func(id, agent, cpu string) *domain.Experiment {
+		return &domain.Experiment{ID: id, PlatformExperimentID: "pe-draft", AgentID: agent, Status: domain.StatusRunning,
+			Job: domain.JobSpec{AcceleratorType: "rtx-4090", AcceleratorCount: 1, CPU: cpu, Memory: "32Gi", Storage: "100Gi"}}
+	}
+	store.active = []*domain.Experiment{on("job-before", baseline, "8"), on("job-new", baseline, "4"), on("job-executor", "ag-executor", "8")}
+	svc, call := planningRouter(t, store, planner)
+	svc.WithJobCancel(store)
+	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"cpu": "4"}); code != http.StatusOK {
+		t.Fatalf("a machine of fewer cores: %d %v", code, out)
+	}
+	if !slices.Equal(store.cancelled, []string{"job-before"}) {
+		t.Errorf("cancelled %v, want only the baseline job on the machine before", store.cancelled)
+	}
+	store.cancelled = nil
+	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"cpu": "4"}); code != http.StatusOK || len(store.cancelled) != 0 {
+		t.Errorf("the machine it has: %d %v with %v cancelled, want nothing cancelled", code, out, store.cancelled)
 	}
 }

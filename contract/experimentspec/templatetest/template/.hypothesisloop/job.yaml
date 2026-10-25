@@ -1,0 +1,42 @@
+# The base job spec of this experiment. Every trial is this file, submitted unedited:
+#
+#   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
+#
+# The flags set what differs from one trial to the next, and hl fills code_ref from the
+# clone it runs in. `hl job submit --help` lists every field. No secret belongs here: a job takes
+# one with --secret-env. The job names no image: it runs in the one the experiment records
+# (hl image set REF).
+# No estimated_duration_hours is stated here. A job that states none gets the one the platform
+# measured on the experiment's baseline job: what it ran plus a half. The baseline job itself is
+# given the largest its agent's quota admits. --estimated-duration-hours states one for a trial
+# that will run longer.
+job:
+  # The platform fetches the job's commit into /workspace/code and runs this command there.
+  command: ["python", "REPLACE-WITH-THE-SCRIPT-OF-ONE-TRIAL"]
+  # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines, and
+  # its `cpu`, a whole number, is then the cores it holds and pays for.
+  accelerator_type: REPLACE-WITH-AN-ACCELERATOR-TYPE-HL-CAPACITY-LISTS
+  accelerator_count: 1
+  # Required, all three, each a quantity: the cores and the memory one node uses and the scratch
+  # space it writes. A job holds what it states, so state what a trial uses and other jobs run
+  # beside it. More than any cluster has is refused with exceeds_cluster_capacity.
+  cpu: 2
+  memory: 8Gi
+  storage: 4Gi
+  # Variables every trial starts with. --env KEY=VALUE sets one for a single submit.
+  # env:
+  #   SEED: "0"
+
+  # A job over several identical nodes. accelerator_count, cpu, memory and storage are per node,
+  # and every node gets RANK, WORLD_SIZE, MASTER_ADDR and MASTER_PORT.
+  # num_nodes: 2
+  # max_retries: 1                      # restarts of the whole job, 0 by default
+  # topology:
+  #   spread_across_hosts: true         # no two nodes share a host, the default
+  #   nodes_within: zone                # region, zone or placement_group, zone by default
+
+  # Nodes of different shapes. groups replaces num_nodes and the per-node accelerator_count,
+  # cpu, memory and storage. accelerator_type, max_retries and topology stay at the top.
+  # groups:
+  #   - {name: learner, replicas: 1, accelerator_count: 8, cpu: 32, memory: 128Gi, storage: 20Gi, command: ["bash", "learner.sh"]}
+  #   - {name: actor, replicas: 16, cpu: 4, memory: 8Gi, storage: 4Gi, command: ["bash", "actor.sh"]}

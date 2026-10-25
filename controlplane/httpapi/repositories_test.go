@@ -97,10 +97,22 @@ func (s *memInstallations) DisconnectGitHubInstallation(_ context.Context, orgID
 	for i, have := range s.connected[orgID] {
 		if have.InstallationID == id {
 			s.connected[orgID] = slices.Delete(s.connected[orgID], i, i+1)
+			if have.Default && len(s.connected[orgID]) > 0 {
+				s.connected[orgID][0].Default = true
+			}
 			return nil
 		}
 	}
 	return db.ErrGitHubInstallationNotFound
+}
+
+func (s *memInstallations) GitHubInstallationConnectedElsewhere(_ context.Context, orgID string, id int64) (bool, error) {
+	for org, connected := range s.connected {
+		if org != orgID && slices.ContainsFunc(connected, func(have *domain.OrgGitHubInstallation) bool { return have.InstallationID == id }) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *memInstallations) MakeGitHubInstallationDefault(_ context.Context, orgID string, id int64) error {
@@ -147,6 +159,9 @@ type fakeApp struct {
 	createErr error
 	// notGranted is what of the App's permissions an installation has not granted, by its id.
 	notGranted map[int64][]string
+	// uninstalled holds each installation removed from GitHub, and uninstallErr fails each removal.
+	uninstalled  []int64
+	uninstallErr error
 }
 
 var (
@@ -184,7 +199,15 @@ func newFakeApp() *fakeApp {
 }
 
 func (a *fakeApp) App() github.App {
-	return github.App{Slug: "hypothesisloop", InstallURL: "https://github.test/apps/hypothesisloop/installations/new"}
+	return github.App{Slug: "hypothesisloop", InstallURL: "https://github.test/apps/hypothesisloop/installations/new", AuthorizeURL: "https://github.test/login/oauth/authorize?client_id=Iv23test"}
+}
+
+func (a *fakeApp) Uninstall(_ context.Context, installationID int64) error {
+	if a.uninstallErr != nil {
+		return a.uninstallErr
+	}
+	a.uninstalled = append(a.uninstalled, installationID)
+	return nil
 }
 
 func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github.Installation, error) {
@@ -382,8 +405,8 @@ func TestAnInstallConnectsTheInstallationGitHubHandsBack(t *testing.T) {
 	w := newGitHubWorld(t, true)
 	var started accounts.InstallStart
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-install-states", map[string]any{"return_to": "/projects/p-1/experiments?new=1"}, http.StatusCreated, &started)
-	if started.State == "" || started.InstallURL != "https://github.test/apps/hypothesisloop/installations/new?state="+started.State || started.ExpiresAt.Before(w.store.clock.Add(14*time.Minute)) || started.ExpiresAt.After(w.store.clock.Add(16*time.Minute)) {
-		t.Fatalf("started = %+v, want a state, the install page carrying it, good for 15 minutes", started)
+	if started.State == "" || started.InstallURL != "https://github.test/login/oauth/authorize?client_id=Iv23test&state="+started.State || started.ExpiresAt.Before(w.store.clock.Add(14*time.Minute)) || started.ExpiresAt.After(w.store.clock.Add(16*time.Minute)) {
+		t.Fatalf("started = %+v, want a state, the authorization page carrying it, good for 15 minutes", started)
 	}
 	w.store.clock = w.store.clock.Add(time.Minute)
 	var finished accounts.InstallFinished
@@ -428,7 +451,7 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 		reason  string
 		says    string
 	}{
-		"a made-up state": {func(w *githubWorld) map[string]any { return finishBody("state-forged", acme.ID) }, "owner", 422, accounts.ReasonInstallStateInvalid, "Install GitHub App again"},
+		"a made-up state": {func(w *githubWorld) map[string]any { return finishBody("state-forged", acme.ID) }, "owner", 422, accounts.ReasonInstallStateInvalid, "Connect GitHub again"},
 		"a state used before": {func(w *githubWorld) map[string]any {
 			state := w.begin("owner", w.orgA)
 			w.ok("owner", "POST", "/github/installations", finishBody(state, rival.ID), http.StatusCreated, nil)
@@ -449,7 +472,7 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 			body := finishBody(w.begin("owner", w.orgA), acme.ID)
 			body["code"] = "code-forged"
 			return body
-		}, "owner", 422, github.ReasonAuthorizationInvalid, "Install GitHub App again"},
+		}, "owner", 422, github.ReasonAuthorizationInvalid, "Connect GitHub again"},
 		"no code": {func(w *githubWorld) map[string]any {
 			body := finishBody(w.begin("owner", w.orgA), acme.ID)
 			delete(body, "code")
@@ -468,8 +491,8 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 			w.app.notGranted[acme.ID] = []string{"administration:write"}
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
 		}, "owner", 422, githost.ReasonPermissionMissing, "administration:write"},
-		"no installation": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 0) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
-		"no state":        {func(w *githubWorld) map[string]any { return finishBody("", acme.ID) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
+		"a negative installation": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), -1) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
+		"no state":                {func(w *githubWorld) map[string]any { return finishBody("", acme.ID) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
 		"github rate limits": {func(w *githubWorld) map[string]any {
 			w.app.installationErr = fmt.Errorf("%w (%s)", github.ErrRateLimited, leak)
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
@@ -538,8 +561,86 @@ func TestInstallationsAreListedPagedAndDisconnected(t *testing.T) {
 	if len(w.installations.connected[w.orgA]) != 1 || len(w.installations.connected[w.orgB]) != 1 {
 		t.Fatalf("after disconnecting one: %d of org a and %d of org b, want one each", len(w.installations.connected[w.orgA]), len(w.installations.connected[w.orgB]))
 	}
-	if len(w.app.looked)+len(w.app.listed)+len(w.app.mints) != 0 {
-		t.Fatal("listing or disconnecting asked GitHub")
+	if len(w.app.looked)+len(w.app.listed)+len(w.app.mints)+len(w.app.uninstalled) != 0 {
+		t.Fatal("listing, or disconnecting what another org still connects, asked GitHub")
+	}
+}
+
+// Disconnecting what no other org connects removes the App from the GitHub account too, so that
+// connecting it again goes through GitHub's install page. GitHub failing that changes nothing.
+func TestDisconnectingTheLastConnectionRemovesTheAppOnGitHub(t *testing.T) {
+	w := newGitHubWorld(t, true)
+	path := "/orgs/" + w.orgA + "/github-installations"
+	w.connect(w.orgA, acme)
+	w.connect(w.orgA, rival)
+	w.connect(w.orgB, acme)
+
+	w.ok("owner", "DELETE", path+"/100", nil, http.StatusNoContent, nil)
+	if len(w.app.uninstalled) != 0 {
+		t.Fatalf("uninstalled = %v, want none while org b still connects acme", w.app.uninstalled)
+	}
+
+	w.app.uninstallErr = fmt.Errorf("%w (%s)", github.ErrRateLimited, leak)
+	message := w.refused("owner", "DELETE", path+"/200", nil, http.StatusBadGateway, accounts.ReasonUninstallFailed)
+	if !strings.Contains(message, "rival") || strings.Contains(message, leak) || len(w.installations.connected[w.orgA]) != 1 {
+		t.Fatalf("GitHub failing the removal: %q with %d connected, want rival named, still connected, and none of GitHub's text", message, len(w.installations.connected[w.orgA]))
+	}
+
+	w.app.uninstallErr = nil
+	w.ok("owner", "DELETE", path+"/200", nil, http.StatusNoContent, nil)
+	if !slices.Equal(w.app.uninstalled, []int64{rival.ID}) || len(w.installations.connected[w.orgA]) != 0 {
+		t.Fatalf("uninstalled = %v with %d connected, want rival removed on GitHub and here", w.app.uninstalled, len(w.installations.connected[w.orgA]))
+	}
+
+	// An installation the org never connected is not removed from GitHub on its say.
+	w.refused("owner", "DELETE", "/orgs/"+w.orgA+"/github-installations/100", nil, http.StatusNotFound, accounts.ReasonNotFound)
+	w.ok("foreign-key", "DELETE", "/orgs/"+w.orgB+"/github-installations/100", nil, http.StatusNoContent, nil)
+	if !slices.Equal(w.app.uninstalled, []int64{rival.ID, acme.ID}) {
+		t.Fatalf("uninstalled = %v, want acme removed once its last org disconnected it", w.app.uninstalled)
+	}
+}
+
+// A connect starts at GitHub's authorization page, which returns no installation: every
+// installation the GitHub user may reach that the org has not connected is connected, as one the
+// App was installed on before, so no one is left on GitHub's install page with nothing to do.
+// With none, the answer is GitHub's install page with a new state.
+func TestAConnectWithoutAnInstallationConnectsWhatThePersonMayReach(t *testing.T) {
+	w := newGitHubWorld(t, true)
+	w.connect(w.orgA, acme)
+	w.connect(w.orgB, rival)
+	w.app.notGranted[carol.ID] = []string{"administration:write"}
+
+	var finished accounts.InstallFinished
+	w.ok("owner", "POST", "/github/installations", finishBody(w.begin("owner", w.orgA), 0), http.StatusCreated, &finished)
+	if finished.Installation == nil || finished.Installation.InstallationID != rival.ID || finished.Install != nil || finished.ReturnTo != "/projects/p-1/experiments?new=1" {
+		t.Fatalf("finished = %+v, want rival, which another org connects, connected here", finished)
+	}
+	if got := w.installations.connected[w.orgA]; len(got) != 2 || got[1].InstallationID != rival.ID {
+		t.Fatalf("connected = %+v, want acme as it was and rival, and carol left out for its missing permission", got)
+	}
+
+	// Carol's own account, refused alone, is the refusal.
+	body := finishBody(w.begin("owner", w.orgA), 0)
+	body["code"] = "code-carol"
+	w.refused("owner", "POST", "/github/installations", body, http.StatusUnprocessableEntity, githost.ReasonPermissionMissing)
+
+	// Nothing left to connect: GitHub's install page, with a state good for the second leg.
+	delete(w.app.notGranted, carol.ID)
+	w.connect(w.orgA, carol)
+	finished = accounts.InstallFinished{}
+	w.ok("owner", "POST", "/github/installations", finishBody(w.begin("owner", w.orgA), 0), http.StatusCreated, &finished)
+	if finished.Installation != nil || finished.Install == nil || finished.Install.InstallURL != "https://github.test/apps/hypothesisloop/installations/new?state="+finished.Install.State {
+		t.Fatalf("finished = %+v, want nothing connected and the install page carrying a new state", finished)
+	}
+	before := len(w.installations.connected[w.orgA])
+	state := finished.Install.State
+	finished = accounts.InstallFinished{}
+	w.ok("owner", "POST", "/github/installations", finishBody(state, carol.ID), http.StatusCreated, &finished)
+	if finished.Installation == nil || finished.Installation.InstallationID != carol.ID || len(w.installations.connected[w.orgA]) != before {
+		t.Fatalf("finished = %+v, want the install page's return taken with the new state", finished)
+	}
+	if len(w.installations.connected[w.orgB]) != 1 {
+		t.Fatal("a connect for one org connected another")
 	}
 }
 
@@ -956,6 +1057,10 @@ func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
 	}
 	w.ok("owner", "DELETE", fmt.Sprintf("/orgs/%s/github-installations/%d", w.orgA, acme.ID), nil, http.StatusNoContent, nil)
 	w.connect(w.orgA, acme)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "rival" {
+		t.Fatalf("the default disconnected: CreatesOn = %q, %v, want the remaining installation promoted, rival", on, err)
+	}
+	w.installations.connected[w.orgA][0].Default = false
 	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "default") {
 		t.Fatalf("several accounts and no default: %v, want repository_account_required saying a default may be set", err)
 	}

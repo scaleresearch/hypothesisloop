@@ -56,6 +56,15 @@ export function acceleratorLabel(type: string): string {
   return type.slice(type.lastIndexOf('=') + 1)
 }
 
+// A priced type for a person: the product after the "=" of its selector, without the vendor
+// prefix ("NVIDIA-A100-80GB-PCIe" reads "A100 80GB PCIe"). CPU cores and Tenstorrent chips say what they are.
+export function resourceLabel(type: string): string {
+  if (type === 'hypothesisloop.dev/cpu=core') return 'CPU core'
+  const name = acceleratorLabel(type)
+  if (type.startsWith('tenstorrent.com/')) return `Tenstorrent ${name.charAt(0).toUpperCase()}${name.slice(1)}`
+  return name.replace(/^NVIDIA-(GeForce-)?/, '').replace(/-/g, ' ')
+}
+
 export function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s} s`

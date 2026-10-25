@@ -1,28 +1,57 @@
+import { useBudgetReference, useCapacity } from '@/lib/capacity'
+import { acceleratorLabel } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { quotaTierValues } from '@/types/api'
 import type { QuotaTier, TypeKind } from '@/types/api'
+import { BudgetHint } from '@/components/budget-hint'
 import { Disclosure } from '@/components/ui/disclosure'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { InfoTip } from '@/components/ui/info-tip'
-import { ModelPicker } from '@/components/model-picker'
 import { Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
+import { Select } from '@/components/ui/select'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Pill } from '@/components/ui/text'
 import { StagesEditor } from '@/components/platform-experiment-form/stages-editor'
 import { TeamEditor } from '@/components/team-editor'
-import { LOCKED, ONE_STAGE } from '@/components/platform-experiment-form/model'
-import type { StepProps } from '@/components/platform-experiment-form/model'
+import { CPU_TYPE, LOCKED, ONE_STAGE } from '@/components/platform-experiment-form/model'
+import type { Machine, StepProps } from '@/components/platform-experiment-form/model'
 
 const PLATFORM_DEFAULT = "Empty is the platform's default."
+
+/** The machine of the plan: a type the org's jobs can be placed on now, or CPU cores, and what one node asks for. */
+function MachineFields({ machine, onChange, locked }: { machine: Machine; onChange: (machine: Machine) => void; locked: StepProps['locked'] }) {
+  const { data: capacity } = useCapacity()
+  const types = Array.from(new Set((capacity?.clusters ?? []).flatMap(c => c.accelerators.filter(a => a.kind === 'accelerator').map(a => a.accelerator_type))))
+  if (machine.accelerator_type && machine.accelerator_type !== CPU_TYPE && !types.includes(machine.accelerator_type)) types.unshift(machine.accelerator_type)
+  const fixed = locked('cpu')
+  return (
+    <FieldGroup label="Machine" hint={fixed ? LOCKED : <>What one node of each job asks for.<InfoTip>Changing it measures the baseline again on the new machine. A change between an accelerator and CPU cores changes what the budget counts, so state the budget again.</InfoTip></>}>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <FormField label="Accelerator">
+          <Select
+            className="w-full"
+            value={machine.accelerator_type === CPU_TYPE ? '' : machine.accelerator_type}
+            disabled={locked('accelerator_type')}
+            onChange={type => onChange({ ...machine, accelerator_type: type })}
+            options={[{ value: '', label: 'CPU cores' }, ...types.map(type => ({ value: type, label: acceleratorLabel(type) }))]}
+          />
+        </FormField>
+        {(['cpu', 'memory', 'storage'] as const).map(field => (
+          <FormField key={field} label={{ cpu: 'CPU', memory: 'Memory', storage: 'Storage' }[field]}>
+            <Input value={machine[field]} disabled={locked(field)} onChange={e => onChange({ ...machine, [field]: e.target.value })} />
+          </FormField>
+        ))}
+      </div>
+    </FieldGroup>
+  )
+}
 
 const tierLabel = (tier: QuotaTier) => tier.charAt(0).toUpperCase() + tier.slice(1).replace(/_/g, ' ')
 
 /** Step 3: the team, budget, the stage ladder, and the settings most leave alone. */
 export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps & { budgetKind?: TypeKind }) {
-  const unit = budgetKind
-    ? budgetUnit(budgetKind, 'long')
-    : `${budgetUnit('accelerator', 'long')}, or ${budgetUnit('cpu', 'long')} for jobs on CPU`
+  const reference = useBudgetReference()
   return (
     <>
       {!isEdit && (
@@ -30,33 +59,21 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
           label="Team"
           hint={<>The platform starts these with the experiment and keeps them up.<InfoTip>It replaces an agent that finishes or loses its machine while time and budget allow. A cut lowers the count.</InfoTip></>}
         >
-          <Stack gap="md">
-            <FormField label="Coordinator model" hint={<>The coordinator assembles and steers the team.<InfoTip>Researchers run on its model unless their entry names one.</InfoTip></>}>
-              <ModelPicker coordinator aria-label="Coordinator model" value={form.coordinator_model} onChange={m => set('coordinator_model', m)} />
-            </FormField>
-            <TeamEditor
-              rows={form.agents}
-              onChange={rows => set('agents', rows)}
-              coordinatorModel={form.coordinator_model}
-              maxAgents={Number(form.max_agents)}
-            />
-          </Stack>
+          <TeamEditor
+            rows={form.agents}
+            onChange={rows => set('agents', rows)}
+            coordinatorModel={form.coordinator_model}
+            coordinator={{ onModelChange: m => set('coordinator_model', m) }}
+          />
         </FieldGroup>
       )}
 
+      {isEdit && form.machine && <MachineFields machine={form.machine} onChange={machine => set('machine', machine)} locked={locked} />}
+
       <div className="grid grid-cols-2 gap-4">
-        {isEdit ? (
-          <FieldGroup label="Max executors" hint="Changed on the experiment page, under Team.">
-            <span className="text-sm tabular-nums">{form.max_agents}</span>
-          </FieldGroup>
-        ) : (
-          <FormField label="Max executors" hint="The most at work at once, at least the team's. The coordinator may add executors up to it.">
-            <Input type="number" min={1} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
-          </FormField>
-        )}
         <FormField
-          label="Budget (accelerator hours)"
-          hint={locked('budget_accelerator_hours') ? LOCKED : <>Caps everything it spends.<InfoTip>{`Counted in ${unit}. An hour on an accelerator spends its type's price; memory and storage spend nothing.`}</InfoTip></>}
+          label={`Budget (${budgetUnit(budgetKind ?? 'accelerator', 'long', reference)})`}
+          hint={locked('budget_accelerator_hours') ? LOCKED : <BudgetHint budget={form.budget_accelerator_hours} kind={budgetKind} />}
         >
           <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={locked('budget_accelerator_hours')} onChange={e => set('budget_accelerator_hours', e.target.value)} />
         </FormField>

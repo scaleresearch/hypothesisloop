@@ -271,15 +271,14 @@ func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 
 func TestLoadRejectsAnIncompletePlanningSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no limit":             {"  limit_minutes: 30\n", ""},
-		"no baseline limit":    {"  baseline_limit_minutes: 90\n", ""},
-		"no baseline floor":    {"  min_baseline_minutes: 45\n", ""},
-		"floor over limit":     {"  min_baseline_minutes: 45", "  min_baseline_minutes: 91"},
-		"no wait":              {"  proposed_for_days: 7\n", ""},
-		"misspelled wait":      {"  proposed_for_days: 7", "  proposed_for_day: 7"},
-		"no planner kept":      {"  planner_kept_minutes: 10\n", ""},
-		"zero planner kept":    {"  planner_kept_minutes: 10", "  planner_kept_minutes: 0"},
-		"negative auto accept": {"  auto_accept_seconds: 30", "  auto_accept_seconds: -1"},
+		"no limit":          {"  limit_minutes: 30\n", ""},
+		"no baseline limit": {"  baseline_limit_minutes: 60\n", ""},
+		"no baseline floor": {"  min_baseline_minutes: 15\n", ""},
+		"floor over limit":  {"  min_baseline_minutes: 15", "  min_baseline_minutes: 61"},
+		"no wait":           {"  proposed_for_days: 7\n", ""},
+		"misspelled wait":   {"  proposed_for_days: 7", "  proposed_for_day: 7"},
+		"no planner kept":   {"  planner_kept_minutes: 10\n", ""},
+		"zero planner kept": {"  planner_kept_minutes: 10", "  planner_kept_minutes: 0"},
 	} {
 		text := productionConfig(t)
 		if !strings.Contains(text, edit[0]) {
@@ -541,46 +540,31 @@ func TestACloudComputeClusterNameIsOneItsAccountKeyCanBeMadeOf(t *testing.T) {
 }
 
 // The committed cloud_compute example rents shapes of types the committed catalog prices, on
-// each provider it has a section of, chosen as localdev/rented chooses it.
+// vast.ai and Runpod at once, one cluster each.
 func TestTheCommittedCloudComputeExampleLoadsWithTheCommittedCatalog(t *testing.T) {
 	example, err := os.ReadFile(filepath.Join("..", "settings", "cloud-compute.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var document yaml.Node
-	if err := yaml.Unmarshal([]byte(strings.ReplaceAll(string(example), Placeholder+"ACCOUNT-ID", "1")), &document); err != nil {
+	text := strings.ReplaceAll(string(example), Placeholder+"ACCOUNT-ID", "1")
+	var section struct {
+		CloudCompute []struct {
+			ClusterName string `yaml:"cluster_name"`
+			Provider    string `yaml:"provider"`
+		} `yaml:"cloud_compute"`
+	}
+	if err := yaml.Unmarshal([]byte(text), &section); err != nil {
 		t.Fatal(err)
 	}
-	entry := document.Content[0].Content[1].Content[0]
 	var providers []string
-	for i := 0; i < len(entry.Content); i += 2 {
-		if entry.Content[i+1].Kind == yaml.MappingNode {
-			providers = append(providers, entry.Content[i].Value)
-		}
+	for _, cc := range section.CloudCompute {
+		providers = append(providers, cc.Provider)
 	}
-	if len(providers) < 2 {
-		t.Fatalf("the example has sections of %v, want vast's and runpod's", providers)
+	if !slices.Equal(providers, []string{"vast", "runpod"}) {
+		t.Fatalf("the example's entries are on %v, want vast and runpod", providers)
 	}
-	whole := entry.Content
-	for _, provider := range providers {
-		entry.Content = nil
-		for i := 0; i < len(whole); i += 2 {
-			key, value := whole[i], *whole[i+1]
-			switch {
-			case key.Value == "provider":
-				value.Value = provider
-			case value.Kind == yaml.MappingNode && key.Value != provider:
-				continue
-			}
-			entry.Content = append(entry.Content, key, &value)
-		}
-		chosen, err := yaml.Marshal(&document)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := loadText(t, productionConfig(t)+"\n"+string(chosen)); err != nil {
-			t.Errorf("hypothesisloop.yaml with cloud-compute.yaml on %s: %v", provider, err)
-		}
+	if err := loadText(t, productionConfig(t)+"\n"+text); err != nil {
+		t.Errorf("hypothesisloop.yaml with cloud-compute.yaml: %v", err)
 	}
 }
 
@@ -704,5 +688,31 @@ func TestLoadRejectsAModelPolicyThatCannotBeApplied(t *testing.T) {
 		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestBudgetReferenceIsH100UnlessNamed(t *testing.T) {
+	load := func(text string) *Settings {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s, err := LoadSettings(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if got := load(productionConfig(t)).BudgetReference; got != "H100" {
+		t.Errorf("committed budget_reference = %q, want H100", got)
+	}
+	without := strings.Replace(productionConfig(t), "budget_reference: H100\n", "", 1)
+	if got := load(without).BudgetReference; got != "H100" {
+		t.Errorf("budget_reference left out = %q, want H100", got)
+	}
+	named := strings.Replace(productionConfig(t), "budget_reference: H100\n", "budget_reference: B200\n", 1)
+	if got := load(named).BudgetReference; got != "B200" {
+		t.Errorf("budget_reference named = %q, want B200", got)
 	}
 }

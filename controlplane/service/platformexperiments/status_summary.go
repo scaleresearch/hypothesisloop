@@ -29,15 +29,6 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		"revising": func() string {
 			return "The planner is updating the plan with your change. It has up to " + in(pe.PlanningEndsAt) + " more."
 		},
-		"accepting": func() string {
-			if pe.AcceptsAt == nil {
-				return "The plan is ready and starts as proposed in a moment. Accept, edit or reject it before then."
-			}
-			return "The plan is ready and starts as proposed in " + in(*pe.AcceptsAt) + ". Accept, edit or reject it before then."
-		},
-		"proposed": func() string {
-			return "The plan is ready and waits for your accept. It expires in " + in(pe.ProposalExpiresAt) + "."
-		},
 		"declined": func() string {
 			return "The planner couldn't propose an experiment and says what it needs. Change the goal or close it; it closes by itself in " + in(pe.ProposalExpiresAt) + "."
 		},
@@ -58,6 +49,9 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		},
 		"baseline_not_on_branch": func() string {
 			return "The baseline job ran on another branch than the baseline's. " + next("declare a job of the baseline branch")
+		},
+		"baseline_not_on_plans_machine": func() string {
+			return "The baseline job ran on another machine than the plan's. " + next("measure it again on the plan's machine")
 		},
 		"baseline_without_finding": func() string {
 			return "The baseline job has no summary of what it measured. " + next("have its summary filed")
@@ -103,7 +97,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "Closed by " + who + "."
 		},
 		string(domain.ClosePlanningLimitReached): func() string { return "Closed: the planner proposed nothing in time." },
-		string(domain.CloseProposalExpired):      func() string { return "Closed: nobody accepted the plan or changed the goal in time." },
+		string(domain.CloseProposalExpired):      func() string { return "Closed: nobody changed the goal in time." },
 		string(domain.CloseBaselineLimitReached): func() string {
 			if pe.BaselineJobID != "" {
 				return "Closed: the baseline was ready, but no executor or budget started the run in time."
@@ -111,6 +105,11 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "Closed: no baseline was measured in time."
 		},
 		string(domain.ClosePlannerStopped): func() string {
+			for _, signup := range signups {
+				if signup.Role == domain.SignupRolePlanner && signup.Instance != nil && signup.Instance.EndReason == "exited" && signup.Instance.ExitLog != "" {
+					return "Closed: the planner stopped at start: " + domain.ExitReasonOf(signup.Instance.ExitLog) + "."
+				}
+			}
 			return "Closed: the planner's machine failed before it answered."
 		},
 		string(domain.CloseAgentsNotStarted): func() string {

@@ -29,6 +29,8 @@ type GitHubApp interface {
 	// UserInstallations is the ids of the App's installations the GitHub user may reach who
 	// authorized the App with code while finishing an install.
 	UserInstallations(ctx context.Context, code string) ([]int64, error)
+	// Uninstall removes an installation from its GitHub account. One already gone is no error.
+	Uninstall(ctx context.Context, installationID int64) error
 	// Check says whether a connected installation still works: installed, not suspended, and
 	// granted every permission the App asks for.
 	Check(ctx context.Context, connected *domain.OrgGitHubInstallation) error
@@ -47,6 +49,7 @@ type InstallationStore interface {
 	IssueGitHubInstallState(ctx context.Context, orgID string, actor domain.Actor, returnTo string, lifetime time.Duration) (string, time.Time, error)
 	TakeGitHubInstallState(ctx context.Context, state string, actor domain.Actor) (*db.GitHubInstallState, error)
 	DisconnectGitHubInstallation(ctx context.Context, orgID string, installationID int64) error
+	GitHubInstallationConnectedElsewhere(ctx context.Context, orgID string, installationID int64) (bool, error)
 	MakeGitHubInstallationDefault(ctx context.Context, orgID string, installationID int64) error
 }
 
@@ -80,10 +83,11 @@ const (
 	ReasonInvalidRequest            = "invalid_request"
 	ReasonInstallStateInvalid       = "install_state_invalid"
 	ReasonInstallationNotAuthorized = "installation_not_authorized"
+	ReasonUninstallFailed           = "github_uninstall_failed"
 	ReasonForbidden                 = "forbidden"
 )
 
-// installStateLifetime is how long a person has from pressing Install GitHub App to GitHub
+// installStateLifetime is how long a person has from pressing Connect GitHub to GitHub
 // handing the state back.
 const installStateLifetime = 15 * time.Minute
 
@@ -102,7 +106,7 @@ func (r *Repositories) refusal(op string, err error, gone int) error {
 	case errors.Is(err, db.ErrPlatformExperimentNotFound):
 		return refusal.NotFound("platform experiment")
 	case errors.Is(err, db.ErrGitHubInstallStateInvalid):
-		return refusal.Invalid(ReasonInstallStateInvalid, "this return from GitHub does not match an install you started in the last 15 minutes, or it was used already: press Install GitHub App again")
+		return refusal.Invalid(ReasonInstallStateInvalid, "this return from GitHub does not match an install you started in the last 15 minutes, or it was used already: press Connect GitHub again")
 	case errors.As(err, &status):
 		return err
 	case r.github != nil:
@@ -137,11 +141,16 @@ func (r *Repositories) beginInstall(ctx context.Context, orgID, returnTo string)
 	if actor.ID == "" {
 		return nil, refusal.Refuse(http.StatusForbidden, ReasonForbidden, "an install of the GitHub App is started by a user or an API key, the one that finishes it")
 	}
+	return r.issue(ctx, orgID, actor, returnTo, app.Addresses().AuthorizeURL)
+}
+
+// issue records an install state and returns page, an address on GitHub, carrying it.
+func (r *Repositories) issue(ctx context.Context, orgID string, actor domain.Actor, returnTo, page string) (*InstallStart, error) {
 	state, expires, err := r.store.IssueGitHubInstallState(ctx, orgID, actor, returnTo, installStateLifetime)
 	if err != nil {
 		return nil, err
 	}
-	address, err := url.Parse(app.Addresses().InstallURL)
+	address, err := url.Parse(page)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +174,12 @@ func inApp(path string) bool {
 // user who authorized the App with code while finishing the install, before anything about it is
 // asked or told. GitHub is then asked as the App about it: it exists, is not suspended and has
 // granted every permission. One the org connected before is answered as it is.
+//
+// Without installation_id, the return is from GitHub's authorization page, where a connect
+// starts: every installation the GitHub user may reach that the org has not connected is
+// connected, so an App installed on the account before is connected without GitHub's install
+// page, which shows such an installation and never returns. When there is none, a new state is
+// issued and install carries GitHub's install page with it.
 func (r *Repositories) finishInstall(ctx context.Context, state, code string, installationID int64) (*InstallFinished, error) {
 	p, err := r.access.Account(ctx)
 	if err != nil {
@@ -174,8 +189,8 @@ func (r *Repositories) finishInstall(ctx context.Context, state, code string, in
 	if err != nil {
 		return nil, err
 	}
-	if state == "" || code == "" || installationID <= 0 {
-		return nil, refusal.Invalid(ReasonInvalidRequest, "state, code and installation_id are required, as GitHub handed them back from the install")
+	if state == "" || code == "" || installationID < 0 {
+		return nil, refusal.Invalid(ReasonInvalidRequest, "state and code are required, as GitHub handed them back, and installation_id when GitHub handed one back")
 	}
 	started, err := r.store.TakeGitHubInstallState(ctx, state, p.Actor())
 	if err != nil {
@@ -188,9 +203,12 @@ func (r *Repositories) finishInstall(ctx context.Context, state, code string, in
 	if err != nil {
 		return nil, err
 	}
+	if installationID == 0 {
+		return r.connectReachable(ctx, app, started, p.Actor(), reachable)
+	}
 	if !slices.Contains(reachable, installationID) {
 		return nil, refusal.Invalid(ReasonInstallationNotAuthorized, "GitHub does not list this installation among those the GitHub account that finished the install may reach, so nothing shows it is yours. "+
-			"Sign in on GitHub as an owner of the account the App is installed on, then press Install GitHub App again")
+			"Sign in on GitHub as an owner of the account the App is installed on, then press Connect GitHub again")
 	}
 	connected, err := r.store.ListGitHubInstallations(ctx, started.OrgID)
 	if err != nil {
@@ -210,10 +228,53 @@ func (r *Repositories) finishInstall(ctx context.Context, state, code string, in
 	return &InstallFinished{OrgID: started.OrgID, ReturnTo: started.ReturnTo, Installation: installation}, nil
 }
 
+// connectReachable connects every installation in reachable the org has not connected, and
+// answers the first. One GitHub refuses is left out; when every one is, the first refusal is
+// the answer. With none to connect it answers a new install on GitHub's install page.
+func (r *Repositories) connectReachable(ctx context.Context, app GitHubApp, started *db.GitHubInstallState, actor domain.Actor, reachable []int64) (*InstallFinished, error) {
+	connected, err := r.store.ListGitHubInstallations(ctx, started.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	finished := &InstallFinished{OrgID: started.OrgID, ReturnTo: started.ReturnTo}
+	var refused error
+	for _, id := range reachable {
+		if slices.ContainsFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == id }) {
+			continue
+		}
+		live, err := app.Installation(ctx, id)
+		if err != nil {
+			r.logger.Info("a reachable github installation was not connected", zap.String("orgID", started.OrgID), zap.Int64("installationID", id), zap.Error(err))
+			if refused == nil {
+				refused = err
+			}
+			continue
+		}
+		installation := &domain.OrgGitHubInstallation{OrgID: started.OrgID, InstallationID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType, ConnectedActor: actor}
+		if err := r.store.ConnectGitHubInstallation(ctx, installation); err != nil {
+			return nil, err
+		}
+		if finished.Installation == nil {
+			finished.Installation = installation
+		}
+	}
+	switch {
+	case finished.Installation != nil:
+		return finished, nil
+	case refused != nil:
+		return nil, refused
+	}
+	finished.Install, err = r.issue(ctx, started.OrgID, actor, started.ReturnTo, app.Addresses().InstallURL)
+	if err != nil {
+		return nil, err
+	}
+	return finished, nil
+}
+
 // InstallStart is an install of the GitHub App started for an org.
 type InstallStart struct {
-	State      string    `json:"state" doc:"Good once, for the caller, until expires_at. GitHub hands it back to the App's callback URL with installation_id and code."`
-	InstallURL string    `json:"install_url" doc:"GitHub's install page of the App, carrying state. Open it for the person."`
+	State      string    `json:"state" doc:"Good once, for the caller, until expires_at. GitHub hands it back to the App's callback URL with code, and with installation_id after an install."`
+	InstallURL string    `json:"install_url" doc:"The page on GitHub to open for the person, carrying state: the App's authorization page when a connect starts, its install page in install."`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
@@ -221,13 +282,36 @@ type InstallStart struct {
 type InstallFinished struct {
 	OrgID        string                        `json:"org_id"`
 	ReturnTo     string                        `json:"return_to" doc:"The page of the UI the install was started from."`
-	Installation *domain.OrgGitHubInstallation `json:"installation"`
+	Installation *domain.OrgGitHubInstallation `json:"installation,omitempty" doc:"The installation connected, absent when there was none to connect and install says where to install the App."`
+	Install      *InstallStart                 `json:"install,omitempty" doc:"Present when nothing was connected: the person installs the App on GitHub's install page, install_url, which carries a new state."`
 }
 
-// disconnect takes an installation away from an org.
+// disconnect takes an installation away from an org. When no other org connected it, the App is
+// first removed from its GitHub account, so that connecting it again goes through GitHub's
+// install page. Should GitHub fail that, the org keeps it and is told, so a retry finishes both.
 func (r *Repositories) disconnect(ctx context.Context, orgID string, installationID int64) error {
 	if _, err := r.access.OrgAdmin(ctx, orgID); err != nil {
 		return err
+	}
+	if r.github != nil {
+		connected, err := r.store.ListGitHubInstallations(ctx, orgID)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == installationID })
+		if i < 0 {
+			return db.ErrGitHubInstallationNotFound
+		}
+		elsewhere, err := r.store.GitHubInstallationConnectedElsewhere(ctx, orgID, installationID)
+		if err != nil {
+			return err
+		}
+		if !elsewhere {
+			if err := r.github.Uninstall(ctx, installationID); err != nil {
+				r.logger.Warn("github did not remove an installation being disconnected", zap.String("orgID", orgID), zap.Int64("installationID", installationID), zap.Error(err))
+				return refusal.Refuse(http.StatusBadGateway, ReasonUninstallFailed, "GitHub did not remove the app from "+connected[i].AccountLogin+", so it is still connected. Try again, or remove the app in that account's settings on GitHub and then disconnect it here")
+			}
+		}
 	}
 	return r.store.DisconnectGitHubInstallation(ctx, orgID, installationID)
 }

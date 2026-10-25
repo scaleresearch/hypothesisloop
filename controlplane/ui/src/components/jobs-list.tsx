@@ -30,6 +30,7 @@ import { LinkTr, RowAnchor, SortableTh, Table, num, quiet } from '@/components/u
 import { Pagination } from '@/components/ui/pagination'
 import { acceleratorLabel, formatAccH, formatDate, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
+import { useBudgetReference } from '@/lib/capacity'
 import { statusTone } from '@/lib/colors'
 import { toneText } from '@/components/ui/tone'
 import { evictionCode, evictionCodeLabel, evictionDetailLines, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
@@ -73,6 +74,7 @@ export function JobsList({ experimentID }: { experimentID?: string }) {
 }
 
 function JobsListContent({ peFilter }: { peFilter: string }) {
+  const reference = useBudgetReference()
   const { org, project } = useTenant()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -148,7 +150,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
 
   const evictionReasons = Object.entries(stats?.evictions_by_reason ?? {}).sort((a, b) => b[1] - a[1])
   const faultSummary = faultBreakdown(stats?.evictions_by_class ?? {})
-  const costUnit = Array.from(new Set(visible.map(job => budgetUnit(job.accelerator_kind)))).join(' / ') || budgetUnit(undefined)
+  const costUnit = Array.from(new Set(visible.map(job => budgetUnit(job.accelerator_kind, 'short', reference)))).join(' / ') || budgetUnit(undefined, 'short', reference)
   const shownLabel = STATUSES.find(s => s.status === statusFilter)?.label
 
   return (
@@ -190,7 +192,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
       {error && <ErrorMessage>Could not load the jobs: {error.message}</ErrorMessage>}
       {clustersError && (
         <ErrorMessage>
-          Could not load the clusters of {org.name}, so no job shows whether its cluster is connected: {clustersError.message}
+          Could not load cluster status: {clustersError.message}
         </ErrorMessage>
       )}
 
@@ -232,10 +234,16 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
               {visible.length === 0 ? (
                 <tr>
                   <td colSpan={9}>
-                    <EmptyState>
-                      No {shownLabel ? `${shownLabel.toLowerCase()} jobs` : 'jobs'}{agentFilter && ' of this agent'}
-                      {peFilter && <> in <PlatformExperimentName id={peFilter} /></>}.
-                    </EmptyState>
+                    {statusFilter || agentFilter || peFilter ? (
+                      <EmptyState>
+                        No {shownLabel ? `${shownLabel.toLowerCase()} jobs` : 'jobs'}{agentFilter && ' of this agent'}
+                        {peFilter && <> in <PlatformExperimentName id={peFilter} /></>}.
+                      </EmptyState>
+                    ) : (
+                      <EmptyState action={<TextLink href={projectPath(project.id, 'experiments')}>Go to Experiments</TextLink>}>
+                        Jobs appear here once an experiment runs.
+                      </EmptyState>
+                    )}
                   </td>
                 </tr>
               ) : visible.map(job => (
@@ -279,10 +287,11 @@ interface JobRowProps {
 }
 
 function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProps) {
+  const reference = useBudgetReference()
   const status = job.status ?? 'UNKNOWN'
   const accelerator = `${job.accelerator_count}× ${acceleratorLabel(job.accelerator_type)}`
   const cost = job.estimated_cost_acch != null ? formatAccH(job.estimated_cost_acch) : '—'
-  const costWithUnit = job.estimated_cost_acch != null ? `${cost} ${budgetUnit(job.accelerator_kind)}` : cost
+  const costWithUnit = job.estimated_cost_acch != null ? `${cost} ${budgetUnit(job.accelerator_kind, 'short', reference)}` : cost
   const about = [
     status === 'QUEUED' && job.not_admitted_reason && notAdmittedLabel(job.not_admitted_reason, job.not_admitted_message),
     job.eviction_reason && [evictionCodeLabel(evictionCode(job.eviction_reason)), evictionDetailLines(job.eviction_reason)[0]].filter(Boolean).join(': '),

@@ -347,7 +347,7 @@ func (m ModelsConfig) Catalogs() map[string]domain.ModelCatalog {
 }
 
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
-// agent the platform runs, before a person accepts its proposal. The platform pays for its machine.
+// agent the platform runs, until its proposal opens it. The platform pays for its machine.
 type PlanningConfig struct {
 	// LimitMinutes is how long a planner has to propose, from the goal and again from each change of it.
 	LimitMinutes int `yaml:"limit_minutes"`
@@ -356,18 +356,14 @@ type PlanningConfig struct {
 	// start, so this alone bounds the time before, with the time a job of its baseline waits on
 	// the platform added (domain.MaxBaselineHold at most).
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
-	// MinBaselineMinutes is the fewest minutes an accepted draft may give its baseline: what
+	// MinBaselineMinutes is the fewest minutes a draft's plan may give its baseline: what
 	// writing a harness, building its environment and measuring once take at the least.
 	MinBaselineMinutes int `yaml:"min_baseline_minutes"`
-	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
+	// ProposedForDays is how long a declined draft waits for a person before it is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`
 	// PlannerKeptMinutes is how long a planner's machine is kept after its answer, so that a goal
 	// changed in that time reaches the planner that is still there.
 	PlannerKeptMinutes int `yaml:"planner_kept_minutes"`
-	// AutoAcceptSeconds is how long a proposal waits before the platform accepts it as proposed,
-	// unless a person accepts it sooner, holds it to edit it, changes the goal or closes it. 0 leaves
-	// every proposal to a person.
-	AutoAcceptSeconds int `yaml:"auto_accept_seconds"`
 }
 
 // AccountsConfig bounds what one account creates. Staff are held to neither bound.
@@ -468,7 +464,10 @@ const MinSigningSecretLength = 32
 
 // Settings is the top-level parsed config from hypothesisloop.yaml.
 type Settings struct {
-	AcceleratorTypes  []AcceleratorTypeConfig  `yaml:"accelerator_types"`
+	AcceleratorTypes []AcceleratorTypeConfig `yaml:"accelerator_types"`
+	// BudgetReference names the accelerator an acch_rate of 1.0 is: a budget's accelerator-hours
+	// are hours on it. H100 when left out.
+	BudgetReference   string                   `yaml:"budget_reference"`
 	ObjectStore       ObjectStoreConfig        `yaml:"object_store"`
 	Quota             QuotaConfig              `yaml:"quota"`
 	Scheduler         SchedulerConfig          `yaml:"scheduler"`

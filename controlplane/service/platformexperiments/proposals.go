@@ -23,12 +23,10 @@ import (
 )
 
 // Proposal is what a draft's planner proposes: the experiment as its file would state it, and
-// beside it what a run costs, which is only ever proposed. A person states the budget, the
-// duration and the agents again when accepting, by the rule that keeps them out of the
-// experiment file: an agent's token wrote this. One without questions the platform accepts as
-// proposed after planning.auto_accept_seconds unless a person acts first; one with questions
-// waits for a person to answer them. Nothing has run when it is written:
-// the baseline is measured once it is accepted, before any executor starts.
+// beside it what a run costs. It opens the draft as it is proposed, with the planner's answers
+// to its questions as the assumptions the run starts on; a person changes the plan afterwards.
+// Nothing has run when it is written: the baseline is measured once it is applied, before any
+// executor starts.
 type Proposal struct {
 	GoalVersion int `json:"goal_version" doc:"The goal_version of the draft the proposal was planned from. 409 goal_changed once the draft has another goal: read it and propose for it."`
 
@@ -39,7 +37,7 @@ type Proposal struct {
 
 	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"Proposed budget of the run: a cap, estimated before anything ran."`
 	DurationHours          float64         `json:"duration_hours" doc:"Proposed length of the run, counted from the moment it starts, once its baseline is declared: a time the goal states is this."`
-	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes the baseline agent needs, from the accept, to measure the baseline and leave its job: few where the repository holds a harness that runs unchanged, more where the harness and its environment are written from nothing. At least planning.min_baseline_minutes and at most planning.baseline_limit_minutes."`
+	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes the baseline agent needs, from the proposal, to measure the baseline and leave its job: few where the repository holds a harness that runs unchanged, more where the harness and its environment are written from nothing. At least planning.min_baseline_minutes and at most planning.baseline_limit_minutes."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The team proposed, one entry for each agent: one of agent_type researcher is a researcher, which runs no job and steers the work through the hypothesis graph, and any other an executor, which runs the jobs. At least one executor."`
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type,omitempty" doc:"The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now."`
@@ -56,16 +54,13 @@ type Proposal struct {
 	SizingReason string             `json:"sizing_reason" doc:"Why this budget, this long and this team are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
 	OutOfScope   []string           `json:"out_of_scope,omitempty"`
 	Risks        []string           `json:"risks,omitempty"`
-	Questions    []ProposalQuestion `json:"questions,omitempty" doc:"Each decision the goal left open that changes what counts, with the answer the proposal is planned on: among them any bound of a gate that depends on a number nobody has measured yet. A proposal with questions is never accepted by itself: a person confirms or changes each answer on accepting it, and the answers go into the description."`
-	// RepoMap is what the planner read of the repository, handed to the baseline agent so that it
-	// does not read it all again.
-	RepoMap string `json:"repo_map,omitempty" doc:"What the planner learned of the repository, for the baseline agent, which is given it when it starts: the files and directories that matter to the goal, the entry points and how the code builds and runs, the toolchain and dependency pins, a line each. Optional, at most 4000 bytes."`
+	Questions    []ProposalQuestion `json:"questions,omitempty" doc:"Each decision the goal left open that changes what counts, with the answer the proposal is planned on: among them any bound of a gate that depends on a number nobody has measured yet. Each answer is an assumption the run starts on: it is added to the description when the proposal is applied, where a person changes it."`
 }
 
 // ProposalQuestion is one decision a goal left open, and the answer its planner planned on.
 type ProposalQuestion struct {
 	Question string `json:"question" doc:"The decision, in a sentence."`
-	Answer   string `json:"answer" doc:"The answer the proposal is planned on, which the person confirms or changes."`
+	Answer   string `json:"answer" doc:"The answer the proposal is planned on, which the run assumes."`
 }
 
 // ProposedAgent is one agent of a proposal's team, as POST /platform-experiments/{id}/agents takes
@@ -85,7 +80,7 @@ func refusedProposal(reason, format string, args ...any) error {
 }
 
 // MaxProposedAgents is the most agents a proposal's team may name, and a draft's max_agents
-// until one is accepted: of the maxAgentSandboxes machines the platform runs for an accepted draft, one
+// until one applies: of the maxAgentSandboxes machines the platform runs for an open draft, one
 // is its coordinator's and one its baseline agent's.
 func MaxProposedAgents(maxAgentSandboxes int) int {
 	return maxAgentSandboxes - 2
@@ -162,7 +157,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 			p.BaselineMinutes, least, limit, least)
 	}
 	if decoded {
-		// An accepted draft starts when it is accepted, whatever its experiment says of a start.
+		// A draft starts when its proposal applies, whatever its experiment says of a start.
 		experiment.StartsAt = time.Time{}
 		experiment.BudgetAcceleratorHours, experiment.DurationHours, experiment.MaxAgents = p.BudgetAcceleratorHours, p.DurationHours, executors
 		pool, unresolved := proposedPool(catalog, p.Agents)
@@ -216,9 +211,6 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 			refuse("too_long", "%s is %d bytes and at most %d", name, len(*text), MaxProposalTextBytes)
 		}
 	}
-	if p.RepoMap = strings.TrimSpace(p.RepoMap); len(p.RepoMap) > MaxProposalTextBytes {
-		refuse("too_long", "repo_map is %d bytes and at most %d: a line per file or directory that matters", len(p.RepoMap), MaxProposalTextBytes)
-	}
 	for _, field := range []struct {
 		name string
 		list []string
@@ -241,7 +233,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 }
 
 // withTexts is the experiment of a proposal with its texts as validate answered them, so that
-// the proposal a person reads states what accepting it stores.
+// the proposal a person reads states what applying it stores.
 func withTexts(experiment json.RawMessage, checked CreatePlatformExperimentRequest) (json.RawMessage, error) {
 	var fields map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(experiment))
@@ -275,32 +267,9 @@ func (s *Service) requirePlanner(ctx context.Context, id string, caller auth.Pri
 	return nil
 }
 
-// Accept makes the draft id the open platform experiment its proposal describes, at what req
-// states, for by, who accepted it.
-func (s *Service) Accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
-	return s.accept(ctx, id, req, by, &by)
-}
-
-// Hold keeps the platform from accepting the proposal of the draft id by itself.
-func (s *Service) Hold(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
-	switch err := s.store.HoldAccept(ctx, id); {
-	case errors.Is(err, db.ErrNotDraft):
-		return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is held", id)
-	case errors.Is(err, db.ErrNotProposed):
-		return nil, invalidTransition("draft %s has no proposal standing to hold", id)
-	case err != nil:
-		return nil, s.refusal("hold", err)
-	}
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
-	if err != nil || pe == nil {
-		return nil, s.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
-	}
-	return pe, nil
-}
-
-// Propose stores p as the proposal of the draft id, written by its planner caller, or with check
-// only checks it and answers the draft as it stands.
-func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal, p *Proposal, check bool) (*domain.PlatformExperiment, error) {
+// Propose applies p as the proposal of the draft id, written by its planner caller, which opens
+// it, or with check only checks it and answers the draft as it stands.
+func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal, p *Proposal, check, working bool) (*domain.PlatformExperiment, error) {
 	if err := s.requirePlanner(ctx, id, caller); err != nil {
 		return nil, err
 	}
@@ -324,23 +293,27 @@ func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal,
 		}
 		return pe, nil
 	}
-	stored, err := json.Marshal(p)
+	if working {
+		return s.draftPlan(ctx, pe, *p)
+	}
+	return s.apply(ctx, pe, *p)
+}
+
+// draftPlan stores proposal, checked, as the plan the planner of the draft pe works on, which its
+// baseline agent starts from while the draft stays a draft.
+func (s *Service) draftPlan(ctx context.Context, pe *domain.PlatformExperiment, proposal Proposal) (*domain.PlatformExperiment, error) {
+	if pe.ProposedAt != nil {
+		return nil, refusal.Refuse(http.StatusConflict, "already_answered", "draft "+pe.ID+" was answered for this goal: a working plan is for a goal not yet answered")
+	}
+	stored, err := json.Marshal(proposal)
 	if err != nil {
 		return nil, s.refusal("encode proposal", err)
 	}
-	proposed, err := s.proposed(ctx, pe, p)
-	if err != nil {
-		return nil, s.refusal("store proposal", err)
+	if err := s.refusedAnswer(ctx, pe, s.store.SetWorkingPlan(ctx, pe.ID, proposal.GoalVersion, stored)); err != nil {
+		return nil, s.refusal("store working plan", err)
 	}
-	if err := s.refusedAnswer(ctx, pe, s.store.SetProposal(ctx, id, p.GoalVersion, stored, proposed)); err != nil {
-		return nil, s.refusal("store proposal", err)
-	}
-	s.logger.Info("draft proposed", zap.String("id", id))
-	pe, err = s.store.GetPlatformExperiment(ctx, id)
-	if err != nil || pe == nil {
-		return nil, s.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
-	}
-	return pe, nil
+	s.logger.Info("draft working plan", zap.String("id", pe.ID))
+	return s.stored(ctx, pe.ID)
 }
 
 // MaxDeclineBytes bounds the reason a planner gives for proposing nothing.
@@ -374,55 +347,10 @@ func (s *Service) Decline(ctx context.Context, id string, caller auth.Principal,
 	return pe, nil
 }
 
-// proposed is what proposal p of draft pe stored now writes beside it: until when it waits, when
-// the platform accepts it by itself, and the agent that is to measure its baseline, signed up for
-// the person who created the draft so that its machine starts while the proposal is read. One
-// with questions is never accepted by itself, since only a person can answer them.
-func (s *Service) proposed(ctx context.Context, pe *domain.PlatformExperiment, p *Proposal) (db.Proposed, error) {
-	now := time.Now().UTC()
-	proposed := db.Proposed{WaitUntil: now.Add(s.planning.ProposedFor), KeepPlanner: s.planning.PlannerKept}
-	if s.planning.AutoAccept > 0 && len(p.Questions) == 0 {
-		at := now.Add(s.planning.AutoAccept)
-		proposed.AcceptsAt = &at
-	}
-	if !s.launch.AgentSandbox || s.launch.DefaultModel == "" {
-		return proposed, nil
-	}
-	var by domain.Actor
-	if pe.Actor != nil {
-		by = *pe.Actor
-	}
-	catalog, err := s.store.AgentTypeCatalog(ctx, pe.ID)
-	if err != nil {
-		return proposed, err
-	}
-	agents, signups, err := sandboxedAgents(catalog, nil, by, now)
-	if err != nil {
-		return proposed, err
-	}
-	proposed.Baseline, proposed.BaselineSignup = agents[0], signups[0]
-	return proposed, nil
-}
-
-// AcceptRequest is what the person who accepts a draft states themselves: what the run costs,
-// how long it and measuring its baseline last, and who runs it. The proposal only proposed them,
-// since an agent wrote it.
-type AcceptRequest struct {
-	BudgetAcceleratorHours float64         `json:"budget_accelerator_hours" doc:"The budget of the run: a cap on everything it spends, with what measuring the baseline costs and burst hours included."`
-	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, once its baseline is declared."`
-	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at least planning.min_baseline_minutes and at most planning.baseline_limit_minutes: baseline_due_at is that much later, and moves out by the time the platform spends building and starting the baseline's jobs."`
-	Agents                 []ProposedAgent `json:"agents" doc:"The team the platform runs, one entry for each agent: one of agent_type researcher is a researcher, any other an executor. At least one executor."`
-	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its description change by a change of the goal (PATCH /platform-experiments/{id} with goal), which the planner plans again."`
-	Answers                []string        `json:"answers,omitempty" doc:"One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the description. Left out for a proposal without questions."`
-}
-
-// answered is the proposal's experiment with each question and its answer added to the end of
-// its description, a line each, so that every agent reads the decisions the person made, and the
+// answered is the proposal's experiment with each question and the planner's answer added to the
+// end of its description, a line each, so that every agent reads what the run assumes, and the
 // answers as the description states them.
-func answered(experiment json.RawMessage, questions []ProposalQuestion, answers []string) (json.RawMessage, []string, error) {
-	if len(answers) != len(questions) {
-		return nil, nil, refusedProposal("invalid_answers", "answers: the proposal has %d questions and the accept answers %d: answer each, in their order", len(questions), len(answers))
-	}
+func answered(experiment json.RawMessage, questions []ProposalQuestion) (json.RawMessage, []string, error) {
 	if len(questions) == 0 {
 		return experiment, nil, nil
 	}
@@ -434,15 +362,11 @@ func answered(experiment json.RawMessage, questions []ProposalQuestion, answers 
 	if err := json.Unmarshal(fields["description"], &description); err != nil {
 		return nil, nil, err
 	}
-	lines := []string{strings.TrimRight(description, "\n"), "", "Decisions the owner made before the run:"}
+	lines := []string{strings.TrimRight(description, "\n"), "", "Assumptions the plan runs on:"}
 	given := make([]string, len(questions))
 	for i, q := range questions {
-		answer := strings.Join(strings.Fields(answers[i]), " ")
-		if answer == "" || len(answer) > MaxProposalTextBytes {
-			return nil, nil, refusedProposal("invalid_answers", "answers[%d]: answer %q in a sentence of at most %d bytes", i, q.Question, MaxProposalTextBytes)
-		}
-		given[i] = answer
-		lines = append(lines, "- "+strings.Join(strings.Fields(q.Question), " ")+" Answer: "+answer)
+		given[i] = strings.Join(strings.Fields(q.Answer), " ")
+		lines = append(lines, "- "+strings.Join(strings.Fields(q.Question), " ")+" Answer: "+given[i])
 	}
 	var err error
 	if fields["description"], err = json.Marshal(strings.Join(lines, "\n")); err != nil {
@@ -452,52 +376,22 @@ func answered(experiment json.RawMessage, questions []ProposalQuestion, answers 
 	return experiment, given, err
 }
 
-// named is the proposal's experiment under the name the person who accepts gave it.
-func named(experiment json.RawMessage, name string) (json.RawMessage, error) {
-	fields := map[string]json.RawMessage{}
-	if err := json.Unmarshal(experiment, &fields); err != nil {
-		return nil, err
-	}
-	var err error
-	if fields["name"], err = json.Marshal(name); err != nil {
-		return nil, err
-	}
-	return json.Marshal(fields)
-}
-
 func invalidTransition(format string, args ...any) error {
 	return refusal.Refuse(http.StatusConflict, "invalid_transition", fmt.Sprintf(format, args...))
 }
 
-// accept makes the draft id the open platform experiment its proposal describes, at the cost
-// req states, with a sandboxed coordinator, its team and the agent that measures its
-// baseline, in one write. by owns its agents; acceptedBy is the person who accepted, nil when the
-// platform accepts it as proposed.
-func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor, acceptedBy *domain.Actor) (*domain.PlatformExperiment, error) {
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
+// apply makes the draft pe the open platform experiment proposal describes, with a sandboxed
+// coordinator, its team and the agent that measures its baseline, owned by the person who
+// created the draft, in the write that stores the proposal. The planner's answers to its
+// questions are added to the description.
+func (s *Service) apply(ctx context.Context, pe *domain.PlatformExperiment, proposal Proposal) (*domain.PlatformExperiment, error) {
+	stored, err := json.Marshal(proposal)
 	if err != nil {
-		return nil, s.refusal("read draft", err)
-	}
-	if pe == nil {
-		return nil, ErrPlatformExperimentNotFound
-	}
-	if err := acceptable(pe); err != nil {
-		return nil, err
-	}
-	var proposal Proposal
-	if err := json.Unmarshal(pe.Proposal, &proposal); err != nil {
-		return nil, s.refusal("decode stored proposal", err)
-	}
-	// The check the proposal passed, again with the cost and the agents the person states.
-	proposal.BudgetAcceleratorHours, proposal.DurationHours, proposal.BaselineMinutes, proposal.Agents = req.BudgetAcceleratorHours, req.DurationHours, req.BaselineMinutes, req.Agents
-	if req.Name != "" {
-		if proposal.Experiment, err = named(proposal.Experiment, req.Name); err != nil {
-			return nil, s.refusal("name the proposed experiment", err)
-		}
+		return nil, s.refusal("encode proposal", err)
 	}
 	var answers []string
-	if proposal.Experiment, answers, err = answered(proposal.Experiment, proposal.Questions, req.Answers); err != nil {
-		return nil, s.refusal("answer the proposal's questions", err)
+	if proposal.Experiment, answers, err = answered(proposal.Experiment, proposal.Questions); err != nil {
+		return nil, s.refusal("add the proposal's answers", err)
 	}
 	now := time.Now().UTC()
 	experiment, err := s.checkProposal(ctx, &proposal, pe)
@@ -505,52 +399,48 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 		return nil, s.refusal("check proposal", err)
 	}
 	if s.launch.DefaultModel == "" || s.launch.CoordinatorModel == "" {
-		return nil, s.refusal("accept", errors.New("the handler has no agent launch settings"))
+		return nil, s.refusal("apply", errors.New("the handler has no agent launch settings"))
 	}
 	if err := requireAgentSandbox(s.launch.AgentSandbox); err != nil {
-		return nil, s.refusal("accept", err)
+		return nil, s.refusal("apply", err)
+	}
+	var by domain.Actor
+	if pe.Actor != nil {
+		by = *pe.Actor
 	}
 
 	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
 	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, experiment.DefaultQuotaTier
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Agents, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Agents, experiment.DurationHours
-	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
+	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(proposal.BaselineMinutes)*time.Minute)
 	pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{}
-	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers
+	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, nil, answers
 
-	catalog, err := s.store.AgentTypeCatalog(ctx, id)
+	catalog, err := s.store.AgentTypeCatalog(ctx, pe.ID)
 	if err != nil {
-		return nil, s.refusal("accept", err)
+		return nil, s.refusal("apply", err)
 	}
-	agents, signups, err := sandboxedAgents(catalog, req.Agents, by, now)
+	agents, signups, err := sandboxedAgents(catalog, proposal.Agents, by, now)
 	if err != nil {
-		return nil, s.refusal("accept", err)
+		return nil, s.refusal("apply", err)
 	}
-	// The baseline agent was signed up with the proposal, and its machine may be up already.
-	signed, err := s.store.ListAgentSignups(ctx, id)
+	signed, err := s.store.ListAgentSignups(ctx, pe.ID)
 	if err != nil {
-		return nil, s.refusal("accept", err)
+		return nil, s.refusal("apply", err)
 	}
 	if slices.ContainsFunc(signed, func(s domain.AgentSignup) bool { return s.Role == domain.SignupRoleBaseline }) {
 		agents, signups = agents[:len(agents)-1], signups[:len(signups)-1]
 	}
-	switch err := s.store.AcceptDraft(ctx, pe, agents, signups); {
-	case errors.Is(err, db.ErrNotDraft):
-		return nil, invalidTransition("platform experiment %s is no longer a draft", id)
-	case errors.Is(err, db.ErrNothingProposed):
-		return nil, invalidTransition("draft %s has no proposal to accept", id)
-	case errors.Is(err, db.ErrMaxAgentSandboxesReached):
+	err = s.store.ApplyProposal(ctx, pe, proposal.GoalVersion, stored, agents, signups)
+	if errors.Is(err, db.ErrMaxAgentSandboxesReached) {
 		return nil, refusedProposal("invalid_agents", "%s", maxAgentSandboxesReached(pe.MaxAgentSandboxes))
-	case err != nil:
-		return nil, s.refusal("accept", err)
 	}
-	s.logger.Info("draft accepted", zap.String("id", id), zap.Int("agents", len(req.Agents)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
-	accepted, err := s.store.GetPlatformExperiment(ctx, id)
-	if err != nil || accepted == nil {
-		return nil, s.refusal("read accepted", errors.Join(err, errors.New("the platform experiment is gone")))
+	if err := s.refusedAnswer(ctx, pe, err); err != nil {
+		return nil, s.refusal("apply", err)
 	}
-	return accepted, nil
+	s.logger.Info("draft applied", zap.String("id", pe.ID), zap.Int("agents", len(proposal.Agents)), zap.Float64("budget_accelerator_hours", pe.BudgetAcceleratorHours))
+	return s.stored(ctx, pe.ID)
 }
 
 // nameActors names whoever created pe, closed it, accepted its proposal and raised its baseline,
@@ -580,7 +470,7 @@ func planningOver(pe *domain.PlatformExperiment) error {
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {
-	return refusal.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed or accepted")
+	return refusal.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed")
 }
 
 func goalChanged(pe *domain.PlatformExperiment) error {
@@ -605,73 +495,31 @@ func (s *Service) refusedAnswer(ctx context.Context, pe *domain.PlatformExperime
 	return err
 }
 
-// AcceptDue accepts, as proposed, every draft whose accepts_at has passed, for the person who
-// created it. One the check refuses now, its accelerator type gone from every cluster for one,
-// is held: it waits for a person, who is told why on accepting it. One that cannot be accepted
-// for a fault of the platform's is tried again on the next pass.
-func (s *Service) AcceptDue(ctx context.Context) error {
-	ids, err := s.store.DraftsToAccept(ctx)
+// ApplyStanding applies, once, every draft whose proposal was stored before proposals applied
+// themselves and still waits, as the platform would have accepted it. One the check refuses now
+// is told in the log and left to its planning limit.
+func (s *Service) ApplyStanding(ctx context.Context, passTimeout time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, passTimeout)
+	defer cancel()
+	drafts, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpDraft)
 	if err != nil {
-		return err
+		s.logger.Error("apply standing proposals: list drafts", zap.Error(err))
+		return
 	}
-	for _, id := range ids {
-		log := s.logger.With(zap.String("platform_experiment_id", id))
-		err := s.acceptAsProposed(ctx, id)
-		var refused *refusal.Refusal
-		switch {
-		case err == nil:
-			log.Info("draft accepted as proposed")
-		case errors.As(err, &refused) && refused.GetStatus() < http.StatusInternalServerError:
-			log.Warn("draft not accepted as proposed: it waits for a person", zap.String("reason", refused.Reason), zap.String("message", refused.Message))
-			if err := s.store.HoldAccept(ctx, id); err != nil && !errors.Is(err, db.ErrNotDraft) && !errors.Is(err, db.ErrNotProposed) {
-				log.Error("hold the draft", zap.Error(err))
-			}
-		default:
-			log.Error("accept the draft as proposed", zap.Error(err))
+	for _, listed := range drafts {
+		pe, err := s.store.GetPlatformExperiment(ctx, listed.ID)
+		if err != nil || pe == nil || pe.ProposedAt == nil || len(pe.Proposal) == 0 || pe.DeclinedReason != "" {
+			continue
 		}
-	}
-	return nil
-}
-
-// acceptAsProposed accepts the draft id at the cost, length and team its proposal states.
-func (s *Service) acceptAsProposed(ctx context.Context, id string) error {
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
-	if err != nil {
-		return err
-	}
-	if pe == nil || pe.Status != domain.PlatformExpDraft || pe.ProposedAt == nil {
-		return nil
-	}
-	var proposal Proposal
-	if err := json.Unmarshal(pe.Proposal, &proposal); err != nil {
-		return fmt.Errorf("decode stored proposal: %w", err)
-	}
-	var by domain.Actor
-	if pe.Actor != nil {
-		by = *pe.Actor
-	}
-	_, err = s.accept(ctx, id, AcceptRequest{
-		BudgetAcceleratorHours: proposal.BudgetAcceleratorHours, DurationHours: proposal.DurationHours,
-		BaselineMinutes: proposal.BaselineMinutes, Agents: proposal.Agents,
-	}, by, nil)
-	return err
-}
-
-// StartAutoAccept runs AcceptDue every interval until ctx is cancelled, each pass bounded by
-// passTimeout.
-func (s *Service) StartAutoAccept(ctx context.Context, interval, passTimeout time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			passCtx, cancel := context.WithTimeout(ctx, passTimeout)
-			if err := s.AcceptDue(passCtx); err != nil {
-				s.logger.Error("accept_due: scan", zap.Error(err))
-			}
-			cancel()
+		var proposal Proposal
+		if err := json.Unmarshal(pe.Proposal, &proposal); err != nil {
+			s.logger.Error("apply standing proposals: decode", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			continue
 		}
+		if _, err := s.apply(ctx, pe, proposal); err != nil {
+			s.logger.Warn("standing proposal not applied", zap.String("platform_experiment_id", pe.ID), zap.Error(err))
+			continue
+		}
+		s.logger.Info("standing proposal applied", zap.String("platform_experiment_id", pe.ID))
 	}
 }

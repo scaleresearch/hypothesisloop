@@ -113,7 +113,8 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 			"Researchers keep the graph and run no job",
 			// A planner proposed a copy with an A100 sed into it for a brief that said CPU only.
 			"`hl platform-experiments propose --check FILE`",
-			"stores nothing and lists every problem at once, and `propose` only the final one",
+			"Your first command, before you read any file, is `hl platform-experiments propose --working FILE`",
+			"each refusal lists every problem at once",
 			"a goal that says it needs no accelerator is never proposed on one",
 			"Every field of the proposal says what the description says.",
 			// Refused for "", cpu and the CPU type in turn.
@@ -122,7 +123,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 			"A refusal lists the valid values",
 			// 3.5 minutes of web searches for a toy goal whose Metric and Control were given.
 			"only when the goal leaves the control or the size of the effect to expect unknown",
-			"a goal that states its Metric and Control needs no search, or one at most",
+			"a goal that states its Metric and Control needs no search",
 			// The UI ticks a point of the goal by its label at the start of a line.
 			"keeps that label at the start of its own line in the description",
 			"`Metric:`", "`Control:`", "`Win:`", "`Held equal:`", "`Fixed:`", "`For:`",

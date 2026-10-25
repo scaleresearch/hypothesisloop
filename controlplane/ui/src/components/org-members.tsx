@@ -79,8 +79,8 @@ function Invites({ onError }: { onError: (message: string) => void }) {
           label={`Invite link, joins as ${created.role}`}
           value={inviteLink(created.token)}
           note={<>
-            Send it yourself, the platform sends no email. It is shown once and works once, until {formatDate(created.expires_at)}.
-            <InfoTip>{`Whoever opens it and signs in joins ${org.name} as ${created.role === 'owner' ? 'an owner' : 'a member'}. If you lose it, revoke the invite and create another.`}</InfoTip>
+            It is shown once and works once, until {formatDate(created.expires_at)}.
+            <InfoTip>{`Whoever opens it joins as ${created.role === 'owner' ? 'an owner' : 'a member'}. If you lose it, revoke the invite and create another.`}</InfoTip>
           </>}
           dismiss="I have sent it"
           onDismiss={() => setCreated(null)}
@@ -114,7 +114,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
       {revoking && (
         <ConfirmDialog
           open
-          title={`Revoke the invite ${revoking.actor.name} created ${formatDate(revoking.created_at)}?`}
+          title="Revoke this invite?"
           confirmLabel="Revoke"
           onConfirm={() => revoke(revoking)}
           onClose={() => setRevoking(null)}
@@ -159,8 +159,6 @@ export function OrgMembers() {
   const members = data?.items
   return (
     <Stack>
-      <Text tone="muted">An owner changes everything in {org.name}. A member reads everything in it and runs experiments.</Text>
-      {!editsOrg && <Text variant="hint">Only an owner can invite people, change a role or remove someone.</Text>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
       {listError && <ErrorMessage>Could not load members: {listError.message}</ErrorMessage>}
       {!members && !listError && <Loading />}
@@ -168,7 +166,7 @@ export function OrgMembers() {
       {members && members.length > 0 && (
         <Table aria-label="Members">
           <thead>
-            <tr><th>Member</th><th>Role</th><th>Joined</th><th /></tr>
+            <tr><th>Member</th><th>Role<InfoTip>Owners manage the organization. Members can view everything and run experiments.</InfoTip></th><th>Joined</th><th /></tr>
           </thead>
           <tbody>
             {members.map(member => {
@@ -225,22 +223,22 @@ function Question({ change, onConfirm, onClose }: { change: Change; onConfirm: (
     return (
       <ConfirmDialog
         open
-        title={`Make ${self ? 'yourself' : id} ${demotes ? 'a member' : 'an owner'} of ${org.name}?`}
+        title={`Make ${self ? 'yourself' : id} ${demotes ? 'a member' : 'an owner'}?`}
         confirmLabel={demotes ? 'Make member' : 'Make owner'}
         variant={demotes ? 'danger' : 'primary'}
         onConfirm={onConfirm}
         onClose={onClose}
       >
         {demotes
-          ? `${self ? 'You keep' : 'They keep'} reading everything and running experiments, and lose what only an owner holds: ${self ? 'your' : 'their'} API keys of the whole organization stop working and the invites ${self ? 'you' : 'they'} made are revoked.`
-          : 'An owner changes everything in the organization: its members, invites, API keys, clusters, projects and repositories.'}
+          ? `${self ? 'You' : 'They'} can still view everything and run experiments. ${self ? 'Your' : 'Their'} organization-wide API keys stop working and ${self ? 'your' : 'their'} invites are revoked.`
+          : 'Owners manage members, invites, API keys, clusters, projects and GitHub.'}
       </ConfirmDialog>
     )
   }
   return (
     <ConfirmDialog
       open
-      title={self ? `Leave ${org.name}?` : `Remove ${id} from ${org.name}?`}
+      title={self ? `Leave ${org.name}?` : `Remove ${id}?`}
       confirmLabel={self ? 'Leave' : 'Remove'}
       onConfirm={onConfirm}
       onClose={onClose}

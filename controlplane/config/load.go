@@ -93,6 +93,9 @@ func (c *Settings) build() error {
 			return fmt.Errorf("accelerator_types: %w", err)
 		}
 	}
+	if c.BudgetReference == "" {
+		c.BudgetReference = domain.DefaultBudgetReference
+	}
 	c.AcceleratorTypes = append([]AcceleratorTypeConfig{{Name: string(domain.CPUType), AccHRate: cpuCoreAccHRate}}, c.AcceleratorTypes...)
 	c.RateByName = make(map[string]float64, len(c.AcceleratorTypes))
 	c.PodResourcesByName = map[string]map[string]string{}
@@ -271,16 +274,13 @@ func (c *Settings) build() error {
 		return fmt.Errorf("planning baseline_limit_minutes is required and positive: how long a platform experiment may stay open without a declared baseline")
 	}
 	if c.Planning.MinBaselineMinutes <= 0 || c.Planning.MinBaselineMinutes > c.Planning.BaselineLimitMinutes {
-		return fmt.Errorf("planning min_baseline_minutes is required, positive and at most baseline_limit_minutes: the fewest minutes an accepted draft may give its baseline")
+		return fmt.Errorf("planning min_baseline_minutes is required, positive and at most baseline_limit_minutes: the fewest minutes a draft's plan may give its baseline")
 	}
 	if c.Planning.ProposedForDays <= 0 {
-		return fmt.Errorf("planning proposed_for_days is required and positive: how long a proposal waits for a person")
+		return fmt.Errorf("planning proposed_for_days is required and positive: how long a declined draft waits for a person")
 	}
 	if c.Planning.PlannerKeptMinutes <= 0 {
 		return fmt.Errorf("planning planner_kept_minutes is required and positive: how long a planner's machine is kept after its answer for a goal changed soon")
-	}
-	if c.Planning.AutoAcceptSeconds < 0 {
-		return fmt.Errorf("planning auto_accept_seconds is 0 or positive: how long a proposal waits before the platform accepts it as proposed, 0 for never")
 	}
 	if c.Accounts.MaxOrgsPerUser <= 0 {
 		return fmt.Errorf("accounts max_orgs_per_user is required and positive: how many orgs a person may own when they create one")

@@ -116,7 +116,7 @@ def test_connect_is_refused_without_proof_from_github(orgs):
         started = _call(a.api, "POST", f"/orgs/{a.org_id}/github-install-states", START)
         assert started.status_code == 201, started.text
         state = started.json()["state"]
-        assert started.json()["install_url"].endswith("?state=" + state), started.text
+        assert "/login/oauth/authorize?" in started.json()["install_url"] and started.json()["install_url"].endswith("&state=" + state), started.text
         # GitHub never issued this code nor made installation 1 for this App: the state is spent on
         # it all the same.
         first = _call(a.api, "POST", "/github/installations", {**FINISH, "state": state})

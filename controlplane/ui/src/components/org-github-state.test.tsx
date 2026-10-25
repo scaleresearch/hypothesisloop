@@ -65,9 +65,9 @@ describe('a connected GitHub account', () => {
 // Each refusal of the check, as the chip it shows, the explanation behind it and its one action.
 describe('a connected GitHub account GitHub refuses', () => {
   const cases: { reason: string; message: string; chip: string; explain: string; action: string; href?: string }[] = [
-    { reason: 'installation_gone', message: 'the GitHub App is no longer installed on acme (installation 7): its owner installs the App again from Settings, GitHub', chip: 'Not installed', explain: 'The GitHub App was removed on acme, so experiments cannot use its repositories. Reinstall it to connect again.', action: 'Reinstall' },
-    { reason: 'installation_suspended', message: 'the GitHub App is suspended on acme (installation 7): its owner unsuspends it on GitHub', chip: 'Suspended', explain: 'The GitHub App is suspended on acme. Unsuspend it on GitHub to use its repositories again.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
-    { reason: 'git_host_permission_missing', message: 'git_host_permission_missing: administration:write, contents:write. The GitHub App installation has not granted that', chip: 'Missing permission', explain: 'The GitHub App on acme has not been granted administration (write), contents (write). Accept the permissions on GitHub.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
+    { reason: 'installation_gone', message: 'the GitHub App is no longer installed on acme (installation 7): its owner installs the App again from Settings, GitHub', chip: 'Removed', explain: 'GitHub access was removed on acme, so experiments cannot use its repositories. Reconnect GitHub to use them again.', action: 'Reconnect' },
+    { reason: 'installation_suspended', message: 'the GitHub App is suspended on acme (installation 7): its owner unsuspends it on GitHub', chip: 'Suspended', explain: 'GitHub access is suspended on acme. Unsuspend it on GitHub to use its repositories again.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
+    { reason: 'git_host_permission_missing', message: 'git_host_permission_missing: administration:write, contents:write. The GitHub App installation has not granted that', chip: 'Missing permission', explain: 'GitHub access on acme is missing administration (write), contents (write). Accept the permissions on GitHub.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
     { reason: 'git_host_failed', message: 'GitHub failed the platform\'s call for GitHub App installation 7: it answered 502', chip: 'No answer', explain: 'GitHub did not answer the check. Try again in a moment.', action: 'Check again' },
   ]
   for (const tc of cases) {
@@ -86,12 +86,12 @@ describe('a connected GitHub account GitHub refuses', () => {
     })
   }
 
-  it('reinstalls in a new tab, as Install GitHub App does', async () => {
+  it('reinstalls in a new tab, as Connect GitHub does', async () => {
     vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: false, reason: 'installation_gone', message: 'gone' })
     vi.spyOn(window, 'open').mockReturnValue({ location: { href: '' }, close: vi.fn() } as unknown as Window)
     vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: `${app.install_url}?state=s-1`, expires_at: at })
     show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Reinstall' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
     expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/orgs/org_a/settings#github')
     expect((await screen.findByRole('status')).textContent).toContain('Waiting for GitHub')
   })
@@ -108,9 +108,9 @@ describe('a connected GitHub account GitHub refuses', () => {
   it('offers a member no action that installs', async () => {
     vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: false, reason: 'installation_gone', message: 'gone' })
     show(member)
-    const chip = (await screen.findByText('Not installed')).closest('[title]')!
-    expect(chip.getAttribute('title')).toBe('The GitHub App was removed on acme, so experiments cannot use its repositories. An owner of the org reinstalls it to connect again.')
-    expect(screen.queryByRole('button', { name: 'Reinstall' })).toBeNull()
+    const chip = (await screen.findByText('Removed')).closest('[title]')!
+    expect(chip.getAttribute('title')).toBe('GitHub access was removed on acme, so experiments cannot use its repositories. Ask an owner of your organization to reconnect GitHub to use them again.')
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
   })
 })
 

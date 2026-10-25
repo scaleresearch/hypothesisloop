@@ -71,8 +71,8 @@ func withAgentSandbox(req CreatePlatformExperimentRequest, launch AgentLaunch) (
 // sandboxedAgents is the agents a platform experiment whose coordinator the platform hosts is given
 // in the write that makes it open, each run by the platform and added by by: one for each
 // agent of the team asked for, of the role its agent type gives, and after them the one that measures the baseline, whose machine is asked
-// for at once beside the coordinator's, so that nothing waits for anyone to add it. An accepted
-// draft and a create with coordinator_in_agentsandbox both get theirs here.
+// for at once beside the coordinator's, so that nothing waits for anyone to add it. A draft's
+// proposal and a create with coordinator_in_agentsandbox both get theirs here.
 func sandboxedAgents(catalog domain.AgentTypeCatalog, team []ProposedAgent, by domain.Actor, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
 	agents := make([]*domain.Agent, 0, len(team)+1)
 	signups := make([]domain.AgentSignup, 0, len(team)+1)

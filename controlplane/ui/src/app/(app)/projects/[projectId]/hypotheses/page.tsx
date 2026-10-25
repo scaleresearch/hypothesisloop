@@ -157,7 +157,7 @@ function ProjectHypotheses() {
           framed
           action={<ButtonLink href={projectPath(project.id, 'experiments')} variant="primary">Create an experiment</ButtonLink>}
         >
-          No experiments yet.
+          Hypotheses appear here once an experiment runs.
         </EmptyState>
       )}
       {experiments.length > 0 && (

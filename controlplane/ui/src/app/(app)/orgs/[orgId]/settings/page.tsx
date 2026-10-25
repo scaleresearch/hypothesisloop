@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { createProject, renameOrg, renameProject } from '@/lib/api/accounts'
 import { GITHUB_CARD } from '@/lib/github-connect'
-import { orgPath } from '@/lib/routes'
 import { useRefreshMe, useTenant } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
 import { OrgGitHub } from '@/components/org-github'
@@ -16,7 +15,6 @@ import { Page } from '@/components/ui/page'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
-import { TextLink } from '@/components/ui/link'
 import { errorMessage } from '@/lib/errors'
 
 /** A name with a Save beside it. `save` rejects with the API's own reason, which is shown. */
@@ -120,18 +118,11 @@ function Projects() {
 export default function SettingsPage() {
   const { me, org } = useTenant()
   const editsOrg = org.actions.includes('edit')
-  const where = org.role ? `, where you are ${org.role}` : ''
   return (
-    <Page title="Settings" description={`Settings of ${org.name}${where}.`}>
+    <Page title="Settings">
       <Section title="Your organizations" note={me.orgs.filter(o => o.role).length} scrollX>
         <YourOrgs />
       </Section>
-
-      {!editsOrg && (
-        <Text tone="muted">
-          You are a member of {org.name}. Only an owner can rename it or manage its projects and GitHub accounts.
-        </Text>
-      )}
 
       {editsOrg && (
         <>
@@ -149,10 +140,6 @@ export default function SettingsPage() {
       <Section title="Members" scrollX>
         <OrgMembers />
       </Section>
-
-      <Text tone="muted">
-        The clusters of {org.name} are managed on <TextLink href={orgPath(org.id, 'clusters')}>Compute Resources</TextLink>.
-      </Text>
 
       <Section id={GITHUB_CARD} title="GitHub" className="scroll-mt-4" scrollX>
         <OrgGitHub />

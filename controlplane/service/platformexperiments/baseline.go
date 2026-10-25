@@ -97,6 +97,11 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if branch := gitrefs.BaselineBranch(pe.ID); baseline.Job.Branch != branch {
 		return refusedBaseline("baseline_not_on_branch", "baseline job %s ran branch %q, and the baseline is measured on %s alone: name the control's job of that branch", baseline.Job.ID, baseline.Job.Branch, branch)
 	}
+	if machine, ok := domain.PlanMachine(pe.Proposal); ok && pe.Status == domain.PlatformExpOpen {
+		if differs := machine.Differs(baseline.Job.Job); differs != "" {
+			return refusedBaseline("baseline_not_on_plans_machine", "baseline job %s asked for %s, and the plan measures the baseline on %s: measure it again there", baseline.Job.ID, differs, machine)
+		}
+	}
 	return checkMeasurement(pe, baseline)
 }
 

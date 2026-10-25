@@ -14,9 +14,8 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Table } from '@/components/ui/table'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Inline, Stack } from '@/components/ui/stack'
+import { Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
-import { InfoTip } from '@/components/ui/info-tip'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 import { formatDate } from '@/lib/format'
@@ -51,7 +50,7 @@ function InstallationState({ installation, onInstall }: { installation: OrgGitHu
     )
   }
   if (!data) return <Text as="span" variant="hint">Checking…</Text>
-  return <StatusChip tone="success" label="Working" explain={`The GitHub App can create and push to repositories on ${installation.account_login}.`} />
+  return <StatusChip tone="success" label="Working" explain={`Experiments can create and push to repositories on ${installation.account_login}.`} />
 }
 
 /**
@@ -92,22 +91,22 @@ export function OrgGitHub() {
   const unconfigured = app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED
   const canInstall = editsOrg && app.data != null
   const installations = data?.items
+  const connect = (first: boolean) => <Button size="sm" variant={first ? 'primary' : 'default'} disabled={install.phase === 'waiting'} onClick={start}>Connect GitHub</Button>
 
   return (
     <Stack>
+      <Text tone="muted">Connect GitHub so the platform can create and manage experiment repositories for you.</Text>
       {editsOrg && unconfigured && (
-        <Callout tone="neutral">This deployment has no GitHub App configured, so no GitHub account can be connected.</Callout>
+        <Callout tone="neutral">GitHub isn&apos;t available on this installation.</Callout>
       )}
       {editsOrg && app.error && !unconfigured && <ErrorMessage>GitHub cannot be connected right now: {app.error.message}</ErrorMessage>}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
 
-      {error && <ErrorMessage>Could not load the GitHub accounts of {org.name}: {error.message}</ErrorMessage>}
+      {error && <ErrorMessage>Could not load GitHub accounts: {error.message}</ErrorMessage>}
       {!data && !error && <Loading />}
       {installations && installations.length === 0 && (
-        <EmptyState>
-          No GitHub account is connected to {org.name}.
-          <InfoTip>An experiment needs one: it keeps its code in a repository there.</InfoTip>
-          {editsOrg ? '' : ' An owner installs the GitHub App here.'}
+        <EmptyState action={canInstall && connect(true)}>
+          No GitHub account connected.
         </EmptyState>
       )}
       {installations && installations.length > 0 && (
@@ -144,23 +143,20 @@ export function OrgGitHub() {
 
       {canInstall && (
         <Stack gap="xs" start>
-          <Inline>
-            <Button size="sm" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>Install GitHub App</Button>
-            <Text as="span" variant="hint">Install it on your account or an organization.</Text>
-          </Inline>
+          {installations && installations.length > 0 && connect(false)}
           <InstallProgress install={install} onCancel={reset} />
         </Stack>
       )}
       {disconnecting && (
         <ConfirmDialog
           open
-          title={`Disconnect ${disconnecting.account_login} from ${org.name}?`}
+          title={`Disconnect ${disconnecting.account_login}?`}
           confirmLabel="Disconnect"
           onConfirm={() => disconnect(disconnecting)}
           onClose={() => setDisconnecting(null)}
         >
-          Experiments that use its repositories keep running. Their agents and jobs can no longer clone,
-          fetch or push within the hour. The App stays installed on GitHub.
+          Within the hour, experiments that use its repositories can no longer clone, fetch or push.
+          The app is also removed from this account on GitHub, unless another HypothesisLoop org still uses it.
         </ConfirmDialog>
       )}
     </Stack>

@@ -95,7 +95,7 @@ describe('an owner', () => {
     show()
     await choose((await row('Bob Stone')).getByLabelText('Role of Bob Stone'), 'owner')
     expect(setOrgMemberRole).not.toHaveBeenCalled()
-    expect(within(screen.getByRole('dialog')).getByText('Make Bob Stone an owner of Lab?')).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText('Make Bob Stone an owner?')).toBeTruthy()
     await confirm('Make owner')
     expect(setOrgMemberRole).toHaveBeenCalledExactlyOnceWith('org_a', 'u2', 'owner')
     await waitFor(() => expect(screen.getByLabelText('Role of Bob Stone')).toHaveProperty('textContent', 'owner'))
@@ -122,7 +122,7 @@ describe('an owner', () => {
     vi.mocked(setOrgMemberRole).mockRejectedValue(new ApiError(409, LAST_OWNER, 'last_owner'))
     show()
     await choose((await row('Ada Lovelace')).getByLabelText('Role of Ada Lovelace'), 'member')
-    expect(within(screen.getByRole('dialog')).getByText('Make yourself a member of Lab?')).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText('Make yourself a member?')).toBeTruthy()
     await confirm('Make member')
     expect(await screen.findByText(LAST_OWNER)).toBeTruthy()
     expect(screen.getByLabelText('Role of Ada Lovelace')).toHaveProperty('textContent', 'owner')
@@ -141,7 +141,7 @@ describe('an owner', () => {
   it('removes a member after being asked', async () => {
     show()
     await userEvent.click((await row('Bob Stone')).getByRole('button', { name: 'Remove' }))
-    expect(within(screen.getByRole('dialog')).getByText('Remove Bob Stone from Lab?')).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText('Remove Bob Stone?')).toBeTruthy()
     await confirm('Remove')
     expect(removeOrgMember).toHaveBeenCalledExactlyOnceWith('org_a', 'u2')
     await waitFor(() => expect(screen.queryByLabelText('Role of Bob Stone')).toBeNull())
@@ -184,7 +184,7 @@ describe('inviting', () => {
     const link = `${window.location.origin}/invite#${TOKEN}`
     expect(await screen.findByTestId('secret')).toHaveProperty('textContent', link)
     expect(document.body.textContent!.split(TOKEN)).toHaveLength(2)
-    expect(screen.getByRole('img', { name: /joins Lab as a member/ })).toBeTruthy()
+    expect(screen.getByRole('img', { name: /joins as a member/ })).toBeTruthy()
     expect(screen.getByText(/It is shown once/)).toBeTruthy()
   })
 
@@ -193,7 +193,7 @@ describe('inviting', () => {
     await choose(await screen.findByLabelText('Role of the invited person'), 'Invite as owner')
     await userEvent.click(screen.getByRole('button', { name: 'Create invite link' }))
     expect(createOrgInvite).toHaveBeenCalledExactlyOnceWith('org_a', 'owner')
-    expect(await screen.findByRole('img', { name: /joins Lab as an owner/ })).toBeTruthy()
+    expect(await screen.findByRole('img', { name: /joins as an owner/ })).toBeTruthy()
   })
 
   it('copies the link to the clipboard', async () => {
@@ -241,7 +241,7 @@ describe('inviting', () => {
     expect(revokeOrgInvite).not.toHaveBeenCalled()
 
     await userEvent.click((await row('inv_1')).getByRole('button', { name: 'Revoke' }))
-    expect(within(screen.getByRole('dialog')).getByText(`Revoke the invite Ada Lovelace created ${formatDate(at)}?`)).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText('Revoke this invite?')).toBeTruthy()
     await confirm('Revoke')
     expect(revokeOrgInvite).toHaveBeenCalledExactlyOnceWith('inv_1')
     expect(await screen.findByText('No pending invites.')).toBeTruthy()
@@ -272,7 +272,6 @@ describe('a member', () => {
     expect(other.queryByRole('button')).toBeNull()
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
-    expect(screen.getByText(/Only an owner can invite people, change a role or remove someone/)).toBeTruthy()
   })
 
   it('is offered no invite and asks the API for none', async () => {

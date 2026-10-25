@@ -50,7 +50,7 @@ describe('the agent types page', () => {
     expect(executors.getByText('Archived')).toBeTruthy()
     expect(executors.queryByRole('columnheader', { name: 'In use' })).toBeNull()
     // Each role is titled and described as the API names it.
-    expect(screen.getByText('Implements experiments and runs their jobs.')).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'Implements experiments and runs their jobs.' })).toBeTruthy()
     for (const role of ['Researcher', 'Baseline', 'Planner', 'Coordinator']) expect(screen.getByRole('table', { name: `${role} types` })).toBeTruthy()
   })
 
@@ -74,7 +74,7 @@ describe('the agent types page', () => {
     expect(dialog.queryByRole('button', { name: 'Researcher' })).toBeNull()
     expect(dialog.getByText('Implements experiments and runs their jobs. The role is fixed once made.')).toBeTruthy()
     await userEvent.click(dialog.getByRole('button', { name: 'Baseline' }))
-    expect(dialog.getByText('Starts as a copy of Baseline.')).toBeTruthy()
+    expect(dialog.getByPlaceholderText('Copy of Baseline')).toBeTruthy()
     await userEvent.type(dialog.getByLabelText('Name'), 'Strict baseline')
     await userEvent.click(dialog.getByRole('button', { name: 'Create and edit' }))
     expect(createAgentType).toHaveBeenCalledExactlyOnceWith('org_a', { from: 'baseline', name: 'Strict baseline' })
@@ -89,10 +89,9 @@ describe('the agent types page', () => {
     expect(navigation.push).not.toHaveBeenCalled()
   })
 
-  it('lets a member read every type and says only an owner changes them', async () => {
+  it('lets a member read every type and change none', async () => {
     show('member')
     await screen.findByRole('table', { name: 'Executor types' })
-    expect(screen.getByRole('note').textContent).toMatch(/Only an owner of Lab can create, edit or archive agent types/)
     expect(screen.queryByRole('button', { name: 'Duplicate' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'New type' })).toBeNull()
   })

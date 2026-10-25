@@ -166,41 +166,35 @@ models:
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the description and the size and proposes the
-# experiment) before the person accepts and states what the run itself costs. A draft takes no
-# job, so the platform pays for the planner's machine and nothing else, and all of it is bounded
-# here.
+# experiment), and which its proposal opens at once. A draft takes no job, so the platform pays
+# for the planner's machine and nothing else, and all of it is bounded here.
 #
 #   limit_minutes         how long the planner has to propose, from the goal and again from each
 #              change of it. A draft with no proposal by then is closed and its machine released.
-#   proposed_for_days     how long a proposal waits for a person before the draft is closed.
-#   planner_kept_minutes  how long the planner's machine is kept after its answer, so that a
-#              goal changed in that time is answered by the planner that is still there,
-#              with nothing to boot. It ends earlier at the planning limit the machine was
-#              rented with, and with the accept. After it no machine runs while the answer
-#              waits, and a changed goal starts one.
+#   proposed_for_days     how long a draft whose planner declined waits for a person to change
+#              the goal before it is closed.
+#   planner_kept_minutes  how long the planner's machine is kept after a decline, so that a goal
+#              changed in that time is answered by the planner that is still there, with
+#              nothing to boot. It ends earlier at the planning limit the machine was rented
+#              with, and with a proposal. After it no machine runs while the decline waits, and
+#              a changed goal starts one.
 #   baseline_limit_minutes  the longest a platform experiment may stay open, counted from its
-#              starts_at (its creation or acceptance, or a later one stated). One created whole
-#              has all of it; an accepted draft has the baseline_minutes its planner estimated
-#              and the person accepted, at most this. The platform starts the run once a
-#              baseline is declared (PATCH baseline_job_id), and its duration_hours count from
-#              then. One not running by its baseline_due_at is closed with close_reason
+#              starts_at (its creation or the proposal that opened it, or a later one stated).
+#              One created whole has all of it; one opened by a proposal has the
+#              baseline_minutes its planner estimated, at most this. The platform starts the run
+#              once a baseline is declared (PATCH baseline_job_id), and its duration_hours count
+#              from then. One not running by its baseline_due_at is closed with close_reason
 #              baseline_limit_reached and its machines are released. baseline_due_at moves out
 #              by the time a job of the baseline waits for the platform to start it, at most
 #              90 minutes in all.
-#   min_baseline_minutes  the fewest baseline_minutes a proposal or an accept may state: a
-#              baseline written from nothing writes its harness, builds its image and measures
-#              once, and a shorter window closes the run before it starts.
-#   auto_accept_seconds  how long a proposal waits before the platform accepts it as proposed,
-#              unless a person accepts it sooner, holds it to edit it, changes the goal or closes
-#              it. Its baseline agent's machine starts with the proposal, so measuring begins
-#              as the proposal is accepted. 0 leaves every proposal to a person.
+#   min_baseline_minutes  the fewest baseline_minutes a proposal may state: a baseline with a
+#              harness that runs unchanged builds its image and measures the control once.
 planning:
   limit_minutes: 30
   proposed_for_days: 7
   planner_kept_minutes: 10
-  baseline_limit_minutes: 90
-  min_baseline_minutes: 45
-  auto_accept_seconds: 30
+  baseline_limit_minutes: 60
+  min_baseline_minutes: 15
 
 # What one account may create. Staff, the platform's operators, are held to neither.
 #
@@ -382,7 +376,8 @@ object_store:
 # you want to bill at: pricing tenstorrent.com/chipArch=blackhole bills every Blackhole board
 # alike, while tenstorrent.com/boardType=7 would price one board model.
 #
-# acch_rate is cost in accelerator-hours (AccH), H100-equivalent (H100 = 1.0).
+# acch_rate is cost in accelerator-hours (AccH), H100-equivalent (H100 = 1.0). budget_reference
+# names that accelerator, so a budget reads as hours on it: H100-hours.
 #
 # hypothesisloop.dev/cpu=core is the one type that is no device: one unit is one CPU core. Every
 # runtime offers its nodes' cores as it, and a job that asks for cores and no accelerator (cpu: 4)
@@ -399,6 +394,8 @@ object_store:
 # Accelerators are the resource dimension admitted/preempted on. RAM/storage are hard
 # physical-fit-checked at admission instead of hours-quota-tracked. Agents declare accelerator
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.
+
+budget_reference: H100
 
 accelerator_types:
   - name:      nvidia.com/gpu.product=Tesla-T4
@@ -638,5 +635,6 @@ stages:
 
 # The machines the control plane rents itself, both left out here: sandbox, the provider account
 # sandboxed agents run on (sandbox.yaml beside this file), and cloud_compute, the provider accounts
-# jobs run on, each scheduled as a cluster (cloud-compute.yaml). A deployment that has them adds
-# those sections to this file; make dev does.
+# jobs run on, each scheduled as a cluster (cloud-compute.yaml, whose entries rent on vast.ai and on
+# Runpod side by side). They are left out because each needs an account and its key. A deployment
+# that has them adds those sections to this file; make dev adds both cloud_compute entries.

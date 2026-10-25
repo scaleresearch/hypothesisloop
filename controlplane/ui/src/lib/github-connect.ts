@@ -43,7 +43,9 @@ const CHANNEL = 'hl-github-install'
 
 type InstallOutcome = { ok: true; installation: OrgGitHubInstallation } | { ok: false; message: string; reason?: string }
 
-type Message = { state: string; outcome: InstallOutcome } | { changed: true }
+// next is the state an install continues under once GitHub's authorization page sent it on to
+// GitHub's install page.
+type Message = { state: string; outcome: InstallOutcome } | { state: string; next: string } | { changed: true }
 
 function post(message: Message) {
   const channel = new BroadcastChannel(CHANNEL)
@@ -108,8 +110,12 @@ export function useGitHubInstall(orgID: string, returnTo: string) {
 
   useEffect(() => listen(message => {
     if ('state' in message && message.state !== waiting) return
+    if ('next' in message) {
+      setInstall({ phase: 'waiting', state: message.next })
+      return
+    }
     void mutate(githubReads)
-    if ('state' in message) {
+    if ('outcome' in message) {
       setInstall(message.outcome.ok ? { phase: 'connected', installation: message.outcome.installation } : { phase: 'failed', message: message.outcome.message, reason: message.outcome.reason })
     }
   }), [waiting, mutate])
@@ -129,29 +135,34 @@ export type ReturnView =
   | { view: 'failed'; message: string }
   // GitHub returned from a change made on GitHub, which no install of this app started.
   | { view: 'changed' }
+  // Nothing was there to connect, so the tab went on to GitHub's install page.
+  | { view: 'installing' }
   // Nothing GitHub sends: a visit.
   | { view: 'nothing' }
 
-const REQUESTED = 'GitHub asked an owner of that organization to approve the install. Press Install GitHub App again once they have.'
-const NO_INSTALLATION = 'GitHub returned without an installation, so nothing was connected. Press Install GitHub App again.'
+const REQUESTED = 'GitHub asked an owner of that organization to approve the install. Try again once they have.'
+const NO_INSTALLATION = 'GitHub returned without an installation, so nothing was connected. Try again.'
+
+type Finish = (state: string, code: string, installationID: number) => Promise<InstallFinished>
 
 /**
  * Takes GitHub's return to the callback URL in the install tab: with the state, the authorization
  * code and the installation GitHub handed back, the installation is connected through `finish`,
- * once, and the outcome is
- * told to the tab the install started in. A return with no state, from a change made on GitHub,
- * has every tab read again and connects nothing.
+ * once, and the outcome is told to the tab the install started in. A return from GitHub's
+ * authorization page has no installation: the API connects the ones the person may reach, or
+ * answers GitHub's install page, where this tab goes on through `go`. A return with no state,
+ * from a change made on GitHub, has every tab read again and connects nothing.
  */
-export function takeReturn(query: string, finish: (state: string, code: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
+export function takeReturn(query: string, finish: Finish, go: (url: string) => void = url => window.location.assign(url)): Promise<ReturnView> {
   // React runs an effect twice in development, and a state works once: the second run is
   // answered what the first was.
-  if (taken?.query !== query) taken = { query, view: take(new URLSearchParams(query), finish) }
+  if (taken?.query !== query) taken = { query, view: take(new URLSearchParams(query), finish, go) }
   return taken.view
 }
 
 let taken: { query: string; view: Promise<ReturnView> } | null = null
 
-async function take(params: URLSearchParams, finish: (state: string, code: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
+async function take(params: URLSearchParams, finish: Finish, go: (url: string) => void): Promise<ReturnView> {
   const state = params.get('state')
   const installed = Number(params.get('installation_id'))
   const hasInstallation = Number.isSafeInteger(installed) && installed > 0
@@ -164,9 +175,16 @@ async function take(params: URLSearchParams, finish: (state: string, code: strin
     post({ state, outcome: { ok: false, message, reason } })
     return { view: 'failed', message }
   }
-  if (!hasInstallation) return failed(params.get('setup_action') === 'request' ? REQUESTED : NO_INSTALLATION)
+  const code = params.get('code') ?? ''
+  if (!hasInstallation && (params.get('setup_action') === 'request' || !code)) return failed(params.get('setup_action') === 'request' ? REQUESTED : NO_INSTALLATION)
   try {
-    const finished = await finish(state, params.get('code') ?? '', installed)
+    const finished = await finish(state, code, hasInstallation ? installed : 0)
+    if (finished.install) {
+      post({ state, next: finished.install.state })
+      go(finished.install.install_url)
+      return { view: 'installing' }
+    }
+    if (!finished.installation) return failed(NO_INSTALLATION)
     post({ state, outcome: { ok: true, installation: finished.installation } })
     return { view: 'connected', account: finished.installation.account_login, returnTo: inApp(finished.return_to) ? finished.return_to : null }
   } catch (error) {

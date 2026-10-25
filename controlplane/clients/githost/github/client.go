@@ -202,6 +202,9 @@ type App struct {
 	InstallURL string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. Connecting goes through POST /orgs/{id}/github-install-states, whose install_url carries the state GitHub hands back."`
 	// NewRepositoryURL is GitHub's own form for a new repository.
 	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
+	// AuthorizeURL is where a person authorizes the App, which sends them to its callback URL
+	// with a code and the state added to it.
+	AuthorizeURL string `json:"-"`
 }
 
 // Client is the only code that talks to GitHub. It acts as the platform's GitHub App and keeps
@@ -241,6 +244,7 @@ func (c *Client) App() App {
 		Slug:             c.slug,
 		InstallURL:       c.webURL + "/apps/" + url.PathEscape(c.slug) + "/installations/new",
 		NewRepositoryURL: c.webURL + "/new",
+		AuthorizeURL:     c.webURL + "/login/oauth/authorize?" + url.Values{"client_id": {c.clientID}}.Encode(),
 	}
 }
 

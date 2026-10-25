@@ -22,6 +22,15 @@ vi.mock('@/lib/api/agent-types', async importActual => ({
   fetchAgentRoles: vi.fn(async () => (await import('@/test-agent-types')).ROLES),
 }))
 vi.mock('@/lib/api/models', () => ({ fetchModels: vi.fn() }))
+vi.mock('@/lib/api/clusters', () => ({
+  fetchResourceCapacity: vi.fn(async () => ({
+    budget_reference: 'H100',
+    clusters: [{ cluster_name: 'a', hosts: 1, multi_node: false, accelerators: [
+      { accelerator_type: 'nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3', kind: 'accelerator', acch_per_hour: 1, available: 1, total: 1, per_node_available: 1 },
+      { accelerator_type: 'nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090', kind: 'accelerator', acch_per_hour: 0.25, available: 1, total: 1, per_node_available: 1 },
+    ] }],
+  })),
+}))
 vi.mock('@/lib/api/agents', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/agents')>()),
   addPlatformExperimentAgents: vi.fn(),
@@ -115,10 +124,10 @@ describe('a new platform experiment', () => {
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))
     expect(sent()).toMatchObject({
-      name: 'Run', description: 'The brief', coordinator_in_agentsandbox: true, max_agents: 2, duration_hours: 48, budget_accelerator_hours: 10,
+      name: 'Run', description: 'The brief', coordinator_in_agentsandbox: true, duration_hours: 48, budget_accelerator_hours: 10,
       agents: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'researcher', count: 1 }],
     })
-    for (const left of ['stages', 'report_interval_seconds', 'starts_at', 'repository', 'coordinator_model']) expect(sent()).not.toHaveProperty(left)
+    for (const left of ['stages', 'report_interval_seconds', 'starts_at', 'repository', 'coordinator_model', 'max_agents']) expect(sent()).not.toHaveProperty(left)
     expect(createPlatformExperiment).toHaveBeenCalledTimes(1)
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
   })
@@ -131,45 +140,60 @@ describe('a new platform experiment', () => {
     await userEvent.clear(screen.getByLabelText('Duration (hours)'))
     await userEvent.type(screen.getByLabelText('Duration (hours)'), '6')
     await next()
-    await userEvent.clear(screen.getByLabelText('Max executors'))
-    await userEvent.type(screen.getByLabelText('Max executors'), '3')
+    expect(screen.queryByLabelText('Max executors')).toBeNull()
+    await userEvent.clear(await screen.findByLabelText('Team entry 1 count'))
+    await userEvent.type(screen.getByLabelText('Team entry 1 count'), '3')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    expect(sent()).toMatchObject({ duration_hours: 6, max_agents: 3 })
+    // The team's executors are the most at work at once, which the API counts.
+    expect(sent()).toMatchObject({ duration_hours: 6, agents: [{ agent_type: 'generalist', count: 3 }, { agent_type: 'researcher', count: 1 }] })
+    expect(sent()).not.toHaveProperty('max_agents')
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
   })
 
-  it('composes the team in one list: each entry an agent type, its count, model and hyperparameters, the researcher on the coordinator\'s model', async () => {
+  it('composes the team in one list after its coordinator: entries of several executor types, each its count and model, the researcher on the coordinator\'s model', async () => {
     show()
     await userEvent.type(name(), 'Run')
     await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await next()
-    expect(await screen.findByText('2 executors, 1 researcher · at most 2 executors at work at once')).toBeTruthy()
+    expect(await screen.findByText('2 executors, 1 researcher')).toBeTruthy()
     // A researcher's model defaults to the coordinator's when neither its entry nor its type names one.
     const researcherModel = screen.getByLabelText('Team entry 2 model') as HTMLInputElement
     expect(researcherModel.placeholder).toBe("Coordinator's model: anthropic/claude-opus-5-5")
+    expect(screen.getByLabelText('Coordinator count')).toHaveProperty('disabled', true)
     await pickModel(screen.getByLabelText('Coordinator model'), 'sonnet', 'anthropic/claude-sonnet-5')
     expect(researcherModel.placeholder).toBe("Coordinator's model: anthropic/claude-sonnet-5")
-    // Adding one of a role raises the count of its built-in entry.
     await userEvent.click(screen.getByRole('button', { name: '+ Add executor' }))
-    expect(screen.getByLabelText('Team entry 1 count')).toHaveProperty('value', '3')
-    expect(screen.getByText('The team has more executors than the max at once: raise the max or lower a count.')).toBeTruthy()
-    await userEvent.clear(screen.getByLabelText('Max executors'))
-    await userEvent.type(screen.getByLabelText('Max executors'), '4')
+    await choose(screen.getByLabelText('Team entry 3 type'), 'Data search')
     await pickModel(screen.getByLabelText('Team entry 1 model'), 'nano', 'openrouter/openai/gpt-5-nano')
-    await userEvent.click(within(screen.getByRole('listitem', { name: 'Team entry 1' })).getByRole('button', { name: '+ Hyperparameters' }))
-    const hyperparameters = screen.getByLabelText('Team entry 1 hyperparameters')
-    await userEvent.click(hyperparameters)
-    await userEvent.paste('{"direction": "kernels"')
-    expect(screen.getByText('Not valid JSON.')).toBeTruthy()
-    await userEvent.paste('}')
+    expect(screen.queryByRole('button', { name: '+ Hyperparameters' })).toBeNull()
+    expect(screen.getByText('3 executors, 1 researcher')).toBeTruthy()
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(sent()).toMatchObject({
-      max_agents: 4, coordinator_model: 'anthropic/claude-sonnet-5',
-      agents: [{ agent_type: 'generalist', count: 3, model: 'openrouter/openai/gpt-5-nano', hyperparameters: { direction: 'kernels' } }, { agent_type: 'researcher', count: 1 }],
+      coordinator_model: 'anthropic/claude-sonnet-5',
+      agents: [{ agent_type: 'generalist', count: 2, model: 'openrouter/openai/gpt-5-nano' }, { agent_type: 'researcher', count: 1 }, { agent_type: 'data-search', count: 1 }],
     })
+  })
+
+  it('counts the budget in H100-hours, the rate of each type in its tip', async () => {
+    show()
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    expect(await screen.findByLabelText('Budget (H100-hours)')).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'Budgets are counted in H100-hours. An hour on another type counts at its rate: NVIDIA-H100-80GB-HBM3 1, NVIDIA-GeForce-RTX-4090 0.25. Jobs on CPU count CPU core-hours. Memory and storage spend nothing.' })).toBeTruthy()
+  })
+
+  it('creates nothing without an executor in the team', async () => {
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
+    await next()
+    await next()
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove team entry 1' }))
+    await create()
+    expect(await screen.findByText('Add at least one executor to the team.')).toBeTruthy()
+    expect(createPlatformExperiment).not.toHaveBeenCalled()
   })
 
   it('offers the agent types a team names from the API, by role, each with what it does, and links to manage them', async () => {
@@ -184,7 +208,7 @@ describe('a new platform experiment', () => {
     await userEvent.click(type)
     expect(screen.getAllByRole('group').map(g => g.getAttribute('aria-label'))).toEqual(expect.arrayContaining(['Executor', 'Researcher']))
     const offered = (await screen.findAllByRole('option')).map(o => o.textContent)
-    expect(offered).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper (v3)', 'Researcher'])
+    expect(offered).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper (v3)', 'Researcher', 'Manage agent types'])
     await userEvent.click(screen.getByRole('option', { name: 'LR sweeper (v3)' }))
     expect(screen.getByText("Your org's own executor type, made by Ada.")).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Manage agent types' }).getAttribute('href')).toBe('/orgs/org_a/settings/agent-types')
@@ -324,12 +348,14 @@ describe('a repository that brings its own experiment', () => {
     await next()
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    // The team's executors are the max at work, whatever max the file states: the API counts them.
     expect(sent()).toMatchObject({
       name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10, repository: 'acme/widgets', branch: 'main',
-      budget_accelerator_hours: 3, max_agents: 4, duration_hours: 6,
+      budget_accelerator_hours: 3, duration_hours: 6,
       metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
       agents: [{ agent_type: 'data-search', count: 3, hyperparameters: { direction: 'dictionaries' } }],
     })
+    expect(sent()).not.toHaveProperty('max_agents')
   })
 
   it('keeps a name already typed when the repository has no experiment file', async () => {
@@ -338,6 +364,21 @@ describe('a repository that brings its own experiment', () => {
     await chooseRepository('acme/widgets')
     await waitFor(() => expect(fetchExperimentFile).toHaveBeenCalled())
     expect(name()).toHaveProperty('value', 'Mine')
+  })
+
+  // A repository made from the experiment template and not yet filled in showed a YAML type
+  // error for budget_accelerator_hours as though the file were broken.
+  it('fills nothing and shows no error for an experiment file the template left unfilled', async () => {
+    vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, '.hypothesisloop/experiment.yaml at main of acme/widgets still has 7 REPLACE-WITH to fill in, as the experiment template leaves it', 'experiment_file_unfilled'))
+    show()
+    await userEvent.type(name(), 'Mine')
+    await chooseRepository('acme/widgets')
+    expect(await screen.findByText(".hypothesisloop/experiment.yaml of acme/widgets at main is the template's, not yet filled in.")).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(document.body.textContent).not.toContain('REPLACE-WITH')
+    expect(name()).toHaveProperty('value', 'Mine')
+    expect(screen.getByLabelText('Experiment goal')).toHaveProperty('value', '')
   })
 
   it('says why its experiment file cannot be used once, in the API\'s words, which name the file and where it was read', async () => {
@@ -358,7 +399,7 @@ describe('a repository that brings its own experiment', () => {
 
 describe('editing a platform experiment', () => {
   const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, duration_hours: 12, stages: [], shared: false,
-    editable: ['name', 'description', 'budget_accelerator_hours', 'max_agents', 'agents', 'max_concurrent_accelerators', 'metrics', 'report_interval_seconds', 'starts_at', 'duration_hours', 'baseline_job_id', 'baseline_reason'] } as unknown as PlatformExperiment
+    editable: ['name', 'description', 'budget_accelerator_hours', 'agents', 'max_concurrent_accelerators', 'metrics', 'report_interval_seconds', 'starts_at', 'duration_hours', 'baseline_job_id', 'baseline_reason'] } as unknown as PlatformExperiment
 
   it('sends the fields that changed and no others, from any step', async () => {
     const renamed = { ...existing, name: 'New' }
@@ -372,12 +413,11 @@ describe('editing a platform experiment', () => {
     expect(createPlatformExperiment).not.toHaveBeenCalled()
   })
 
-  it('shows max executors and no team to change: that is done in place on the experiment page', async () => {
+  it('shows no team and no max executors to change: the team is changed in place on the experiment page', async () => {
     show(existing)
     await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
-    expect(screen.queryByRole('spinbutton', { name: 'Max executors' })).toBeNull()
+    expect(screen.queryByText('Max executors')).toBeNull()
     expect(screen.queryByRole('list', { name: 'Team' })).toBeNull()
-    expect(screen.getByText('Changed on the experiment page, under Team.')).toBeTruthy()
   })
 
   it('reads the experiment\'s duration and sends a changed one as duration_hours', async () => {
@@ -410,6 +450,35 @@ describe('editing a platform experiment', () => {
   })
 })
 
+// A plan made from a sentence states its machine, which the person changes while the baseline is
+// measured and which is fixed once the run starts.
+describe('the machine of a plan', () => {
+  const planned = {
+    id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, duration_hours: 12, stages: [], shared: false,
+    proposal: { accelerator_type: 'hypothesisloop.dev/cpu=core', cpu: '8', memory: '32Gi', storage: '100Gi' },
+    editable: ['name', 'description', 'budget_accelerator_hours', 'duration_hours', 'accelerator_type', 'cpu', 'memory', 'storage'],
+  } as unknown as PlatformExperiment
+
+  it('sends what of it changed', async () => {
+    vi.mocked(updatePlatformExperiment).mockResolvedValue(planned)
+    show(planned)
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    const cpu = screen.getByLabelText('CPU')
+    expect(cpu).toHaveProperty('value', '8')
+    await userEvent.clear(cpu)
+    await userEvent.type(cpu, '4')
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', { cpu: '4' }))
+  })
+
+  it('is fixed once running', async () => {
+    show({ ...planned, status: 'running', editable: ['name', 'description', 'duration_hours'] } as PlatformExperiment)
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    expect(screen.getByLabelText('CPU')).toHaveProperty('disabled', true)
+    expect(screen.getAllByText('Fixed once running.').length).toBeGreaterThan(0)
+  })
+})
+
 describe('a draft of a new platform experiment', () => {
   const draft: ExperimentDraft = {
     id: 'draft-7', project_id: 'prj_1', step: '2', failure: '', created_at: at, updated_at: at,
@@ -419,6 +488,7 @@ describe('a draft of a new platform experiment', () => {
   it('is saved from any step, as typed, and saved again in place', async () => {
     show()
     await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
     expect(await screen.findByRole('button', { name: 'Draft saved' })).toBeTruthy()
@@ -426,7 +496,7 @@ describe('a draft of a new platform experiment', () => {
     await next()
     // Nothing changed since it was saved, so there is nothing to save.
     expect(screen.getByRole('button', { name: 'Draft saved' })).toHaveProperty('disabled', true)
-    await userEvent.type(screen.getByLabelText('Max executors'), '0')
+    await userEvent.type(await screen.findByLabelText('Team entry 1 count'), '0')
     await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
     await waitFor(() => expect(updateExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-1', expect.objectContaining({ step: '3' })))
     expect(createExperimentDraft).toHaveBeenCalledTimes(1)
@@ -452,16 +522,56 @@ describe('a draft of a new platform experiment', () => {
     expect(deleteExperimentDraft).not.toHaveBeenCalled()
   })
 
-  it('is left as it is while the App is installed in another tab', async () => {
+  it('is left as it is while GitHub is connected in another tab', async () => {
     const opened = { location: { href: '' }, close: vi.fn() }
     vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
     vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: 'https://github.test/install?state=s-1', expires_at: '' })
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()
     await userEvent.type(name(), 'Before GitHub')
-    await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     expect(await screen.findByText(/Waiting for GitHub/)).toBeTruthy()
     expect(opened.location.href).toBe('https://github.test/install?state=s-1')
     expect(createExperimentDraft).not.toHaveBeenCalled()
     expect(name()).toHaveProperty('value', 'Before GitHub')
   })
+})
+
+describe('what a new platform experiment lacks', () => {
+  it('starts from a new private repository from the template, and asks for a branch only of an existing one', async () => {
+    show()
+    expect(await screen.findByText('A new repository starts from the experiment template.')).toBeTruthy()
+    expect(screen.queryByLabelText('Branch')).toBeNull()
+    await chooseRepository('acme/widgets')
+    expect(screen.getByLabelText('Branch')).toBeTruthy()
+    expect(screen.queryByText('A new repository starts from the experiment template.')).toBeNull()
+  })
+
+  it('stays on step 1 at Next while the name or the goal is empty, says which, and clears each once given', async () => {
+    show()
+    await next()
+    expect(screen.getByRole('tab', { name: '1. What', selected: true })).toBeTruthy()
+    expect(screen.getByText('Name the experiment.')).toBeTruthy()
+    expect(screen.getByText('Describe what the experiment should achieve.')).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(name()))
+    await userEvent.type(name(), 'Run')
+    expect(screen.queryByText('Name the experiment.')).toBeNull()
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
+    await next()
+    expect(screen.getByRole('tab', { name: '2. Measure', selected: true })).toBeTruthy()
+  })
+
+  it('goes back to step 1 at Create while GitHub is not connected, and points at the way to connect it', async () => {
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+    show()
+    await essentials()
+    const button = screen.getByRole('button', { name: 'Create experiment' })
+    expect(button).toHaveProperty('disabled', false)
+    await create()
+    expect(screen.getByRole('tab', { name: '1. What', selected: true })).toBeTruthy()
+    expect(screen.getByText('Connect GitHub first.')).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Connect GitHub' })))
+    expect(createPlatformExperiment).not.toHaveBeenCalled()
+  })
+
 })

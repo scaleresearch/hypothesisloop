@@ -212,7 +212,6 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	}
 	for field, more := range map[string]map[string]any{
 		"budget_accelerator_hours":    {"budget_accelerator_hours": 500},
-		"max_agents":                  {"max_agents": 30},
 		"duration_hours":              {"duration_hours": 48},
 		"starts_at":                   {"starts_at": "2030-01-02T00:00:00Z"},
 		"max_concurrent_accelerators": {"max_concurrent_accelerators": 8},

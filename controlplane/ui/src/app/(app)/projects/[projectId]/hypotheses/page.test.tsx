@@ -68,7 +68,7 @@ describe('the hypotheses of a project', () => {
   it('lead to creating an experiment when the project has none', async () => {
     vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect(await screen.findByText(/No experiments yet/)).toBeTruthy()
+    expect(await screen.findByText('Hypotheses appear here once an experiment runs.')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Create an experiment' }).getAttribute('href')).toBe('/projects/prj_1/experiments')
     expect(navigation.replace).not.toHaveBeenCalled()
   })

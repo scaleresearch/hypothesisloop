@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMetric, headline, shortId } from './format'
+import { formatMetric, headline, resourceLabel, shortId } from './format'
 
 describe('headline', () => {
   it('keeps the first sentence without its full stop', () => {
@@ -41,5 +41,14 @@ describe('formatMetric', () => {
 describe('headline of a labelled claim', () => {
   it('drops the label', () => {
     expect(headline('Mechanism: tanh is bounded. Idea: try it.')).toBe('tanh is bounded')
+  })
+})
+
+describe('the name of a priced type', () => {
+  it('drops the selector key and the vendor prefix', () => {
+    expect(resourceLabel('nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe')).toBe('A100 80GB PCIe')
+    expect(resourceLabel('nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090')).toBe('RTX 4090')
+    expect(resourceLabel('hypothesisloop.dev/cpu=core')).toBe('CPU core')
+    expect(resourceLabel('tenstorrent.com/chipArch=blackhole')).toBe('Tenstorrent Blackhole')
   })
 })

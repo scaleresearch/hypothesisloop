@@ -301,7 +301,6 @@ CREATE TABLE platform_experiments (
     proposed_at                    TIMESTAMPTZ,
     declined_reason                TEXT             NOT NULL DEFAULT '',
     planner_ends_at                TIMESTAMPTZ,
-    accepts_at                     TIMESTAMPTZ,
     accepted_at                    TIMESTAMPTZ,
     accepted_by_kind               TEXT             NOT NULL DEFAULT '',
     accepted_by_id                 TEXT             NOT NULL DEFAULT '',
@@ -365,7 +364,6 @@ CREATE TABLE platform_experiments (
     CONSTRAINT platform_experiments_model_budget CHECK (model_budget_usd IS NULL OR model_budget_usd > 0)
 );
 CREATE INDEX idx_platform_experiments_project ON platform_experiments(project_id);
-CREATE INDEX idx_platform_experiments_accepts_at ON platform_experiments(accepts_at) WHERE accepts_at IS NOT NULL;
 CREATE INDEX idx_platform_experiments_in_progress ON platform_experiments(status)
     WHERE status IN ('draft', 'open', 'running');
 

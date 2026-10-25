@@ -27,7 +27,7 @@ vi.mock('@/lib/api/request', async importActual => ({
   apiSend: vi.fn(),
 }))
 vi.mock('@/components/repository-select', async original => ({ ...await original(), RepositorySelect: () => null }))
-vi.mock('@/components/connect-github-step', () => ({ useNeedsGitHub: () => false, useGitHub: () => undefined, ConnectGitHubStep: () => null }))
+vi.mock('@/components/connect-github-step', async original => ({ ...await original(), useGitHub: () => undefined, useGitHubAccounts: () => undefined, usePlainGitHost: () => false, ConnectGitHubDialog: () => null }))
 
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {
@@ -111,10 +111,11 @@ describe('the card of a platform experiment', () => {
 })
 
 describe('the subtitle of the list', () => {
-  it('counts the agents that ran, and does not say they are active', async () => {
+  it('does not count the agents that ever ran', async () => {
     vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 5 })
     vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect(await screen.findByText('5 agents ran')).toBeTruthy()
+    await screen.findByText(/first experiment/i)
+    expect(screen.queryByText(/agents ran/)).toBeNull()
   })
 })

@@ -337,7 +337,7 @@ func TestTheBaselineCreatesNoDefaultBranchOnAnEmptyRepository(t *testing.T) {
 	w.noSecretLeaked()
 }
 
-func TestOnlyAnAgentPastTheDraftPushes(t *testing.T) {
+func TestOnlyAnAgentPastTheDraftOrItsBaselineAgentPushes(t *testing.T) {
 	w := newWorld(t)
 	for _, token := range []string{"tok-planner", "tok-researcher", "tok-coordinator", "tok-job"} {
 		dir := w.clone(token, strings.TrimPrefix(token, "tok-"))
@@ -355,6 +355,12 @@ func TestOnlyAnAgentPastTheDraftPushes(t *testing.T) {
 	}
 	if w.hostRef("refs/heads/hl/pe-1/executor-2/x") != "" {
 		t.Error("a read-only push reached the host")
+	}
+	// A draft's baseline agent builds its branch while the plan is drafted.
+	baseline := w.clone("tok-baseline", "baseline-in-draft")
+	w.commitOn(baseline, "hl/pe-1/baseline")
+	if out, err := w.git("tok-baseline", baseline, "push", "--quiet", "origin", "hl/pe-1/baseline"); err != nil {
+		t.Errorf("the baseline agent pushing in a draft: %v: %s, want it pushed", err, out)
 	}
 	w.noSecretLeaked()
 }

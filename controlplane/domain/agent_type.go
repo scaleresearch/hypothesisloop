@@ -53,7 +53,7 @@ var AgentRoleInfos = []AgentRoleInfo{
 		"baseline", SignupRoleBaseline, false, true},
 	{AgentRoleCoordinator, "Coordinator", "Assembles and steers the team of a platform experiment: one per experiment, not signed up and not ranked.",
 		CoordinatorAgentType, "", false, false},
-	{AgentRolePlanner, "Planner", "Plans a draft: proposes the experiment, its budget and its team, then takes no part once the draft is accepted.",
+	{AgentRolePlanner, "Planner", "Plans a draft: proposes the experiment, its budget and its team, which opens it, and then takes no part.",
 		PlannerAgentType, SignupRolePlanner, false, false},
 }
 

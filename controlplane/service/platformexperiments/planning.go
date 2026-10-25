@@ -18,14 +18,11 @@ import (
 type Planning struct {
 	// Limit is how long a planner has to propose, from the goal or from a changed one.
 	Limit time.Duration
-	// ProposedFor is how long a proposal waits for the person before the draft is closed.
+	// ProposedFor is how long a declined draft waits for the person before it is closed.
 	ProposedFor time.Duration
 	// PlannerKept is how long a planner's machine is kept after its answer, for a goal changed in
 	// that time to reach the planner that is still there.
 	PlannerKept time.Duration
-	// AutoAccept is how long a proposal waits before the platform accepts it as proposed, unless
-	// a person accepts it sooner, holds it, changes its goal or closes it. 0 leaves it to a person.
-	AutoAccept time.Duration
 }
 
 // checkGoal is goal as it is stored, or why it is refused.
@@ -56,9 +53,9 @@ func draftName(goal string) string {
 	return string(runes) + "…"
 }
 
-// CreateDraft creates a platform experiment in status draft from one sentence, with its planner:
-// an agent the platform runs, of role planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
-// the planner proposes the rest and a person accepts it. A repository to be created is created
+// CreateDraft creates a platform experiment in status draft from one sentence, with its planner
+// and its baseline agent, agents the platform runs, whose machines start at once. The draft has the planning limit for an end and nothing of a run, no budget among it:
+// the planner proposes the rest, which opens it. A repository to be created is created
 // after this returns, by the repository pass it wakes (ProvideRepositories). repository, branch and
 // account say where it keeps its code, as on a create.
 func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, repository, branch, account string, by domain.Actor) (*domain.PlatformExperiment, error) {
@@ -91,7 +88,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues, b
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
 	}
 	if MaxProposedAgents(launch.MaxAgentSandboxes) < 1 {
-		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_agentsandboxes_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one executor", launch.MaxAgentSandboxes)
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_agentsandboxes_per_platform_experiment), and an open draft takes three at least: its coordinator, its baseline agent and one executor", launch.MaxAgentSandboxes)
 	}
 	if err := requireAgentSandbox(launch.AgentSandbox); err != nil {
 		return nil, err
@@ -141,10 +138,19 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues, b
 		InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: launch.DefaultModel,
 		Actor: &by,
 	}
-	if err := s.store.CreateDraft(ctx, pe, planner, signup); err != nil {
+	baselineID, err := domain.NewID(domain.AgentIDPrefix)
+	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
 	}
-	pe.SignupCount = 1
+	baseline := &domain.Agent{ID: baselineID, CreatedAt: now}
+	baselineSignup := domain.AgentSignup{
+		AgentID: baselineID, Role: domain.SignupRoleBaseline, InAgentSandbox: true,
+		AgentType: domain.AgentRoleBaseline.Info().AgentType, Actor: &by,
+	}
+	if err := s.store.CreateDraft(ctx, pe, planner, signup, baseline, baselineSignup); err != nil {
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: %w", err)
+	}
+	pe.SignupCount = 2
 	s.logger.Info("draft created", zap.String("id", pe.ID), zap.String("planner", plannerID))
 	s.wakeRepositories(pe)
 	return pe, nil

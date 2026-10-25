@@ -37,6 +37,10 @@ in your next turn, within the description. The baseline's `README.md` says how i
 The `prior_runs` of `hl platform-experiments get` are earlier runs on this repository: read
 their summary, results and registry (`--platform-experiment ID`) before choosing a lever, for
 what was tried, what it reached and what was refuted.
+You may start while the experiment is still open and its baseline is measured: no job of yours
+is taken until the run starts, which an update tells you. Until then read the description, the
+baseline branch `hl/{{platform_experiment_id}}/baseline` as it is pushed and the registry, and
+choose your first ideas; then end your turn and wait.
 
 The registry is the lab notebook every agent and each of your restarts reads and writes: the only
 memory that survives them. It is a graph rooted at the objective (`root`). A *hypothesis* is one

@@ -190,7 +190,8 @@ type ExperimentFile struct {
 
 // ReadExperimentFile reads the experiment file of a repository the project's org reaches at
 // branch, and creates nothing. It answers the file with where it was read: one that places the
-// experiment elsewhere is refused experiment_file_elsewhere.
+// experiment elsewhere is refused experiment_file_elsewhere, and one that still holds the
+// template's placeholders experiment_file_unfilled.
 func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository, branch string) (*ExperimentFile, error) {
 	if err := experimentspec.ValidateBranch(branch); err != nil {
 		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_branch", err.Error())
@@ -206,6 +207,9 @@ func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository,
 	}
 	if err != nil {
 		return nil, err
+	}
+	if n := experimentspec.Unfilled(data); n > 0 {
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "experiment_file_unfilled", fmt.Sprintf("%s still has %d %s to fill in, as the experiment template leaves it", at, n, experimentspec.Placeholder))
 	}
 	file, err := experimentspec.Parse(data)
 	if err != nil {

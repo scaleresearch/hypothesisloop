@@ -12,23 +12,26 @@ interface DialogProps {
   onClose: () => void
   title: ReactNode
   size?: 'default' | 'sm' | 'wide'
+  /** The panel keeps one height whatever it holds, and its content scrolls within itself: for steps that must not move the edges. */
+  fixedHeight?: boolean
   children: ReactNode
 }
 
 /** A modal: focus stays inside, Escape and a click outside close it. */
-export function Dialog({ open, onClose, title, size = 'default', children }: DialogProps) {
+export function Dialog({ open, onClose, title, size = 'default', fixedHeight, children }: DialogProps) {
   return (
     <HeadlessDialog open={open} onClose={onClose} className="relative z-50">
       <DialogBackdrop className="fixed inset-0 bg-scrim" />
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <DialogPanel
           className={clsx(
-            'max-h-full w-full animate-rise overflow-y-auto rounded-lg border bg-surface-raised p-6 shadow-lg',
+            'max-h-full w-full animate-rise rounded-lg border bg-surface-raised p-6 shadow-lg',
+            fixedHeight ? 'flex h-full flex-col overflow-hidden sm:h-[min(760px,100%)]' : 'overflow-y-auto',
             size === 'sm' ? 'max-w-md' : size === 'wide' ? 'max-w-7xl' : 'max-w-2xl',
           )}
         >
-          <DialogTitle className="mb-4 text-xl font-normal">{title}</DialogTitle>
-          {children}
+          <DialogTitle className="mb-4 shrink-0 text-xl font-normal">{title}</DialogTitle>
+          {fixedHeight ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
         </DialogPanel>
       </div>
     </HeadlessDialog>

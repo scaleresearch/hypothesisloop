@@ -22,6 +22,6 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & FieldProps>(
   function Textarea({ fieldSize, mono, bare, className, ...props }, ref) {
-    return <HeadlessTextarea ref={ref} className={clsx(fieldClass(fieldSize, mono, bare), 'resize-y', className)} {...props} />
+    return <HeadlessTextarea ref={ref} className={clsx(fieldClass(fieldSize, mono, bare), !bare && 'resize-y', className)} {...props} />
   },
 )

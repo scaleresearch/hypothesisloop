@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cutByMax, defaultTeam, executorsAtWork, toTeam, toTeamRows } from '@/lib/team'
+import { cutByMax, defaultTeam, executorCount, executorsAtWork, keptRows, startsFrom, toTeam, toTeamRows } from '@/lib/team'
 import type { JoinedAgent } from '@/types/api'
 
 function agent(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
@@ -35,21 +35,49 @@ describe('sending the team', () => {
     expect(toTeam(defaultTeam(3))).toEqual({ agents: [{ agent_type: 'generalist', count: 3 }, { agent_type: 'researcher', count: 1 }] })
   })
 
-  it('sends rows as entries, an empty model and empty hyperparameters left out', () => {
-    expect(toTeam([{ agent_type: 'at-lr', model: ' ', count: '2', hyperparameters: ' ' }])).toEqual({ agents: [{ agent_type: 'at-lr', count: 2 }] })
-    expect(toTeam([{ agent_type: 'generalist', model: 'openrouter/qwen/qwen3.7-flash', count: '1', hyperparameters: '{"direction": "kernels"}' }]))
+  it('sends rows as entries, an empty model left out and hyperparameters as they came', () => {
+    expect(toTeam([{ agent_type: 'at-lr', model: ' ', count: '2' }])).toEqual({ agents: [{ agent_type: 'at-lr', count: 2 }] })
+    expect(toTeam([{ agent_type: 'generalist', model: 'openrouter/qwen/qwen3.7-flash', count: '1', hyperparameters: { direction: 'kernels' } }]))
       .toEqual({ agents: [{ agent_type: 'generalist', model: 'openrouter/qwen/qwen3.7-flash', count: 1, hyperparameters: { direction: 'kernels' } }] })
   })
 
-  it('names the entry whose hyperparameters are no JSON object, and sends nothing', () => {
-    expect(toTeam([{ agent_type: 'generalist', model: '', count: '1', hyperparameters: '' }, { agent_type: 'generalist', model: '', count: '1', hyperparameters: '[1]' }]))
-      .toEqual({ problem: 'Team entry 2: hyperparameters: A JSON object, as {"lr": 0.001}.' })
+  it('names the entry whose count is no whole number of at least 1, and sends nothing', () => {
+    for (const count of ['', '0', '1.5', 'x']) {
+      expect(toTeam([{ agent_type: 'generalist', model: '', count: '1' }, { agent_type: 'researcher', model: '', count }]))
+        .toEqual({ problem: 'Team entry 2: the count is a whole number of at least 1.' })
+    }
   })
 
-  it('reads entries back as rows, hyperparameters as JSON text', () => {
-    expect(toTeamRows([{ count: 2 }, { agent_type: 'researcher', count: 1, hyperparameters: { lr: 0.1 } }])).toEqual([
-      { agent_type: 'generalist', count: '2', model: '', hyperparameters: '' },
-      { agent_type: 'researcher', count: '1', model: '', hyperparameters: '{\n  "lr": 0.1\n}' },
+  it('names a second entry of one type and model, unless each row is one agent', () => {
+    const rows = [{ agent_type: 'generalist', model: '', count: '1' }, { agent_type: 'data-search', model: '', count: '1' }, { agent_type: 'generalist', model: ' ', count: '2' }]
+    expect(toTeam(rows)).toEqual({ problem: 'Team entry 3: entry 1 has this type and model. Raise its count instead.' })
+    expect(toTeam(rows, { perAgent: true })).toMatchObject({ agents: [{}, {}, {}] })
+    expect(toTeam([{ agent_type: 'generalist', model: '', count: '1' }, { agent_type: 'generalist', model: 'anthropic/claude-sonnet-5', count: '1' }])).toMatchObject({ agents: [{}, {}] })
+  })
+
+  it('reads entries back as rows, hyperparameters kept as they are', () => {
+    expect(toTeamRows([{ count: 2, hyperparameters: {} }, { agent_type: 'researcher', count: 1, hyperparameters: { lr: 0.1 } }])).toEqual([
+      { agent_type: 'generalist', count: '2', model: '' },
+      { agent_type: 'researcher', count: '1', model: '', hyperparameters: { lr: 0.1 } },
     ])
+  })
+
+  it('reads rows a draft kept with hyperparameters as JSON text', () => {
+    expect(keptRows([
+      { agent_type: 'generalist', count: '2', model: '', hyperparameters: '' },
+      { agent_type: 'generalist', count: '1', model: 'm', hyperparameters: '{"direction": "kernels"}' },
+      { agent_type: 'data-search', count: '1', model: '', hyperparameters: '{oops' },
+    ])).toEqual([
+      { agent_type: 'generalist', count: '2', model: '' },
+      { agent_type: 'generalist', count: '1', model: 'm', hyperparameters: { direction: 'kernels' } },
+      { agent_type: 'data-search', count: '1', model: '' },
+    ])
+  })
+
+  it('counts every agent but a researcher as an executor, and says what an entry starts from', () => {
+    expect(executorCount([{ agent_type: 'generalist', count: '2', model: '' }, { agent_type: 'at-lr', count: '3', model: '' }, { agent_type: 'researcher', count: '4', model: '' }])).toBe(5)
+    expect(startsFrom({ agent_type: 'generalist', count: '1', model: '', hyperparameters: { direction: 'kernels', lr: 1 } })).toBe('kernels')
+    expect(startsFrom({ agent_type: 'generalist', count: '1', model: '', hyperparameters: { direction: 3 } })).toBe('{"direction":3}')
+    expect(startsFrom({ agent_type: 'generalist', count: '1', model: '' })).toBe('')
   })
 })

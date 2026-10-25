@@ -110,10 +110,8 @@ describe('creating a project', () => {
 })
 
 describe('a member of the org', () => {
-  it('sees its members and where its clusters are, and that the rest is an owner\'s, with nothing to change', () => {
+  it('sees its members and has nothing to change', () => {
     show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member', actions: ['create_api_key'] }] })
-    expect(screen.getByText(/Only an owner can rename it or manage its projects and GitHub accounts/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Compute Resources' }).getAttribute('href')).toBe('/orgs/org_a/clusters')
     expect(screen.getByText('members')).toBeTruthy()
     expect(screen.getByText('api keys')).toBeTruthy()
     expect(screen.queryByLabelText('Organization name')).toBeNull()
@@ -151,7 +149,6 @@ describe('your organizations', () => {
       expect.stringMatching(/^Laborg_labmember1.*Current$/),
     ])
     expect(rows()[1].getAttribute('aria-current')).toBe('true')
-    expect(screen.getByText('Settings of Lab, where you are member.')).toBeTruthy()
   })
 
   it('switches to another org in one click, to the settings of that org', () => {

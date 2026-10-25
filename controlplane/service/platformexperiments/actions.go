@@ -12,15 +12,16 @@ import (
 )
 
 // fieldsIn is what a PATCH changes of a platform experiment in status. A draft's plan comes from
-// its planner and is edited in the accept, and once it runs admission and the stage ladder have
+// its planner, and once it runs admission and the stage ladder have
 // acted on the rest.
 func fieldsIn(status domain.PlatformExperimentStatus) []string {
 	switch status {
 	case domain.PlatformExpOpen:
-		return []string{"name", "description", "budget_accelerator_hours", "max_agents", "agents", "max_concurrent_accelerators",
-			"metrics", "report_interval_seconds", "starts_at", "duration_hours", "baseline_job_id", "baseline_reason", "model_budget_usd"}
+		return []string{"name", "description", "budget_accelerator_hours", "agents", "max_concurrent_accelerators",
+			"metrics", "report_interval_seconds", "starts_at", "duration_hours", "baseline_job_id", "baseline_reason", "model_budget_usd",
+			"accelerator_type", "cpu", "memory", "storage"}
 	case domain.PlatformExpRunning:
-		return []string{"name", "description", "duration_hours", "max_agents", "agents", "baseline_job_id", "baseline_reason", "model_budget_usd"}
+		return []string{"name", "description", "duration_hours", "agents", "baseline_job_id", "baseline_reason", "model_budget_usd"}
 	}
 	return nil
 }
@@ -34,10 +35,16 @@ func goalEditable(pe *domain.PlatformExperiment) bool {
 	return pe.Goal != "" && pe.Status != domain.PlatformExpClosed
 }
 
+// machineFields are the machine of a plan, which an experiment made from a sentence states.
+var machineFields = []string{"accelerator_type", "cpu", "memory", "storage"}
+
 // Editable is the fields of pe that caller may change now, the one rule PATCH refuses by and a
-// form locks its fields by. The goal is a person's.
+// form locks its fields by. The goal is a person's, and the machine is the plan's.
 func Editable(pe *domain.PlatformExperiment, caller auth.Principal) []string {
 	fields := fieldsIn(pe.Status)
+	if _, ok := domain.PlanMachine(pe.Proposal); !ok {
+		fields = slices.DeleteFunc(fields, func(f string) bool { return slices.Contains(machineFields, f) })
+	}
 	switch caller.Kind {
 	case auth.KindCoordinator:
 		return slices.DeleteFunc(fields, func(f string) bool { return !slices.Contains(coordinatorFields, f) })
@@ -76,9 +83,6 @@ func actions(pe *domain.PlatformExperiment, caller auth.Principal) []domain.Plat
 		actions = append(actions, domain.PlatformExpActionAbandon)
 	default:
 		actions = append(actions, domain.PlatformExpActionClose)
-	}
-	if acceptable(pe) == nil {
-		actions = append(actions, domain.PlatformExpActionAccept)
 	}
 	if domain.TakesSignup(pe.Status, domain.SignupRoleExecutor) {
 		actions = append(actions, domain.PlatformExpActionAddAgent)
@@ -131,25 +135,12 @@ func closes(pe *domain.PlatformExperiment) error {
 	return nil
 }
 
-// acceptable refuses to accept pe unless it is a draft whose planner's proposal stands.
-func acceptable(pe *domain.PlatformExperiment) error {
-	switch {
-	case pe.Status != domain.PlatformExpDraft:
-		return invalidTransition("platform experiment %s is %s: only a draft is accepted", pe.ID, pe.Status)
-	case pe.DeclinedAt != nil:
-		return invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Change its goal with PATCH /platform-experiments/%s, or close it", pe.ID, pe.ID)
-	case pe.ProposedAt == nil:
-		return invalidTransition("draft %s has no proposal to accept yet: its planner is still working", pe.ID)
-	}
-	return nil
-}
-
 // notEditable refuses the fields of pe that no PATCH changes in its status.
 func notEditable(pe *domain.PlatformExperiment, fields []string) error {
 	var message string
 	switch pe.Status {
 	case domain.PlatformExpDraft:
-		message = "A draft's plan comes from its planner. Change the goal, or edit the proposal before you accept it."
+		message = "A draft's plan comes from its planner. Change the goal, and once the plan applies, edit it."
 	case domain.PlatformExpClosed:
 		message = fmt.Sprintf("platform experiment %s is closed and nothing of it changes.", pe.ID)
 	case domain.PlatformExpOpen, domain.PlatformExpRunning:

@@ -7,7 +7,7 @@ import { beginGitHubInstall, checkGitHubInstallation, fetchGitHubApp, fetchGitHu
 import { checkRepository } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { githubCardPath, takeReturn } from '@/lib/github-connect'
+import { takeReturn } from '@/lib/github-connect'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { Me, OrgGitHubInstallation, Repository } from '@/types/api'
 
@@ -76,10 +76,17 @@ describe('the repository of a new platform experiment', () => {
     expect(screen.getByRole('status').textContent).toBe('acme/widgets')
   })
 
+  it('leads to the installation\'s settings on GitHub to widen what it covers', async () => {
+    show()
+    const link = await screen.findByRole('link', { name: 'Adjust GitHub access' })
+    expect(link.getAttribute('href')).toBe('https://github.com/organizations/acme/settings/installations/7')
+    expect(link.getAttribute('target')).toBe('_blank')
+  })
+
   it('may be left out', async () => {
     show('acme/open')
     await userEvent.click(await screen.findByRole('combobox'))
-    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on acme' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'New repository on acme' }))
     expect(screen.getByRole('status').textContent).toBe('')
     expect([repositoryFields(''), repositoryFields('acme/open'), repositoryFields('@acme')]).toEqual([{}, { repository: 'acme/open' }, { repository_account: 'acme' }])
   })
@@ -88,16 +95,16 @@ describe('the repository of a new platform experiment', () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'second' }], total: 2 })
     show()
     await userEvent.click(await screen.findByRole('combobox'))
-    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on second' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'New repository on second' }))
     expect(screen.getByRole('status').textContent).toBe('@second')
-    expect(screen.queryByRole('option', { name: 'A new private repository on acme' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'New repository on acme' })).toBeNull()
   })
 
   it('offers a new one on a personal account as on an organisation', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ ...organisation, account_login: 'ada', account_type: 'User' }], total: 1 })
     show('acme/open')
     await userEvent.click(await screen.findByRole('combobox'))
-    await userEvent.click(await screen.findByRole('option', { name: 'A new private repository on ada' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'New repository on ada' }))
     expect(screen.getByRole('status').textContent).toBe('')
   })
 
@@ -105,10 +112,10 @@ describe('the repository of a new platform experiment', () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'ada', account_type: 'User' }], total: 2 })
     show()
     await userEvent.click(await screen.findByRole('combobox'))
-    expect(await screen.findByRole('option', { name: 'A new private repository on acme' })).toBeTruthy()
-    await userEvent.click(screen.getByRole('option', { name: 'A new private repository on ada' }))
+    expect(await screen.findByRole('option', { name: 'New repository on acme' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('option', { name: 'New repository on ada' }))
     expect(screen.getByRole('status').textContent).toBe('@ada')
-    expect(screen.queryByRole('option', { name: 'A new private repository on acme' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'New repository on acme' })).toBeNull()
   })
 
   it('offers no new one on an account connected before its type was kept', async () => {
@@ -116,37 +123,17 @@ describe('the repository of a new platform experiment', () => {
     show()
     await userEvent.click(await screen.findByRole('combobox'))
     await screen.findByRole('option', { name: 'acme/open' })
-    expect(screen.queryByRole('option', { name: /A new private repository/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /New repository/ })).toBeNull()
     expect(screen.getByRole('combobox').getAttribute('placeholder')).toBe('Choose a repository')
-  })
-
-  it('leads to GitHub for a repository of the person\'s own, and lists it once they refresh', async () => {
-    show()
-    const create = await screen.findByRole('link', { name: 'create it on GitHub' })
-    expect(create.getAttribute('href')).toBe('https://github.test/new?owner=acme&visibility=private')
-    expect(screen.queryByRole('button', { name: 'give the App access' })).toBeNull()
-    await userEvent.click(screen.getByRole('combobox'))
-    await screen.findByRole('option', { name: 'acme/open' })
-    expect(screen.queryByRole('option', { name: /acme\/mine/ })).toBeNull()
-    await userEvent.keyboard('{Escape}')
-    repositories.push({ repository: 'acme/mine', installation_id: 7, private: true })
-    try {
-      await userEvent.click(screen.getByRole('button', { name: 'refresh this list' }))
-      await userEvent.click(screen.getByRole('combobox'))
-      await userEvent.click(await screen.findByRole('option', { name: /acme\/mine/ }))
-      expect(screen.getByRole('status').textContent).toBe('acme/mine')
-    } finally {
-      repositories.pop()
-    }
   })
 
   it('takes the org\'s default for a new one among several accounts, and offers the others', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'ada', account_type: 'User', default: true }], total: 2 })
     show('acme/open')
     await userEvent.click(await screen.findByRole('combobox'))
-    expect(await screen.findByRole('option', { name: 'A new private repository on acme' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: 'New repository on acme' })).toBeTruthy()
     expect(screen.getAllByRole('option', { name: /on ada/ })).toHaveLength(1)
-    await userEvent.click(screen.getByRole('option', { name: 'A new private repository on ada' }))
+    await userEvent.click(screen.getByRole('option', { name: 'New repository on ada' }))
     expect(screen.getByRole('status').textContent).toBe('')
   })
 
@@ -155,7 +142,7 @@ describe('the repository of a new platform experiment', () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, removed], total: 2 })
     vi.mocked(checkGitHubInstallation).mockImplementation(async (_, id) => id === 8 ? { working: false, reason: 'installation_gone', message: 'gone' } : { working: true })
     show()
-    await waitFor(() => expect(screen.getByRole('combobox').getAttribute('placeholder')).toBe('A new private repository on acme'))
+    await waitFor(() => expect(screen.getByRole('combobox').getAttribute('placeholder')).toBe('New repository on acme'))
     await userEvent.click(screen.getByRole('combobox'))
     await screen.findByRole('option', { name: 'acme/open' })
     expect(screen.queryByRole('option', { name: /antonibertel/ })).toBeNull()
@@ -170,50 +157,43 @@ describe('the repository of a new platform experiment', () => {
     })
     show()
     await userEvent.click(await screen.findByRole('combobox'))
-    expect(await screen.findByRole('option', { name: 'A new private repository on antonibertel' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'A new private repository on acme' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: 'New repository on antonibertel' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'New repository on acme' })).toBeTruthy()
   })
 
-  it.each([['an owner', owner], ['a member', me]])('leads %s once to the GitHub section of the org\'s settings where the App has a problem', async (_, as) => {
-    vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'gone', 'installation_gone'))
-    show(undefined, as)
-    await screen.findByText('Not installed')
-    const links = screen.getAllByRole('link', { name: 'See the connection in settings' })
-    expect(links.map(l => l.getAttribute('href'))).toEqual([githubCardPath('org_a')])
-  })
-
-  it.each([['an owner', owner, 1], ['a member', me, 0]])('leads %s once to the org\'s settings when no account is connected', async (_, as, installs) => {
+  it('offers an owner to connect GitHub in the field\'s place when no account is connected, and asks GitHub nothing', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
-    show(undefined, as)
-    const links = await screen.findAllByRole('link', { name: 'See the connection in settings' })
-    expect(links.map(l => l.getAttribute('href'))).toEqual([githubCardPath('org_a')])
-    expect(screen.queryAllByRole('button', { name: 'Install GitHub App' })).toHaveLength(installs)
+    show(undefined, owner)
+    expect(await screen.findByText('Connect GitHub to create or choose a repository')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeTruthy()
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(fetchGitHubRepositories).not.toHaveBeenCalled()
   })
 
   it('shows what the create would refuse as a chip and its fix, before anything is created', async () => {
     const gone = 'the GitHub App is no longer installed on acme (installation 7): its owner installs the App again from Settings, GitHub'
     vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, gone, 'installation_gone'))
     show()
-    const chip = (await screen.findByText('Not installed')).closest('[title]')!
-    expect(chip.getAttribute('title')).toBe('The GitHub App was removed on acme, so experiments cannot use its repositories. An owner of the org reinstalls it to connect again.')
+    const chip = (await screen.findByText('Removed')).closest('[title]')!
+    expect(chip.getAttribute('title')).toBe('GitHub access was removed on acme, so experiments cannot use its repositories. Ask an owner of your organization to reconnect GitHub to use them again.')
     expect(document.body.textContent).not.toContain(gone)
     expect(checkRepository).toHaveBeenCalledWith('prj_1', {})
     vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
     vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    await waitFor(() => expect(screen.queryByText('Not installed')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Removed')).toBeNull())
   })
 
   it('offers an owner to reinstall where the App was removed', async () => {
     vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'gone', 'installation_gone'))
     show(undefined, owner)
-    expect(await screen.findByRole('button', { name: 'Reinstall' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Reconnect' })).toBeTruthy()
   })
 
   it('checks a repository picked as the create would, and offers to add it to the App', async () => {
     vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'the GitHub installation the org connected does not cover that repository', 'repository_not_reachable'))
     show('acme/open', owner)
-    expect((await screen.findByText('No access')).closest('[title]')!.getAttribute('title')).toBe('The GitHub App cannot reach this repository. Add it to the App\'s repositories on acme.')
+    expect((await screen.findByText('No access')).closest('[title]')!.getAttribute('title')).toBe('GitHub access does not cover this repository. Add it to the repositories it can reach on acme.')
     expect(checkRepository).toHaveBeenCalledWith('prj_1', { repository: 'acme/open' })
     expect(screen.getByRole('button', { name: 'Add repositories' })).toBeTruthy()
   })
@@ -225,12 +205,6 @@ describe('the repository of a new platform experiment', () => {
     expect(screen.getByRole('link', { name: 'Review on GitHub' }).getAttribute('href')).toBe('https://github.com/organizations/acme/settings/installations/7')
   })
 
-  it('names no owner for a new repository on GitHub when several accounts are connected', async () => {
-    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, { ...organisation, installation_id: 8, account_login: 'ada', account_type: 'User' }], total: 2 })
-    show()
-    expect((await screen.findByRole('link', { name: 'create it on GitHub' })).getAttribute('href')).toBe('https://github.test/new?visibility=private')
-  })
-
   it('is searched on the server once typing pauses', async () => {
     show()
     const field = await screen.findByRole('combobox')
@@ -238,15 +212,14 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.type(field, 'wid')
     await waitFor(() => expect(fetchGitHubRepositories).toHaveBeenLastCalledWith('org_a', { q: 'wid', limit: 50 }))
     expect(vi.mocked(fetchGitHubRepositories).mock.calls.map(c => c[1]?.q)).not.toContain('w')
-    await waitFor(() => expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['A new private repository on acme', 'acme/widgetsprivate']))
+    await waitFor(() => expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(['New repository on acme', 'acme/widgetsprivate']))
   })
 
-  it('says an owner installs the App when no account is connected, and asks GitHub nothing', async () => {
+  it('tells a member to ask an owner when no account is connected', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show()
-    expect(await screen.findByText(/An owner of the org installs the GitHub App/)).toBeTruthy()
-    expect(screen.queryByRole('combobox')).toBeNull()
-    expect(fetchGitHubRepositories).not.toHaveBeenCalled()
+    expect(await screen.findByText('Ask an owner of your organization to connect GitHub.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Connect GitHub' })).toBeNull()
   })
 
   it('is typed on a deployment whose git host is not GitHub', async () => {
@@ -272,24 +245,17 @@ describe('installing the App from the form', () => {
     vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: 'https://github.test/install?state=s-1', expires_at: at })
   })
 
-  it('opens GitHub in a new tab, leaves the form as it is, and lists what the App reaches once the other tab connects', async () => {
-    show('acme/open', owner)
-    await userEvent.click(await screen.findByRole('button', { name: 'give the App access' }))
-    expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/')
-    expect(opened.location.href).toBe('https://github.test/install?state=s-1')
-    expect((await screen.findByText(/Waiting for GitHub/))).toBeTruthy()
-    expect(screen.getAllByRole('status').some(s => s.textContent === 'acme/open')).toBe(true)
-    const listed = vi.mocked(fetchGitHubRepositories).mock.calls.length
-    await takeReturn('installation_id=7&setup_action=update&state=s-1', async () => ({ org_id: 'org_a', return_to: '/', installation: organisation }))
-    expect(await screen.findByText('acme is connected.')).toBeTruthy()
-    await waitFor(() => expect(vi.mocked(fetchGitHubRepositories).mock.calls.length).toBeGreaterThan(listed))
-  })
-
-  it('installs the App from the form when no account is connected', async () => {
+  it('connects GitHub in a new tab and becomes the picker once the other tab connects', async () => {
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
     show(undefined, owner)
-    await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/')
+    expect(opened.location.href).toBe('https://github.test/install?state=s-1')
     expect(await screen.findByText(/Waiting for GitHub/)).toBeTruthy()
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation], total: 1 })
+    await takeReturn('installation_id=7&setup_action=install&state=s-1', async () => ({ org_id: 'org_a', return_to: '/', installation: organisation }))
+    expect(await screen.findByRole('combobox')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Connect GitHub' })).toBeNull()
   })
+
 })

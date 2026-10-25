@@ -10,6 +10,7 @@ import { formatAccH, formatDate, formatMetric, relTime, shortId } from '@/lib/fo
 import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { experimentPath, jobPath } from '@/lib/routes'
 import { budgetUnit } from '@/lib/units'
+import { useBudgetReference } from '@/lib/capacity'
 import type { Experiment } from '@/types/api'
 
 const SHOWN = 8
@@ -21,8 +22,9 @@ export function JobsTable({ experimentId, jobs, total, rankingMetric }: {
   total: number
   rankingMetric: string | undefined
 }) {
+  const reference = useBudgetReference()
   const shown = jobs.slice(0, SHOWN)
-  const unit = Array.from(new Set(shown.map(exp => budgetUnit(exp.accelerator_kind)))).join(' / ') || budgetUnit(undefined)
+  const unit = Array.from(new Set(shown.map(exp => budgetUnit(exp.accelerator_kind, 'short', reference)))).join(' / ') || budgetUnit(undefined, 'short', reference)
   const variedByHypothesis = variedEnvByHypothesis(shown)
   return (
     <Section
@@ -59,7 +61,7 @@ export function JobsTable({ experimentId, jobs, total, rankingMetric }: {
                   <td className="hidden truncate text-xs xl:table-cell"><AgentLabel id={exp.agent_id} /></td>
                   <td className="truncate" title={exp.eviction_reason}><Badge status={exp.status} /></td>
                   <td className={clsx(num, 'whitespace-nowrap')} title={exp.metric?.name}>{exp.metric ? formatMetric(exp.metric.value) : '—'}</td>
-                  <td className={clsx(num, 'hidden whitespace-nowrap lg:table-cell')} title={exp.estimated_cost_acch != null ? `${cost} ${budgetUnit(exp.accelerator_kind)}` : undefined}>{cost}</td>
+                  <td className={clsx(num, 'hidden whitespace-nowrap lg:table-cell')} title={exp.estimated_cost_acch != null ? `${cost} ${budgetUnit(exp.accelerator_kind, 'short', reference)}` : undefined}>{cost}</td>
                   <td className="hidden truncate text-xs text-subtle lg:table-cell" title={formatDate(exp.created_at)}>{relTime(exp.created_at)}</td>
                 </LinkTr>
               )

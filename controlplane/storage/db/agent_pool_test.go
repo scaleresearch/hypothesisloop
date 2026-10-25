@@ -172,11 +172,13 @@ func TestMaxAgentsIsHeldToTheExecutorsAtWork(t *testing.T) {
 	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, nil); err != nil {
 		t.Fatalf("max_agents of the two at work: got = %v, want = nil", err)
 	}
-	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, domain.AgentPool{{AgentType: "generalist", Model: "model-1", Count: 1}}); !errors.As(err, &below) || below.Key.AgentType != "generalist" {
-		t.Fatalf("an entry below its executors at work: got = %v, want PoolBelowAtWorkError of the entry", err)
+	// While it runs, an entry below its executors at work cuts the newest of them.
+	got.MaxAgents = 1
+	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpRunning, domain.AgentPool{{AgentType: "generalist", Model: "model-1", Count: 1}}); err != nil {
+		t.Fatalf("an entry below its executors at work: got = %v, want the newest cut", err)
 	}
-	if stored, _ := pes.GetPlatformExperiment(ctx, pe); stored.MaxAgents != 2 || len(stored.Agents) != 0 {
-		t.Errorf("stored %d and %+v, want the refused write to leave max_agents 2 and no executors", stored.MaxAgents, stored.Agents)
+	if atWork, _ := pes.AgentsAtWork(ctx, pe); atWork[domain.PoolKey{AgentType: "generalist", Model: "model-1"}] != 1 {
+		t.Errorf("at work after the entry was lowered: %v, want one generalist", atWork)
 	}
 }
 

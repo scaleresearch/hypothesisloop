@@ -12,7 +12,7 @@ golangci-lint run ./...
 
 | Target | What it does |
 |---|---|
-| `make dev` | Runs the control plane and UI as host processes against the compose datastores, with hosted agents (on `SANDBOX_PROVIDER`) and rented compute (on `CLOUD_COMPUTE_PROVIDER`) run by control-service through public tunnels and the images under `IMAGE_TAG`. Starting it rents nothing. Hosted agents and jobs placed on the rented cluster do. |
+| `make dev` | Runs the control plane and UI as host processes against the compose datastores, with hosted agents (on `SANDBOX_PROVIDER`) and rented compute (on each provider of `CLOUD_COMPUTE_PROVIDERS`, vast.ai and RunPod unless it names fewer, each the cluster `hypothesisloop-<provider>` of org `default`) run by control-service through public tunnels and the images under `IMAGE_TAG`. Starting it rents nothing. Hosted agents and jobs placed on the rented clusters do. |
 | `make dev-api` | Rebuilds and restarts the API and metrics-service after a Go change |
 | `make dev-status`, `make dev-down` | Shows or stops the `make dev` processes |
 | `make tunnels`, `make tunnels-down` | Starts or stops the public tunnels to this machine's API, metrics-service, object store and git server |

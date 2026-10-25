@@ -34,6 +34,10 @@ func (s *Service) codeInRepository(pe *domain.PlatformExperiment, codeRef string
 // ReasonBaselineTestsNoHypothesis refuses the job of a baseline agent that names a hypothesis.
 const ReasonBaselineTestsNoHypothesis = "baseline_tests_no_hypothesis"
 
+// ReasonNotThePlansMachine refuses a baseline job of an open platform experiment that asks for
+// another machine than its plan states.
+const ReasonNotThePlansMachine = "not_the_plans_machine"
+
 // ReasonBranchNotOfExperiment refuses a job whose branch is none of its platform experiment's.
 const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
 

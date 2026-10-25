@@ -8,7 +8,7 @@ import { DEFAULT_AGENT_TYPE, RESEARCHER_AGENT_TYPE, typeName, useAgentRoles, use
 import { inheritedModel, useModels } from '@/lib/models'
 import { relTime } from '@/lib/format'
 import { phaseOf } from '@/lib/phase'
-import { atWorkByKey, cutByMax, executorsAtWork, poolKey, toTeam, toTeamRows } from '@/lib/team'
+import { atWorkByKey, cutByMax, executorCount, executorsAtWork, poolKey, toTeam, toTeamRows } from '@/lib/team'
 import type { TeamRow } from '@/lib/team'
 import { useRoster } from '@/lib/roster'
 import { useTenant } from '@/lib/tenant'
@@ -16,8 +16,6 @@ import { ModelName } from '@/components/model-name'
 import { TeamEditor } from '@/components/team-editor'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
-import { FormField } from '@/components/ui/form-field'
-import { Input } from '@/components/ui/input'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
@@ -35,18 +33,17 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
-function CutConfirm({ max, cut, nameOf, onConfirm, onCancel }: {
-  max: number
+function CutConfirm({ cut, nameOf, onConfirm, onCancel }: {
   cut: JoinedAgent[]
   nameOf: (typeID: string) => string
   onConfirm: () => void
   onCancel: () => void
 }) {
   return (
-    <Dialog open onClose={onCancel} title={`Lower max executors to ${max}?`} size="sm">
+    <Dialog open onClose={onCancel} title={`Cut ${plural(cut.length, 'executor')} at work?`} size="sm">
       <Stack>
         <Text variant="note">
-          This cuts the {cut.length === 1 ? 'newest executor' : `${cut.length} newest executors`} at work.
+          The team has fewer executors than are at work, so saving cuts the {cut.length === 1 ? 'newest' : `${cut.length} newest`}.
           {cut.length === 1 ? ' It winds down' : ' Each winds down'} as a cut executor does, and nobody takes {cut.length === 1 ? 'its' : 'their'} place.
         </Text>
         <ul className="grid gap-1 rounded border bg-surface-inset px-3 py-2 text-xs" aria-label="Executors to cut">
@@ -59,7 +56,7 @@ function CutConfirm({ max, cut, nameOf, onConfirm, onCancel }: {
         </ul>
         <Inline gap="xs" className="justify-end">
           <Button onClick={onCancel}>Cancel</Button>
-          <Button variant="danger" onClick={onConfirm}>Lower and cut {cut.length}</Button>
+          <Button variant="danger" onClick={onConfirm}>Save and cut {cut.length}</Button>
         </Inline>
       </Stack>
     </Dialog>
@@ -70,7 +67,6 @@ function TeamChange({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
   const { org } = useTenant()
   const { mutate } = useSWRConfig()
   const { data: catalog } = useAgentTypes(org.id)
-  const [max, setMax] = useState(String(pe.max_agents))
   const [rows, setRows] = useState<TeamRow[]>(() => toTeamRows(pe.agents))
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -78,22 +74,19 @@ function TeamChange({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
 
   const opened = JSON.stringify(toTeamRows(pe.agents))
   const teamChanged = JSON.stringify(rows) !== opened
-  const maxN = Number(max)
-  const maxChanged = maxN !== pe.max_agents
+  // The API holds the team's executors as the most at work at once.
+  const total = executorCount(rows)
+  const maxN = teamChanged && total > 0 ? total : pe.max_agents
   const running = pe.status === 'running'
   const executors = executorsAtWork(atWork)
-  const cut = running && Number.isInteger(maxN) ? cutByMax(executors, maxN) : []
+  const cut = running ? cutByMax(executors, maxN) : []
   const remaining = atWork.filter(a => !cut.includes(a))
 
   async function save() {
     setConfirming(false)
-    const patch: PlatformExperimentPatch = {}
-    if (maxChanged) patch.max_agents = maxN
-    if (teamChanged) {
-      const team = toTeam(rows)
-      if ('problem' in team) return setError(team.problem)
-      patch.agents = team.agents
-    }
+    const team = toTeam(rows)
+    if ('problem' in team) return setError(team.problem)
+    const patch: PlatformExperimentPatch = { agents: team.agents }
     setBusy(true)
     setError('')
     try {
@@ -110,38 +103,30 @@ function TeamChange({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
 
   return (
     <Stack gap="lg">
-      <FormField
-        label="Max executors"
-        className="max-w-xs"
-        hint={cut.length > 0
-          ? `Saving cuts the ${plural(cut.length, 'newest executor')} at work.`
-          : `The most at work at once. ${executors.length} at work now.`}
-      >
-        <Input type="number" min={1} step={1} value={max} onChange={e => setMax(e.target.value)} />
-      </FormField>
       <TeamEditor
         rows={rows}
         onChange={setRows}
         coordinatorModel={pe.coordinator?.model ?? ''}
-        maxAgents={maxN}
+        coordinator={pe.coordinator ? {} : false}
         atWork={row => atWorkByKey(remaining).get(poolKey(row.agent_type, row.model.trim())) ?? 0}
       />
+      {cut.length > 0 && <Text variant="hint">Saving cuts the {plural(cut.length, 'newest executor')} at work.</Text>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
       <Inline gap="xs" className="justify-end">
         <Button onClick={onDone} disabled={busy}>Cancel</Button>
         <Button
           variant="primary"
           loading={busy}
-          disabled={!maxChanged && !teamChanged}
+          disabled={!teamChanged}
           onClick={() => cut.length > 0 ? setConfirming(true) : void save()}
         >Save</Button>
       </Inline>
-      {confirming && <CutConfirm max={maxN} cut={cut} nameOf={id => typeName(id, catalog)} onConfirm={() => void save()} onCancel={() => setConfirming(false)} />}
+      {confirming && <CutConfirm cut={cut} nameOf={id => typeName(id, catalog)} onConfirm={() => void save()} onCancel={() => setConfirming(false)} />}
     </Stack>
   )
 }
 
-/** Who an experiment keeps at work: its team and its max executors, editable in place by its owner. */
+/** Who an experiment keeps at work: its team, editable in place by its owner, whose executors are its max at work. */
 export function Team({ pe }: { pe: PlatformExperiment }) {
   const { org } = useTenant()
   const { data: roster, error } = useRoster(pe)

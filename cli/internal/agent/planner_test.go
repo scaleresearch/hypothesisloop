@@ -85,6 +85,24 @@ func TestAPlannerChecksAProposalWithoutStoringIt(t *testing.T) {
 	}
 }
 
+// The planner's first plan is stored as the draft's working plan, for its baseline agent to start
+// from, and opens nothing.
+func TestAPlannerStoresAWorkingPlan(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"status": "draft"} })
+	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-env/ag-1"))
+	file := clitest.WriteFile(t, "experiment:\n  name: n\nbudget_accelerator_hours: 6\n")
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(PlatformExperimentsPropose, []string{"--working", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("propose --working: exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 1 || (*got)[0].Query != "working=true" || !strings.Contains(stdout.String(), "stored as the working plan") {
+		t.Fatalf("requests = %+v, stdout %q, want one PUT with working=true and the line that it is stored", *got, stdout.String())
+	}
+	if code := clitest.Run(PlatformExperimentsPropose, []string{"--working", "--check", file}, &stdout, &stderr); code != 2 {
+		t.Fatalf("--working with --check: exit %d, want 2", code)
+	}
+}
+
 func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"status": "draft"} })
 	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-env/ag-1"))

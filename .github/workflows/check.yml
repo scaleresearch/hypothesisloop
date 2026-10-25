@@ -8,16 +8,16 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: controlplane/ui/package-lock.json
-      - uses: azure/setup-helm@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: azure/setup-helm@v5
+      - uses: astral-sh/setup-uv@v10.3.2
       - run: npm ci --prefix controlplane/ui
       - run: make check

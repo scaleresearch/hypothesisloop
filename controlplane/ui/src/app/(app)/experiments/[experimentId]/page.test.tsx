@@ -93,7 +93,8 @@ describe('a shared platform experiment of another org', () => {
 describe('the baseline of a platform experiment', () => {
   it('is being prepared while the experiment is open without one, and is the job with what it reported once declared', async () => {
     const first = show('', {})
-    expect(await screen.findByText(/Preparing the baseline\./)).toBeTruthy()
+    const step = within(await screen.findByRole('list', { name: 'Phase' })).getAllByRole('listitem').find(li => li.getAttribute('aria-current') === 'step')
+    expect(step?.textContent).toBe('Baseline')
     first.unmount()
     cleanup()
 
@@ -107,7 +108,6 @@ describe('the baseline of a platform experiment', () => {
     const link = await screen.findByRole('link', { name: 'job-base' })
     expect(link.getAttribute('href')).toBe('/experiments/pe-x/jobs/job-base')
     await waitFor(() => expect(link.parentElement!.textContent).toBe('Baseline measured by job-base: val_loss 1.800, exact_match 1.000.'))
-    expect(screen.queryByText(/Preparing the baseline/)).toBeNull()
   })
 
   it('says who raised it while the run went on, from which job and why', async () => {

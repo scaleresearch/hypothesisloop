@@ -172,42 +172,17 @@ async def baseline_clock(setup: RunSetup) -> str:
     return f"baseline_due_at is {due}, {max(0, int(left))} minutes from now."
 
 
-# A baseline agent is signed up with the planner's proposal, so that its machine starts while the
-# draft counts down to being accepted. It has nothing to measure before that.
-ACCEPT_POLL_S = 3
-
-
-async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEPT_POLL_S, said=lambda: None) -> None:
-    """Returns once the platform experiment of a baseline agent is no longer a draft, or a stop is
-    asked for, and at once for any other agent. A platform that does not answer is waited out.
-    said() is called once, when it starts waiting."""
-    if not config.measures_baseline(setup.cfg):
-        return
-    waiting = False
-    while not stop_flag[0]:
-        try:
-            status = (await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)).get("status")
-        except api_client.APIError as e:
-            log.warning("could not read whether the draft was accepted (%s)", e)
-            status = None
-        if status is not None and status != platform.PLATFORM_EXPERIMENT_DRAFT:
-            return
-        if not waiting:
-            log.info("waiting for the draft to be accepted before measuring its baseline")
-            said()
-            waiting = True
-        await asyncio.sleep(poll_s)
-
-
-async def repo_map(setup: RunSetup) -> str:
-    """What the planner recorded of the repository, "" where it recorded nothing or it could not
-    be read."""
+async def takes_no_job_yet(setup: RunSetup) -> bool:
+    """Whether the platform takes no job of the agent yet: a baseline agent's while its experiment
+    is a draft, an executor's until the run starts. A read that failed says no."""
     try:
-        proposal = (await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)).get("proposal") or {}
+        status = (await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)).get("status")
     except api_client.APIError as e:
-        log.warning("could not read the planner's map of the repository (%s)", e)
-        return ""
-    return (proposal.get("repo_map") or "").strip()
+        log.warning("could not read whether the platform takes jobs yet (%s)", e)
+        return False
+    if config.measures_baseline(setup.cfg):
+        return status == platform.PLATFORM_EXPERIMENT_DRAFT
+    return status in (platform.PLATFORM_EXPERIMENT_DRAFT, platform.PLATFORM_EXPERIMENT_OPEN)
 
 
 def _closer(actor: dict | None) -> str:

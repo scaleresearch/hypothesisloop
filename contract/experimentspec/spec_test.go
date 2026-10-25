@@ -36,6 +36,7 @@ func TestASpecIsParsedByTheKeysOfTheCreateBody(t *testing.T) {
 		"a repository account":          valid + "repository_account: acme\n",
 		"what it continues":             valid + "continues: pex_1\n",
 		"when it starts":                valid + "starts_at: 2026-01-01T00:00:00Z\n",
+		"the model budget":              valid + "model_budget_usd: 5\n",
 		"from_repo":                     valid + "from_repo: true\n",
 		"a key the body does not have":  valid + "budget_acelerator_hours: 4\n",
 		"a list":                        "- name: a\n",

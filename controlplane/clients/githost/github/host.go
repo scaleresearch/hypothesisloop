@@ -182,7 +182,7 @@ func (h *Host) createsOn(ctx context.Context, projectID, account string) (string
 	case 1:
 		return project.OrgID, working[0], nil
 	}
-	return "", nil, refusal.Invalid(ReasonRepositoryAccountRequired, "the org has connected several working GitHub accounts ("+strings.Join(logins, ", ")+") and made none the default for new repositories: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
+	return "", nil, refusal.Invalid(ReasonRepositoryAccountRequired, "the org has connected several working GitHub accounts ("+strings.Join(logins, ", ")+") and the default for new repositories is not one that works: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
 }
 
 // unusable says GitHub removed or suspended an installation or it lacks a permission the App

@@ -31,6 +31,12 @@ func (s *Service) WithPlanning(planning Planning) *Service {
 	return s
 }
 
+// BudgetReference names the accelerator an hour of which is one accelerator-hour, as the
+// settings file's budget_reference does.
+func (s *Service) BudgetReference() string {
+	return s.cfg.BudgetReference
+}
+
 // ClusterRegistry says whose each registered cluster is and whether the platform shares it, and
 // which org a project is of. *db.Store satisfies it.
 type ClusterRegistry interface {

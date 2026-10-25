@@ -51,7 +51,7 @@ const tones: Record<string, Tone> = {
   promoted: 'success',
   rejected: 'danger',
   cancelled: 'neutral',
-  draft: 'neutral',
+  draft: 'accent',
   open: 'info',
   closed: 'neutral',
   guaranteed: 'neutral',

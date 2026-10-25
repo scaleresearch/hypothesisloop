@@ -16,6 +16,7 @@ type ConnectionsClient interface {
 	Installation(ctx context.Context, installationID int64) (*Installation, error)
 	Repositories(ctx context.Context, installationID int64) ([]Repository, error)
 	UserInstallations(ctx context.Context, clientSecret, code string) ([]int64, error)
+	Uninstall(ctx context.Context, installationID int64) error
 }
 
 // Connections is the App as the orgs connecting its installations ask of it. clientSecret is the
@@ -35,7 +36,7 @@ func NewConnections(app ConnectionsClient, clientSecret string, logger *zap.Logg
 
 func (c *Connections) Addresses() domain.GitHubAddresses {
 	app := c.app.App()
-	return domain.GitHubAddresses{Slug: app.Slug, InstallURL: app.InstallURL, NewRepositoryURL: app.NewRepositoryURL}
+	return domain.GitHubAddresses{Slug: app.Slug, InstallURL: app.InstallURL, NewRepositoryURL: app.NewRepositoryURL, AuthorizeURL: app.AuthorizeURL}
 }
 
 // Installation names no account in what it refuses for one removed or suspended: the account is
@@ -53,6 +54,10 @@ func (c *Connections) Installation(ctx context.Context, installationID int64) (*
 
 func (c *Connections) UserInstallations(ctx context.Context, code string) ([]int64, error) {
 	return c.app.UserInstallations(ctx, c.clientSecret, code)
+}
+
+func (c *Connections) Uninstall(ctx context.Context, installationID int64) error {
+	return c.app.Uninstall(ctx, installationID)
 }
 
 func (c *Connections) Repositories(ctx context.Context, installationID int64) ([]domain.GitHubRepository, error) {

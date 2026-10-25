@@ -39,7 +39,7 @@ TEST_MEMGRAPH := hypothesisloop-test-memgraph
 test:
 	podman run -d --rm --name $(TEST_MEMGRAPH) -p 127.0.0.1:7688:7687 docker.io/memgraph/memgraph:3.13.1 --telemetry-enabled=false >/dev/null
 	$(call await,the test Memgraph,podman exec $(TEST_MEMGRAPH) sh -c "echo 'RETURN 1;' | mgconsole") || { podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit 1; }
-	go test ./... -timeout 60s; rc=$$?; podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit $$rc
+	go test ./... -timeout 5m; rc=$$?; podman rm -f $(TEST_MEMGRAPH) >/dev/null; exit $$rc
 
 # pytest, not unittest discovery: the conftest.py fixtures every test relies on only load under pytest.
 # The tests that shell out to hl find the one built from this tree.

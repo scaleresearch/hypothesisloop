@@ -1,15 +1,21 @@
 import type { PlatformExperiment, StatusReason } from '@/types/api'
 
-export type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
+export type Phase = 'repository' | 'planning' | 'baseline' | 'running' | 'closed'
 
 /** The course of an experiment from a sentence to its close, in order. */
 export const PHASES: { key: Phase; label: string }[] = [
+  { key: 'repository', label: 'Repository' },
   { key: 'planning', label: 'Planning' },
-  { key: 'proposal', label: 'Proposal' },
-  { key: 'baseline', label: 'Preparing baseline' },
+  { key: 'baseline', label: 'Baseline' },
   { key: 'running', label: 'Running' },
   { key: 'closed', label: 'Closed' },
 ]
+
+/** The phases shown for pe: Repository only while the platform creates its repository. */
+export function phasesOf(pe: Stated): typeof PHASES {
+  const phase = phaseOf(pe)
+  return PHASES.filter(({ key }) => key !== 'repository' || phase === 'repository')
+}
 
 type Stated = Pick<PlatformExperiment, 'id' | 'status' | 'status_reason'>
 
@@ -34,13 +40,12 @@ type OwnerAction = { opens: 'edit' | 'agents'; label: string }
  * those of statusWaiters in controlplane/domain/status_reason.go that wait for the owner,
  * or for the coordinator, whose move is the owner's where a person coordinates. phase.test.ts
  * reads that file and fails when the two differ. null is a move with no control in the strip:
- * the proposal and the goal are below it, a baseline is added or declared with the hl
+ * the goal is below it, a baseline is added or declared with the hl
  * command the API's message gives, which names the platform experiment, the edit form has no
  * field for a metric's bound, and the page's Close experiment button is there in every state, but
  * the strip's sentence gives the hl commands that write its summary and close it.
  */
 export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
-  proposed: null,
   declined: null,
   baseline_required: null,
   baseline_undeclared: null,
@@ -50,6 +55,7 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   baseline_missing_metric: null,
   baseline_breaks_constraint: null,
   baseline_not_on_branch: null,
+  baseline_not_on_plans_machine: null,
   baseline_weaker_than_own_job: null,
   budget_below_baseline: { opens: 'edit', label: 'Edit budget' },
   budget_spent: { opens: 'edit', label: 'Edit budget' },
@@ -59,20 +65,20 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
 
 /**
  * The one place that says which phase an experiment is in, from its status and its status_reason.
- * A draft is at its proposal while one stands or its planner declined, and planning otherwise,
- * also while something the platform runs holds planning up.
+ * A draft is planning, also while its planner declined or something the platform runs holds
+ * planning up, and either is at its repository while the platform creates it.
  */
-export function phaseOf(pe: Stated & { proposed_at?: string }): Phase {
+export function phaseOf(pe: Stated): Phase {
+  const creating = pe.status_reason?.reason === 'repository_creating'
   switch (pe.status) {
-    case 'draft':
-      return pe.proposed_at || reasonOf(pe).reason === 'declined' ? 'proposal' : 'planning'
-    case 'open': return 'baseline'
+    case 'draft': return creating ? 'repository' : 'planning'
+    case 'open': return creating ? 'repository' : 'baseline'
     case 'running': return 'running'
     case 'closed': return 'closed'
   }
 }
 
-// The reasons a draft closes for, before anything was accepted: such an experiment had no team.
+// The reasons a draft closes for, before a proposal opened it: such an experiment had no team.
 const PLANNED_ONLY: NonNullable<PlatformExperiment['close_reason']>[] = ['planning_limit_reached', 'proposal_expired', 'planner_stopped', 'repository_not_created']
 
 export function closedWhilePlanned(pe: Pick<PlatformExperiment, 'close_reason'>): boolean {

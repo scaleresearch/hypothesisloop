@@ -59,12 +59,12 @@ helper line is printed either way and fails nothing.
               hl platform-experiments start checks one, and its name and metrics are the
               platform experiment's: a file left by another experiment of the repository
               fails here
-  job-spec    .hypothesisloop/job.yaml states a job, its image, and its cpu, memory and
-              storage as quantities, in each group of a grouped job, with no REPLACE-WITH
-              left, no secret_env and no metadata.estimated_duration_hours: every job
-              submitted from it would hold that in place of the estimate measured on the
-              baseline job. A missing image is answered with the one the experiment was
-              proposed with
+  job-spec    .hypothesisloop/job.yaml states a job, its cpu, memory and storage as
+              quantities, in each group of a grouped job, with no REPLACE-WITH left, no
+              job.image (the image is the experiment's), no secret_env and no
+              metadata.estimated_duration_hours: every job submitted from it would hold that
+              in place of the estimate measured on the baseline job. A job.image is answered with
+              the image the experiment records
   metrics     every metric the platform experiment declares is named, by its key, in a file
               of the clone besides those two: a job reports each under its key
   helper      whether metrics.py, the Python helper of the experiment template, is there, and
@@ -240,8 +240,8 @@ func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]s
 			return nil, err
 		case strings.TrimSpace(string(data)) == "":
 			gap = "is empty"
-		case strings.Contains(string(data), experimentspec.Placeholder):
-			gap = fmt.Sprintf("still has %d %s to fill in", strings.Count(string(data), experimentspec.Placeholder), experimentspec.Placeholder)
+		case experimentspec.Unfilled(data) > 0:
+			gap = fmt.Sprintf("still has %d %s to fill in", experimentspec.Unfilled(data), experimentspec.Placeholder)
 		case item.check != nil:
 			gap = item.check(data)
 		}

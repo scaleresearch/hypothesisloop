@@ -55,7 +55,7 @@ describe('the connected GitHub accounts', () => {
   it('say why they could not be read', async () => {
     vi.mocked(fetchGitHubInstallations).mockRejectedValue(new Error('API unreachable'))
     show()
-    expect((await screen.findByRole('alert')).textContent).toBe('Could not load the GitHub accounts of Lab: API unreachable')
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load GitHub accounts: API unreachable')
   })
 })
 
@@ -71,13 +71,12 @@ describe('a member who is no owner', () => {
 describe('installing the GitHub App', () => {
   it('opens GitHub in a new tab with a state for this org and page, waits, and lists the account the other tab connected', async () => {
     show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     expect(window.open).toHaveBeenCalledExactlyOnceWith('', '_blank')
     expect(beginGitHubInstall).toHaveBeenCalledExactlyOnceWith('org_a', '/orgs/org_a/settings#github')
     expect((await screen.findByRole('status')).textContent).toContain('Waiting for GitHub')
     expect(opened.location.href).toBe(`${app.install_url}?state=s-1`)
-    expect(screen.getByRole('button', { name: 'Install GitHub App' })).toHaveProperty('disabled', true)
-    expect(screen.getByText('Install it on your account or an organization.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Connect GitHub' })).toHaveProperty('disabled', true)
 
     // The tab GitHub returns to connects lab and tells this one.
     installations = [...installations, lab]
@@ -88,7 +87,7 @@ describe('installing the GitHub App', () => {
 
   it('shows the refusal the other tab was given', async () => {
     show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     await screen.findByRole('status')
     await takeReturn('installation_id=9&state=s-1', () => Promise.reject(new ApiError(422, 'GitHub does not list this installation among those the GitHub account that finished the install may reach.', 'installation_not_authorized')))
     expect((await screen.findByRole('alert')).textContent).toBe('GitHub does not list this installation among those the GitHub account that finished the install may reach.')
@@ -97,24 +96,24 @@ describe('installing the GitHub App', () => {
 
   it('stops waiting on Cancel', async () => {
     show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     await userEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('status')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Install GitHub App' })).toHaveProperty('disabled', false)
+    expect(screen.getByRole('button', { name: 'Connect GitHub' })).toHaveProperty('disabled', false)
   })
 
   it('says why the tab did not open', async () => {
     vi.mocked(window.open).mockReturnValue(null)
     show()
-    await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Allow pop-ups for this site')
   })
 
   it('is not offered, and says why, on a deployment without a GitHub App', async () => {
     vi.mocked(fetchGitHubApp).mockRejectedValue(new ApiError(503, 'no GitHub App', 'github_not_configured'))
     show()
-    expect(await screen.findByText('This deployment has no GitHub App configured, so no GitHub account can be connected.')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Install GitHub App' })).toBeNull()
+    expect(await screen.findByText('GitHub isn\'t available on this installation.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Connect GitHub' })).toBeNull()
     expect(await screen.findByRole('cell', { name: 'acme' })).toBeTruthy()
   })
 
@@ -131,8 +130,8 @@ describe('disconnecting', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Disconnect' }))
     expect(disconnectGitHubInstallation).not.toHaveBeenCalled()
     const question = within(screen.getByRole('dialog'))
-    expect(question.getByText('Disconnect acme from Lab?')).toBeTruthy()
-    expect(question.getByText(/can no longer\s+clone, fetch or push within the hour/)).toBeTruthy()
+    expect(question.getByText('Disconnect acme?')).toBeTruthy()
+    expect(question.getByText(/can\s+no longer clone, fetch or push/)).toBeTruthy()
     await userEvent.click(question.getByRole('button', { name: 'Disconnect' }))
     expect(disconnectGitHubInstallation).toHaveBeenCalledExactlyOnceWith('org_a', 7)
     await waitFor(() => expect(screen.queryByRole('cell', { name: 'acme' })).toBeNull())

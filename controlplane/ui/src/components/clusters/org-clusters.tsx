@@ -3,6 +3,7 @@
 import { Fragment, useState } from 'react'
 import useSWR from 'swr'
 import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, type Registered } from '@/lib/api/clusters'
+import { clusterLabel } from '@/lib/clusters'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/clusters/settings-editor'
 import { ClusterStatus } from '@/components/clusters/cluster-status'
@@ -117,19 +118,28 @@ export function OrgClusters() {
               {orders && <MoveButtons cluster={c} index={index} of={shownOwn.length} onMove={to => move(c.name, to)} disabled={switching !== ''} />}
             </span>
           </td>
-          <td className="font-mono text-xs font-medium">{c.name}</td>
+          <td>
+            {c.provider
+              ? (
+                  <>
+                    <div className="text-sm font-medium">{clusterLabel(c)}</div>
+                    <Text as="div" variant="meta" className="font-mono">{c.name} · on demand</Text>
+                  </>
+                )
+              : <span className="font-mono text-xs font-medium">{c.name}</span>}
+          </td>
           <td><ClusterStatus cluster={c} /></td>
           <td className="text-xs">
-            {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
+            {c.owned ? 'Your org' : <Badge tone="neutral">Platform</Badge>}
           </td>
           <td>
             <Switch
-              label={`Use ${c.name} for the jobs of ${org.name}`}
+              label={`Use ${clusterLabel(c)} for jobs`}
               checked={c.enabled}
               disabled={!c.actions.includes('enable') || switching !== ''}
               onChange={enabled => change(c.name, () => setClusterEnabled(org.id, c.name, enabled))}
             />
-            {!c.enabled && <Text as="div" variant="meta" className="whitespace-nowrap">Off: no new jobs go here.</Text>}
+            {!c.enabled && <Text as="div" variant="meta" className="whitespace-nowrap">No new jobs</Text>}
           </td>
           {edits && (
             <td>
@@ -167,23 +177,21 @@ export function OrgClusters() {
             mono
             className="w-60"
             aria-label="Cluster name"
-            placeholder="name, e.g. lab-k8s or gpu-box-1"
+            placeholder="e.g. lab-k8s or gpu-box-1"
             value={name}
             onChange={e => setName(e.target.value)}
           />
           <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>Add cluster</Button>
-          <Text as="span" variant="hint">A Kubernetes cluster, or one bare-metal node.</Text>
         </Inline>
       )}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
       {registered && <StartCommand key={registered.name} registered={registered} onHide={() => setRegistered(null)} />}
 
-      {error && <ErrorMessage>Could not load the clusters of {org.name}: {error.message}</ErrorMessage>}
+      {error && <ErrorMessage>Could not load clusters: {error.message}</ErrorMessage>}
       {!data && !error && <Loading />}
       {data && data.length === 0 && (
         <EmptyState>
-          No cluster is registered for {org.name}, and the platform provides none.
-          {!editsOrg && ' An owner adds one here.'}
+          No clusters yet.
         </EmptyState>
       )}
       {data && data.length > 0 && (
@@ -195,20 +203,20 @@ export function OrgClusters() {
                 <th>Order</th>
                 <th>Cluster</th>
                 <th>Status</th>
-                <th>Provided by</th>
-                <th title={`Whether jobs of ${org.name} are placed on the cluster`}>Use for jobs</th>
+                <th>Provider</th>
+                <th>Use for jobs</th>
                 {edits && <th />}
               </tr>
             </thead>
             <tbody>
               <tr>
-                <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Clusters of {org.name}, tried first, in the order {editsOrg ? 'you set' : 'an owner sets'}</th>
+                <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Your clusters</th>
               </tr>
               {shownOwn.length === 0 && (
                 <tr>
                   <td colSpan={columns}>
                     <Text as="span" variant="note">
-                      None yet.
+                      None
                     </Text>
                   </td>
                 </tr>
@@ -216,7 +224,7 @@ export function OrgClusters() {
               {shownOwn.map((c, index) => row(c, index))}
               {others.length > 0 && (
                 <tr>
-                  <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Platform compute, for every org, tried after {org.name}&apos;s own</th>
+                  <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Platform clusters</th>
                 </tr>
               )}
               {others.map(c => row(c))}
@@ -236,8 +244,8 @@ export function OrgClusters() {
           void change(cluster, () => removeCluster(org.id, cluster))
         }}
       >
-        Its jobs go back to the queue and run on another cluster, keeping their retries. Its runtime
-        token is refused from then on, so stop its agent. The name is free to register again.
+        Its jobs go back to the queue and run on another cluster. Its token stops working, so stop
+        its agent.
       </ConfirmDialog>
     </Stack>
   )

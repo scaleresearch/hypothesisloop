@@ -134,6 +134,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if err := ValidateExperiment(exp, s.credits); err != nil {
 		return err
 	}
+	// The baseline is measured on the machine the plan states, which a person may change while
+	// it is open: a job sized for the one before measures nothing the run is ranked on.
+	if machine, ok := domain.PlanMachine(pe.Proposal); ok && measuresBaseline && pe.Status == domain.PlatformExpOpen {
+		if differs := machine.Differs(exp.Job); differs != "" {
+			return &AdmissionError{Reason: ReasonNotThePlansMachine, Message: fmt.Sprintf("the plan of platform experiment %s measures its baseline on %s, and this job asks for %s: submit it on the plan's machine, as hl platform-experiments get states it", pe.ID, machine, differs)}
+		}
+	}
 	if err := s.codeInRepository(pe, exp.CodeRef); err != nil {
 		return err
 	}

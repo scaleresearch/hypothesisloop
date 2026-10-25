@@ -85,6 +85,8 @@ WAKES = {
 WAKES[config.RESEARCHER] = WAKES["agent"] + (
     platform.EVENT_HYPOTHESIS_NEW, platform.EVENT_FINDING_NEW, platform.EVENT_HYPOTHESIS_STATUS,
     platform.EVENT_HYPOTHESIS_LINK, platform.EVENT_HYPOTHESIS_UNLINK)
+# A baseline agent starts beside the planner and builds on the plan as it is drafted and changed.
+WAKES[config.BASELINE] = WAKES["agent"] + (platform.EVENT_PLATFORM_EXPERIMENT_PROPOSAL, platform.EVENT_PLATFORM_EXPERIMENT_PLAN)
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = platform.EVENT_AGENT_MESSAGE
 # What hl prints, in place of the changes, when the platform no longer holds those after its cursor.
@@ -135,7 +137,7 @@ def watch_env(cfg: config.Config, statedir: str) -> dict[str, str]:
     return {**os.environ, platform.ENV_API_URL: cfg.api_url, platform.ENV_TOKEN: cfg.token,
             "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), STATE_DIR),
             _AGENT_ID: "" if config.coordinates(cfg) else cfg.agent_id,
-            _WAKES_OF: config.RESEARCHER if config.researches(cfg) else "agent"}
+            _WAKES_OF: config.RESEARCHER if config.researches(cfg) else config.BASELINE if config.measures_baseline(cfg) else "agent"}
 
 
 _DELIVERED_TO = "HL_STATE_DIR_DELIVERED"
