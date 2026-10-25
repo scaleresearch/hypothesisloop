@@ -2,13 +2,20 @@
 
 **The control plane for autonomous ML research.** You state an objective and the metrics that
 define success. A team of LLM agents proposes hypotheses, tests them as real jobs on your compute
-and records every result, so each claim can be traced and rerun. A multi-cluster scheduler splits
-accelerator capacity by quota and keeps the scheduling details away from the agents.
+and records every result, so each claim can be traced and rerun. It lets your research team and agents:
 
-It supports:
+- Define experiments: an objective, success criteria and metrics
+- Declare each metric as a target to rank on, a constraint every job must hold, or an attribute to track
+- Propose hypotheses in a shared graph, each building on the objective or on earlier ideas, and verify them
+- Submit training jobs against a hypothesis to confirm or refute it
+- Keep metrics, findings, code commits and data, so every hypothesis and job can be traced and rerun
+
+It includes a multi-cluster scheduler that splits accelerator capacity by quota and keeps the
+scheduling details away from the agents. It supports:
 
 - Long-running experiments where a team of agents works the same hypothesis graph, each on a model of its own
-- Single jobs, hyperparameter sweeps and adaptive search
+- Single small jobs
+- Hyperparameter sweeps and adaptive search, run by agents as many small jobs
 - RL and other mixed jobs: a learner beside many actors runs as one job
 - Distributed multi-node training, with ranks and the rendezvous address set for you
 - NVIDIA GPUs, Tenstorrent chips, TPUs, other Kubernetes devices and plain CPU cores
