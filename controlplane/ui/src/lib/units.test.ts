@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetUnit, inFlight, occupancy, unitCount, unitRate } from './units'
+import { budgetUnit, inFlight, occupancy, unitCount } from './units'
 
 describe('a count of a priced type', () => {
   it('says cores for the CPU type and is a bare number for an accelerator', () => {
@@ -9,14 +9,6 @@ describe('a count of a priced type', () => {
     expect(unitCount('accelerator', 4)).toBe('4')
     // An API that predates kinds sends none: everything it lists is an accelerator.
     expect(unitCount(undefined, 4)).toBe('4')
-  })
-
-  it('prices a unit by the hour in the unit of the budget', () => {
-    expect(unitRate('cpu', 1)).toBe('1 CPU-hour')
-    expect(unitRate('cpu', 0.5)).toBe('0.5 CPU-hours')
-    expect(unitRate('accelerator', 0.375, 'H100')).toBe('0.375 H100-hours')
-    expect(unitRate('accelerator', 1, 'H100')).toBe('1 H100-hour')
-    expect(unitRate(undefined, 0.25)).toBe('0.25 accelerator-hours')
   })
 })
 

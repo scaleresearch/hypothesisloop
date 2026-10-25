@@ -361,7 +361,7 @@ object_store:
 # A type is named by a fact its own driver publishes, written as a fully-qualified "key=value":
 #
 #   nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3   NVIDIA GPU Feature Discovery node label
-#   amd.com/gpu.product-name=Instinct-MI300X       AMD node labeller node label
+#   amd.com/gpu.product-name=AMD_Instinct_MI300X   AMD node labeller node label
 #   tenstorrent.com/chipArch=blackhole             Tenstorrent DRA device attribute
 #
 # These strings are NOT defined here. The driver emits them; this file only attaches a price.
@@ -383,7 +383,26 @@ object_store:
 # runtime offers its nodes' cores as it, and a job that asks for cores and no accelerator (cpu: 4)
 # holds that many units. It is built in at 1.0, so the budget of an experiment on cores reads as
 # CPU core-hours: 4 cores for an hour cost 4. It is not listed below, and a file that lists it is
-# refused at load.
+# refused at load. Against the platform compute limit a core counts quota.shared_acch_per_cpu_core
+# instead, its share of an H100.
+#
+# label is the type as a person reads it, which the capacity answer carries beside the string.
+#
+# This list is the one place a GPU model is named. providers holds its name on each provider a
+# cloud_compute entry rents it on, in that provider's own words, and a cloud_compute shape names
+# the type alone: a shape of a type with no entry for its provider is refused at load.
+#   vast    gpu_name as vast.ai's offer search returns it; min_gpu_ram_mb tells apart models it
+#           sells under one name (an A100 PCIE of 40 or 80 GB)
+#   runpod  gpu_id as Runpod's GPU catalog lists it
+# On either, max_price_per_gpu_hour is the most a machine of the model may cost an hour per GPU,
+# in place of the account's max_price_per_hour, which an expensive model would never pass. Each
+# rent takes the cheapest offer, so a ceiling is not what is paid. In October 2026, per GPU on
+# vast.ai (verified, Europe and North America) and on Runpod's SECURE cloud: H100 SXM $1.80 to
+# $2.35 and $3.99, H100 PCIe about $2.27 and $2.89, H100 NVL $2.33 to $2.54 and $3.19, H200 $4.15
+# to $4.61 and $5.29, B200 $6.25 to $7.50 and $7.99, A100 SXM 80GB $0.70 to $1.16 and $1.79, A100
+# PCIe 80GB about $1.05 and $1.79, L40S about $0.45 and $1.09, RTX 5090 $0.21 to $1.07 and $1.19,
+# RTX A6000 about $0.40 and $0.59. Runpod publishes no list price of the MI300X, which it rents
+# about as an H100 SXM.
 #
 # pod_resources is what every node of a job on the type needs beside the device, by the name the
 # runtime knows it. The platform adds it to every job admitted on the type, so no job spec states
@@ -399,34 +418,108 @@ budget_reference: H100
 
 accelerator_types:
   - name:      nvidia.com/gpu.product=Tesla-T4
+    label:     T4
     acch_rate: 0.125
 
   - name:      nvidia.com/gpu.product=NVIDIA-L40
+    label:     L40
     acch_rate: 0.25
 
+  - name:      nvidia.com/gpu.product=NVIDIA-L40S
+    label:     L40S
+    acch_rate: 0.3
+    providers:
+      vast:   {gpu_name: L40S, max_price_per_gpu_hour: 1.20}
+      runpod: {gpu_id: NVIDIA L40S}
+
   - name:      nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
+    label:     A100 PCIe 80GB
     acch_rate: 0.375
+    providers:
+      vast:   {gpu_name: A100 PCIE, min_gpu_ram_mb: 80000}
+      runpod: {gpu_id: NVIDIA A100 80GB PCIe, max_price_per_gpu_hour: 2.20}
+
+  - name:      nvidia.com/gpu.product=NVIDIA-A100-SXM4-80GB
+    label:     A100 SXM 80GB
+    acch_rate: 0.45
+    providers:
+      vast:   {gpu_name: A100 SXM4, min_gpu_ram_mb: 80000, max_price_per_gpu_hour: 1.80}
+      runpod: {gpu_id: NVIDIA A100-SXM4-80GB, max_price_per_gpu_hour: 2.20}
 
   - name:      nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+    label:     H100 SXM 80GB
     acch_rate: 1.0
+    providers:
+      vast:   {gpu_name: H100 SXM, max_price_per_gpu_hour: 3.20}
+      runpod: {gpu_id: NVIDIA H100 80GB HBM3, max_price_per_gpu_hour: 4.80}
+
+  - name:      nvidia.com/gpu.product=NVIDIA-H100-PCIe
+    label:     H100 PCIe 80GB
+    acch_rate: 0.9
+    providers:
+      vast:   {gpu_name: H100 PCIE, max_price_per_gpu_hour: 3.00}
+      runpod: {gpu_id: NVIDIA H100 PCIe, max_price_per_gpu_hour: 3.50}
+
+  - name:      nvidia.com/gpu.product=NVIDIA-H100-NVL
+    label:     H100 NVL 94GB
+    acch_rate: 1.0
+    providers:
+      vast:   {gpu_name: H100 NVL, max_price_per_gpu_hour: 3.40}
+      runpod: {gpu_id: NVIDIA H100 NVL, max_price_per_gpu_hour: 3.90}
 
   - name:      nvidia.com/gpu.product=NVIDIA-H200
-    acch_rate: 1.25
+    label:     H200 141GB
+    acch_rate: 1.5
+    providers:
+      vast:   {gpu_name: H200, max_price_per_gpu_hour: 5.50}
+      runpod: {gpu_id: NVIDIA H200, max_price_per_gpu_hour: 6.40}
+
+  - name:      nvidia.com/gpu.product=NVIDIA-B200
+    label:     B200 180GB
+    acch_rate: 2.5
+    providers:
+      vast:   {gpu_name: B200, max_price_per_gpu_hour: 8.50}
+      runpod: {gpu_id: NVIDIA B200, max_price_per_gpu_hour: 9.60}
 
   - name:      nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4070-Ti
+    label:     RTX 4070 Ti
     acch_rate: 0.1
 
   - name:      nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
+    label:     RTX 4090
     acch_rate: 0.15
+    providers:
+      vast:   {gpu_name: RTX 4090}
+      runpod: {gpu_id: NVIDIA GeForce RTX 4090}
+
+  - name:      nvidia.com/gpu.product=NVIDIA-GeForce-RTX-5090
+    label:     RTX 5090
+    acch_rate: 0.25
+    providers:
+      vast:   {gpu_name: RTX 5090}
+      runpod: {gpu_id: NVIDIA GeForce RTX 5090}
+
+  - name:      nvidia.com/gpu.product=NVIDIA-RTX-A6000
+    label:     RTX A6000
+    acch_rate: 0.2
+    providers:
+      vast:   {gpu_name: RTX A6000}
+      runpod: {gpu_id: NVIDIA RTX A6000}
 
   - name:      nvidia.com/gpu.product=NVIDIA-GeForce-GTX-1070-Ti
+    label:     GTX 1070 Ti
     acch_rate: 0.05
 
-  # Add a rate when jobs may request another accelerator type.
-  # - name:      amd.com/gpu.product-name=Instinct-MI300X
-  #   acch_rate: 1.125
+  # A job on it runs ROCm: its image needs a ROCm build of its framework (PyTorch from the rocm
+  # wheel index), and a CUDA build finds no GPU. vast.ai rents no AMD GPU.
+  - name:      amd.com/gpu.product-name=AMD_Instinct_MI300X
+    label:     AMD Instinct MI300X 192GB
+    acch_rate: 1.125
+    providers:
+      runpod: {gpu_id: AMD Instinct MI300X OAM, max_price_per_gpu_hour: 4.00}
 
   - name:      tenstorrent.com/chipArch=blackhole
+    label:     Tenstorrent Blackhole
     acch_rate: 0.5
     pod_resources:
       hugepages-1Gi: 4Gi
@@ -449,8 +542,10 @@ quota:
 
   # Accelerators-in-flight (SUBMITTED+RUNNING) a platform experiment may hold at once when it
   # does not set its own max_concurrent_accelerators. Speculative submission makes capacity
-  # appear on demand, so this is the concurrency ceiling that live capacity used to provide.
-  default_max_concurrent_accelerators: 64
+  # appear on demand, so this is the concurrency ceiling that live capacity used to provide. A job
+  # on cores counts its cores here, so it is set for a team of agents each running jobs of 8 to
+  # 16 cores at once; the platform compute limit below bounds GPUs well before it.
+  default_max_concurrent_accelerators: 1024
 
   # What the model calls the platform makes for one platform experiment's agents and coordinator
   # may cost, in US dollars as recorded with each call: the default of one that states no
@@ -472,10 +567,17 @@ quota:
 
   # The platform compute limit an org is created with: the accelerator hours per hour of the
   # platform's clusters its placed jobs may reserve together, and those of any one of its
-  # projects (acch_rate times accelerator_count of each placed job). A job past either waits for
-  # placed ones to end. Staff change an org's with hl-admin org limits. 0 < project <= org.
-  default_org_shared_acch_per_hour: 64
-  default_project_shared_acch_per_hour: 32
+  # projects (acch_rate times accelerator_count of each placed job, and shared_acch_per_cpu_core
+  # times the cores of a job on cores). A job past either waits for placed ones to end. Staff
+  # change an org's with hl-admin org limits. 0 < project <= org. 256 is 256 H100s at once, or
+  # 12800 cores.
+  default_org_shared_acch_per_hour: 512
+  default_project_shared_acch_per_hour: 256
+
+  # What one CPU core reserves of the platform compute limit, in H100s: a core rents for about a
+  # fiftieth of an H100. The budget of a job on cores still counts each core at 1, as CPU
+  # core-hours. Required and positive.
+  shared_acch_per_cpu_core: 0.02
 
   # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is

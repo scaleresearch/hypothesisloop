@@ -109,3 +109,24 @@ func TestPlaceIsTheBestStockedDataCenterOnTheGlobalNetworkThatHasEverySpec(t *te
 		t.Errorf("Networked = %+v, want none", supply)
 	}
 }
+
+// A model with a ceiling of its own is held to it times its GPUs in place of the account's.
+func TestAModelsOwnCeilingReplacesTheAccounts(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, "/v2/catalog/gpus/NVIDIA RTX A4500", reply(200, gpuJSON(`{"id":"EU-RO-1","availability":"LOW"}`)))
+	cfg := testSettings()
+	cfg.MaxPricePerHour = 0.1
+	if supply, _ := newTestProvider(t, api, cfg).Rentable(context.Background(), gpuSpec("g"), 1); supply.Count != 0 || !strings.Contains(supply.Why, "max_price_per_hour") {
+		t.Fatalf("a GPU above the account's ceiling: %+v", supply)
+	}
+	cfg.Accelerators = map[string]Accelerator{a4500: {GPUID: "NVIDIA RTX A4500", MaxPricePerGPUHour: 0.3}}
+	two := gpuSpec("g")
+	two.AcceleratorCount = 2
+	if supply, err := newTestProvider(t, api, cfg).Rentable(context.Background(), two, 1); err != nil || supply.Count != 1 {
+		t.Fatalf("2 GPUs at $0.25 under a ceiling of $0.30 each: %+v, %v", supply, err)
+	}
+	cfg.Accelerators[a4500] = Accelerator{GPUID: "NVIDIA RTX A4500", MaxPricePerGPUHour: 0.2}
+	if supply, _ := newTestProvider(t, api, cfg).Rentable(context.Background(), two, 1); supply.Count != 0 || !strings.Contains(supply.Why, "max_price_per_gpu_hour") {
+		t.Errorf("a GPU above its own ceiling: %+v", supply)
+	}
+}

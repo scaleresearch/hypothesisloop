@@ -100,18 +100,14 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 // the cluster is renamed.
 func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, string, error) {
 	shapes := make([]compute.Shape, 0, len(cc.Shapes))
-	var acceleratorTypes []string
 	for _, s := range cc.Shapes {
 		shapes = append(shapes, compute.Shape{
 			Name: s.Name, AcceleratorType: s.AcceleratorType, Accelerators: s.Accelerators,
 			CPUMillis: s.CPUMillis, MemoryBytes: s.MemoryBytes, StorageBytes: s.StorageBytes, MaxInstances: s.MaxInstances,
 		})
-		if s.Accelerators > 0 {
-			acceleratorTypes = append(acceleratorTypes, s.AcceleratorType)
-		}
 	}
 	log := logger.Named("cloudcompute").With(zap.String("cluster", cc.ClusterName))
-	rented, err := providers.New(cc.Provider, cc.Sections[cc.Provider], pcfg.CloudComputeSecrets[cc.ClusterName], acceleratorTypes, log.Named(cc.Provider).Sugar().Infof)
+	rented, err := providers.New(cc.Provider, cc.Sections[cc.Provider], pcfg.CloudComputeSecrets[cc.ClusterName], pcfg.Accelerators(cc), log.Named(cc.Provider).Sugar().Infof)
 	if err != nil {
 		return nil, "", fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
 	}

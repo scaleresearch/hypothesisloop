@@ -15,6 +15,10 @@ type exampleSettings struct {
 	Region string `yaml:"region"`
 }
 
+type exampleAccelerator struct {
+	Model string `yaml:"model"`
+}
+
 func settingsNode(t *testing.T, text string) yaml.Node {
 	t.Helper()
 	var holder struct {
@@ -29,25 +33,32 @@ func settingsNode(t *testing.T, text string) yaml.Node {
 func TestAProviderIsBuiltFromItsOwnSectionOfTheConfig(t *testing.T) {
 	var got exampleSettings
 	var gotSecret string
-	var gotTypes []string
-	byName["example"] = adapter(func(s exampleSettings, secret string, acceleratorTypes []string, _ func(string, ...any)) (*fake.Provider, error) {
-		got, gotSecret, gotTypes = s, secret, acceleratorTypes
+	var gotTypes map[string]exampleAccelerator
+	byName["example"] = adapter(func(s exampleSettings, secret string, accelerators map[string]exampleAccelerator, _ func(string, ...any)) (*fake.Provider, error) {
+		got, gotSecret, gotTypes = s, secret, accelerators
 		return fake.New(), nil
 	})
 	defer delete(byName, "example")
 
-	rented, err := New("example", settingsNode(t, "settings: {region: eu}"), "a-secret", []string{"nvidia.com/gpu.product=NVIDIA-H100"}, t.Logf)
+	const h100 = "nvidia.com/gpu.product=NVIDIA-H100"
+	rented, err := New("example", settingsNode(t, "settings: {region: eu}"), "a-secret", map[string]yaml.Node{h100: settingsNode(t, "settings: {model: H100 SXM}")}, t.Logf)
 	if err != nil || rented == nil || got.Region != "eu" || gotSecret != "a-secret" {
 		t.Fatalf("provider %v, settings %+v, %v", rented, got, err)
 	}
-	if len(gotTypes) != 1 || gotTypes[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
-		t.Errorf("accelerator types handed to the provider = %q", gotTypes)
+	if len(gotTypes) != 1 || gotTypes[h100].Model != "H100 SXM" {
+		t.Errorf("accelerators handed to the provider = %v", gotTypes)
+	}
+	if _, err := New("example", yaml.Node{}, "", map[string]yaml.Node{h100: settingsNode(t, "settings: {modle: H100 SXM}")}, t.Logf); err == nil || !strings.Contains(err.Error(), h100) {
+		t.Errorf("a misspelled key of an accelerator's entry: err = %v", err)
 	}
 	if _, err := New("example", settingsNode(t, "settings: {regoin: eu}"), "", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "the section of the provider") {
 		t.Errorf("a misspelled provider setting: err = %v", err)
 	}
 	if _, err := New("example", yaml.Node{}, "", nil, t.Logf); err != nil {
 		t.Errorf("a provider with no settings of its own: %v", err)
+	}
+	if _, err := New("vast", settingsNode(t, "settings: {account_id: \"1\", max_price_per_hour: 1, accelerators: []}"), "a-key", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "accelerators") {
+		t.Errorf("a provider section that names its own accelerators, which only the catalog names: err = %v", err)
 	}
 }
 
@@ -91,12 +102,13 @@ func shippedSections(t *testing.T, path, key string) map[string]yaml.Node {
 }
 
 // Every provider has its section in the shipped example of the settings section it rents for, and
-// the section builds its adapter.
+// the section builds its adapter, with every accelerator type the shipped catalog names on it.
 func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
 	shipped := shippedSections(t, "../../../../controlplane/settings/sandbox.yaml", "sandbox")
 	for name, node := range shippedSections(t, "../../../../controlplane/settings/cloud-compute.yaml", "cloud_compute") {
 		shipped[name] = node
 	}
+	catalog := shippedCatalog(t)
 	for _, name := range Names() {
 		if name == "fake" {
 			continue
@@ -106,15 +118,50 @@ func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
 			if !found {
 				t.Fatalf("no shipped example of the settings has a section of %s", name)
 			}
-			if _, err := New(name, node, "FlyV1 not-a-real-key", nil, t.Logf); err != nil {
+			if _, err := New(name, node, "FlyV1 not-a-real-key", catalog[name], t.Logf); err != nil {
 				t.Fatalf("provider: %v", err)
 			}
-			_, err := New(name, node, "FlyV1 not-a-real-key", []string{"nvidia.com/gpu.product=NVIDIA-H100"}, t.Logf)
+			if name != "vast" && name != "runpod" {
+				return
+			}
+			if len(catalog[name]) == 0 {
+				t.Fatalf("the shipped catalog names no accelerator type on %s", name)
+			}
+			_, err := New(name, node, "FlyV1 not-a-real-key", map[string]yaml.Node{"nvidia.com/gpu.product=NVIDIA-H100": {}}, t.Logf)
 			if err == nil || !strings.Contains(err.Error(), "NVIDIA-H100") {
-				t.Errorf("err = %v, want a refusal of an accelerator no shipped section rents", err)
+				t.Errorf("err = %v, want a refusal of an accelerator with an empty entry", err)
 			}
 		})
 	}
+}
+
+// shippedCatalog is the shipped catalog's entry of every accelerator type on each provider, by
+// provider and then type.
+func shippedCatalog(t *testing.T) map[string]map[string]yaml.Node {
+	t.Helper()
+	raw, err := os.ReadFile("../../../../controlplane/settings/hypothesisloop.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		AcceleratorTypes []struct {
+			Name      string               `yaml:"name"`
+			Providers map[string]yaml.Node `yaml:"providers"`
+		} `yaml:"accelerator_types"`
+	}
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]map[string]yaml.Node{}
+	for _, accelerator := range document.AcceleratorTypes {
+		for name, entry := range accelerator.Providers {
+			if out[name] == nil {
+				out[name] = map[string]yaml.Node{}
+			}
+			out[name][accelerator.Name] = entry
+		}
+	}
+	return out
 }
 
 // A config that names a vendor and leaves out its settings must stop the process at startup,

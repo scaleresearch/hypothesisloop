@@ -74,7 +74,7 @@ func TestLoadRejectsScaleUpTimeoutAtOrAboveRendezvousLimit(t *testing.T) {
 }
 
 func TestLoadRejectsZeroDefaultMaxConcurrentAccelerators(t *testing.T) {
-	text := strings.Replace(productionConfig(t), "  default_max_concurrent_accelerators: 64", "  default_max_concurrent_accelerators: 0", 1)
+	text := strings.Replace(productionConfig(t), "  default_max_concurrent_accelerators: 1024", "  default_max_concurrent_accelerators: 0", 1)
 	if err := loadText(t, text); err == nil {
 		t.Fatal("Load accepted default_max_concurrent_accelerators: 0")
 	}
@@ -563,30 +563,51 @@ func TestTheCommittedCloudComputeExampleLoadsWithTheCommittedCatalog(t *testing.
 	if !slices.Equal(providers, []string{"vast", "runpod"}) {
 		t.Fatalf("the example's entries are on %v, want vast and runpod", providers)
 	}
-	if err := loadText(t, productionConfig(t)+"\n"+text); err != nil {
-		t.Errorf("hypothesisloop.yaml with cloud-compute.yaml: %v", err)
+	cfg, err := loadConfigText(t, productionConfig(t)+"\n"+text)
+	if err != nil {
+		t.Fatalf("hypothesisloop.yaml with cloud-compute.yaml: %v", err)
+	}
+	for _, cc := range cfg.CloudCompute {
+		accelerators := cfg.Accelerators(cc)
+		for _, shape := range cc.Shapes {
+			if shape.Accelerators == 0 {
+				continue
+			}
+			if _, named := accelerators[shape.AcceleratorType]; !named {
+				t.Errorf("%s shape %s: the catalog has no %s entry for %s", cc.ClusterName, shape.Name, cc.Provider, shape.AcceleratorType)
+			}
+			if cfg.LabelByName[shape.AcceleratorType] == "" {
+				t.Errorf("%s shape %s: %s has no label", cc.ClusterName, shape.Name, shape.AcceleratorType)
+			}
+		}
+	}
+	if cfg.LabelByName["hypothesisloop.dev/cpu=core"] != "CPU core" {
+		t.Errorf("the built-in CPU type's label = %q", cfg.LabelByName["hypothesisloop.dev/cpu=core"])
 	}
 }
 
 // A catalog string is written as the runtimes report it, and a rented shape offers only a priced
-// type, or no job could ever be admitted to it.
+// type the catalog names on the shape's provider, or no job could ever be admitted to it.
 func TestAcceleratorTypesAreCanonicalAndEveryRentedShapeIsPriced(t *testing.T) {
 	const priced = "nvidia.com/gpu.product=NVIDIA-L40"
+	const named = "nvidia.com/gpu.product=NVIDIA-L40S"
 	shape := func(acceleratorType string) string {
 		return "\ncloud_compute:\n" + cluster + "    shapes:\n      - name: gpu\n        accelerator_type: " + acceleratorType +
 			"\n        accelerators: 1\n        cpu: \"8\"\n        memory: 32Gi\n        storage: 100Gi\n        max_instances: 1\n"
 	}
-	if err := loadText(t, productionConfig(t)+shape(priced)); err != nil {
-		t.Fatalf("a shape of a priced type: %v", err)
+	if err := loadText(t, productionConfig(t)+shape(named)); err != nil {
+		t.Fatalf("a shape of a priced type named on its provider: %v", err)
 	}
 	for name, tc := range map[string]struct{ text, want string }{
 		"a catalog name GFD never labels": {strings.Replace(productionConfig(t), priced, "nvidia.com/gpu.product=NVIDIA L40", 1),
 			`accelerator_types: accelerator type "nvidia.com/gpu.product=NVIDIA L40" must be written "nvidia.com/gpu.product=NVIDIA-L40"`},
 		"a catalog name with no key": {strings.Replace(productionConfig(t), priced, "L40", 1), `accelerator type "L40" is not a key=value catalog string`},
-		"a shape of an unpriced type": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-B200"),
-			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-B200" is not priced in accelerator_types`},
+		"a shape of an unpriced type": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-GB300"),
+			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-GB300" is not priced in accelerator_types`},
 		"a shape of a type in another casing": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-l40"),
 			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-l40" is not priced in accelerator_types`},
+		"a shape of a type with no name on its provider": {productionConfig(t) + shape(priced),
+			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-L40" has no providers.vast entry in accelerator_types`},
 	} {
 		if err := loadText(t, tc.text); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want an error saying %q", name, err, tc.want)

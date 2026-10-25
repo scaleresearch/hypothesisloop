@@ -17,14 +17,6 @@ export function unitCount(kind: TypeKind | undefined, n: number): string {
   return `${n} ${n === 1 ? 'core' : 'cores'}`
 }
 
-// What one unit of the type costs for an hour, in the unit budgets are counted in.
-export function unitRate(kind: TypeKind | undefined, acchPerHour: number, reference?: string): string {
-  const n = Math.round(acchPerHour * 1000) / 1000
-  if (kind === 'cpu') return `${n} CPU-${n === 1 ? 'hour' : 'hours'}`
-  const unit = budgetUnit('accelerator', 'long', reference)
-  return `${n} ${n === 1 ? unit.replace(/s$/, '') : unit}`
-}
-
 // Devices and cores in flight, as one value. The concurrency cap counts the two together.
 export function inFlight(accelerators: number, cores: number, cap: number | null | undefined): { label: string; value: string; atCap: boolean } {
   const held = cores > 0 ? `${accelerators} accelerators, ${unitCount('cpu', cores)}` : String(accelerators)

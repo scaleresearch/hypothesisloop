@@ -146,7 +146,7 @@ func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 	if cfg.AccountID == "" {
 		cfg.AccountID = "1"
 	}
-	p, err := New(cfg, testKey, nil, t.Logf)
+	p, err := New(cfg, testKey, cfg.Accelerators, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

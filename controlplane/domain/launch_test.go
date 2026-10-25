@@ -110,7 +110,16 @@ func eachShell(t *testing.T, test func(t *testing.T, shell string)) {
 // when set, is sent to the script once the file named by READY exists.
 func launch(t *testing.T, shell, gitURL, commit, grace string, signal syscall.Signal, command ...string) launched {
 	t.Helper()
+	return launchAt(t, "", shell, gitURL, commit, grace, signal, command...)
+}
+
+// launchAt is launch with the code directory moved to codeDir, or under the temporary one when empty.
+func launchAt(t *testing.T, codeDir, shell, gitURL, commit, grace string, signal syscall.Signal, command ...string) launched {
+	t.Helper()
 	dir := t.TempDir()
+	if codeDir == "" {
+		codeDir = filepath.Join(dir, "workspace", "code")
+	}
 	shims := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(shims, 0o755); err != nil {
 		t.Fatal(err)
@@ -130,7 +139,7 @@ func launch(t *testing.T, shell, gitURL, commit, grace string, signal syscall.Si
 	}
 	defer output.Close()
 
-	script := strings.ReplaceAll(LaunchScript, JobCodeDir, filepath.Join(dir, "workspace", "code"))
+	script := strings.ReplaceAll(LaunchScript, JobCodeDir, codeDir)
 	cmd := exec.Command(shell, clusterapi.LaunchCommand(script, command, nil)[1:]...)
 	cmd.Env = []string{
 		"PATH=" + shims + string(os.PathListSeparator) + os.Getenv("PATH"),
@@ -227,6 +236,21 @@ func TestTheLaunchScriptRunsTheCommandInTheJobsCommitAndEndsWithItsExitLine(t *t
 // A repository that never answers is tried seven times over about three minutes, the pauses
 // doubling to a minute, and ends the script with the code that tells the platform the command
 // never ran.
+func TestALaunchWhoseUserCannotCreateTheCodeDirectoryRunsTheCommandUnderItsHome(t *testing.T) {
+	eachShell(t, func(t *testing.T, shell string) {
+		url, commit := gitServer(t, "pwd\n")
+		got := launchAt(t, "/proc/hypothesisloop/workspace/code", shell, url, commit, "30", 0, "sh", "job.sh")
+
+		if line := got.exitLine(t); got.code != 0 || line.Code != 0 {
+			t.Fatalf("exit %d, exit line %+v, want 0:\n%s", got.code, line, got.output)
+		}
+		if !strings.Contains(got.output, "cannot create /proc/hypothesisloop/workspace/code, so the code is in ") ||
+			!strings.Contains(got.output, filepath.Join("workspace", "code")+"\n") {
+			t.Errorf("the command did not run in the code directory under the home:\n%s", got.output)
+		}
+	})
+}
+
 func TestALaunchWhoseRepositoryNeverAnswersEndsWithCodeUnreachable(t *testing.T) {
 	eachShell(t, func(t *testing.T, shell string) {
 		listener := httptest.NewServer(http.NotFoundHandler())

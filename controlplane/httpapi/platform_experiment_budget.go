@@ -71,7 +71,7 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 			"coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, " +
 			"and is answered 422 naming org_id without it. An org you do not reach is not found. Staff read one org with org_id and every " +
 			"cluster that reports without it. accelerator_type is the exact " +
-			"driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type " +
+			"driver-published string a job spec takes, so what you read here is what you submit, and label the type as a person reads it. pod_resources on a type " +
 			"is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory " +
 			"and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed " +
 			"and free now, and per_node_available on a type the most of it free on one node now. hosts is how many nodes a cluster has and " +
@@ -81,7 +81,7 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
 			"currently-schedulable nodes count — powered-off hardware never appears. " +
 			"platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour " +
-			"(acch_per_hour of the type times accelerator_count), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, " +
+			"(acch_per_hour of the type times accelerator_count, and for a job on cores acch_per_cpu_core times its cores), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, " +
 			"and one that alone passes the project's where no cluster of the org's own can hold it is refused 422 exceeds_project_compute_limit."}, a.getResourceCapacity)
 }
 

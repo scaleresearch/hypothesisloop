@@ -45,7 +45,7 @@ func conformanceOptions() providertest.Options {
 // conformanceKey is the account key of hypothesisloop-runpod, the cluster localdev/dev.sh names.
 var conformanceKey = config.AccountKey(config.SectionCloudCompute, "hypothesisloop-runpod")
 
-func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
+func conformanceProvider(t *testing.T, accelerators map[string]Accelerator) *Provider {
 	t.Helper()
 	if os.Getenv(conformanceKey.Name) == "" {
 		t.Skip(conformanceKey.Name + " is not set")
@@ -54,8 +54,7 @@ func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 		AccountID:       "conformance",
 		MaxPricePerHour: 0.7,
 		Cloud:           "SECURE",
-		Accelerators:    accelerators,
-	}, os.Getenv(conformanceKey.Name), nil, t.Logf)
+	}, os.Getenv(conformanceKey.Name), accelerators, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -80,7 +79,7 @@ func gpuOptions(t *testing.T) (*Provider, providertest.Options) {
 	opts := conformanceOptions()
 	opts.Template.AcceleratorType = acceleratorname.NVIDIAProductLabel(product)
 	opts.Template.AcceleratorCount = 1
-	return conformanceProvider(t, []Accelerator{{Product: product, GPUID: gpuID}}), opts
+	return conformanceProvider(t, map[string]Accelerator{opts.Template.AcceleratorType: {GPUID: gpuID}}), opts
 }
 
 func TestConformanceNetwork(t *testing.T) {

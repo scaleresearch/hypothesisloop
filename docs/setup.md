@@ -85,7 +85,11 @@ run `make -s runtime-token CLUSTER=my-cluster ORG=<org id>`.
 | of the platform's own org (`default` locally: the local cluster and the rented ones) | every org's jobs, ranked below an org's own |
 
 `hl-admin org limits ORG RATE PROJECT_RATE` caps the accelerator hours per hour of the platform's
-clusters that an org's placed jobs, and each of its projects', may reserve.
+clusters that an org's placed jobs, and each of its projects', may reserve. A new org starts with
+`quota.default_org_shared_acch_per_hour` (512) and `quota.default_project_shared_acch_per_hour`
+(256), in H100s at once. A GPU counts its `acch_rate` and a CPU core `quota.shared_acch_per_cpu_core`
+(0.02, about its price as a share of an H100), so a project may run 256 H100s or 12800 cores. The
+budget of a job on cores still counts a core-hour as 1.
 
 | Command | Effect |
 |---|---|
@@ -144,7 +148,16 @@ brings compute by registering a cluster or a machine (`hl cluster add`).
 cluster. It rents one machine per node of a job and destroys it when the job ends. `vast` runs
 single-node jobs. `runpod` runs single-node jobs and multi-node jobs on GPU pods in one data
 center over Global Networking. Each entry lists the shapes (machine sizes) the account may rent,
-CPU-only shapes included.
+CPU-only shapes included, each naming its GPU by catalog string alone.
+
+Every GPU model is defined once, in `accelerator_types` of `hypothesisloop.yaml`: its catalog
+string, a `label` the capacity answer and the UI show, its `acch_rate`, and under `providers` its
+name on each provider (`gpu_name` and `min_gpu_ram_mb` on vast.ai, `gpu_id` on RunPod) with an
+optional `max_price_per_gpu_hour` that replaces the account's `max_price_per_hour` for it. A shape
+of a type with no entry for its provider is refused at load. The example rents the RTX 4090, RTX
+5090, RTX A6000, L40S, A100 PCIe and SXM 80GB, H100 SXM, PCIe and NVL, H200 and B200 on both, and the
+AMD Instinct MI300X on RunPod alone. A job on the MI300X runs ROCm, so its image needs a ROCm build
+of its framework, such as PyTorch from the ROCm wheel index.
 
 The example ships two entries, one on vast.ai and one on RunPod, and the control plane runs every
 entry it is given at once, each as its own cluster with its own account key. To use both, list

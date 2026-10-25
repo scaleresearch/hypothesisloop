@@ -254,7 +254,7 @@ func (spec *Spec) Validate() error {
 	if s.DurationHours <= 0 {
 		refuse("duration_hours", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
 	}
-	if s.MaxAgents <= 0 {
+	if s.MaxAgents <= 0 && s.Executors() == 0 {
 		refuse("max_agents", "max_agents is required and must be positive, or agents with an executor in it: how many executors may be at work at once")
 	}
 	if s.ReportIntervalSeconds < 0 {
@@ -263,9 +263,9 @@ func (spec *Spec) Validate() error {
 	if len(s.Stages) > 0 {
 		if err := ValidateStages(s.Stages); err != nil {
 			refuse("stages", "stages: %s", err)
-		} else if len(s.Stages) > 1 && s.MaxAgents > 0 && s.MaxAgents < MinExecutorsForCut {
+		} else if n := max(s.MaxAgents, s.Executors()); len(s.Stages) > 1 && n > 0 && n < MinExecutorsForCut {
 			refuse("stages", "stages: %d stages for at most %d executors, and a run of fewer than %d has one stage since no boundary cuts: state one stage or leave stages out",
-				len(s.Stages), s.MaxAgents, MinExecutorsForCut)
+				len(s.Stages), n, MinExecutorsForCut)
 		}
 	}
 	if s.DefaultQuotaTier != "" && !ValidQuotaTierOverride(string(s.DefaultQuotaTier)) {

@@ -43,7 +43,7 @@ func conformanceOptions() providertest.Options {
 // conformanceKey is the account key of hypothesisloop-vast, the cluster localdev/dev.sh names.
 var conformanceKey = config.AccountKey(config.SectionCloudCompute, "hypothesisloop-vast")
 
-func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
+func conformanceProvider(t *testing.T, accelerators map[string]Accelerator) *Provider {
 	t.Helper()
 	if os.Getenv(conformanceKey.Name) == "" {
 		t.Skip(conformanceKey.Name + " is not set")
@@ -53,9 +53,8 @@ func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 		MaxPricePerHour:  0.15,
 		MinReliability:   0.99,
 		VerifiedOnly:     true,
-		Accelerators:     accelerators,
 		ExcludedMachines: excludedMachines(t),
-	}, os.Getenv(conformanceKey.Name), nil, t.Logf)
+	}, os.Getenv(conformanceKey.Name), accelerators, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -74,7 +73,7 @@ func TestConformanceGPU(t *testing.T) {
 	opts := conformanceOptions()
 	opts.Template.AcceleratorType = acceleratorname.NVIDIAProductLabel(product)
 	opts.Template.AcceleratorCount = 1
-	providertest.Run(t, conformanceProvider(t, []Accelerator{{Product: product, GPUName: gpuName}}), opts)
+	providertest.Run(t, conformanceProvider(t, map[string]Accelerator{opts.Template.AcceleratorType: {GPUName: gpuName}}), opts)
 }
 
 func TestConformanceMarket(t *testing.T) {

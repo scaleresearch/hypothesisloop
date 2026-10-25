@@ -1,5 +1,5 @@
 import { useBudgetReference, useCapacity } from '@/lib/capacity'
-import { acceleratorLabel } from '@/lib/format'
+import { resourceLabel } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { quotaTierValues } from '@/types/api'
 import type { QuotaTier, TypeKind } from '@/types/api'
@@ -22,7 +22,9 @@ const PLATFORM_DEFAULT = "Empty is the platform's default."
 /** The machine of the plan: a type the org's jobs can be placed on now, or CPU cores, and what one node asks for. */
 function MachineFields({ machine, onChange, locked }: { machine: Machine; onChange: (machine: Machine) => void; locked: StepProps['locked'] }) {
   const { data: capacity } = useCapacity()
-  const types = Array.from(new Set((capacity?.clusters ?? []).flatMap(c => c.accelerators.filter(a => a.kind === 'accelerator').map(a => a.accelerator_type))))
+  const offered = (capacity?.clusters ?? []).flatMap(c => c.accelerators.filter(a => a.kind === 'accelerator'))
+  const labels = new Map(offered.filter(a => a.label).map(a => [a.accelerator_type, a.label as string]))
+  const types = Array.from(new Set(offered.map(a => a.accelerator_type)))
   if (machine.accelerator_type && machine.accelerator_type !== CPU_TYPE && !types.includes(machine.accelerator_type)) types.unshift(machine.accelerator_type)
   const fixed = locked('cpu')
   return (
@@ -34,7 +36,7 @@ function MachineFields({ machine, onChange, locked }: { machine: Machine; onChan
             value={machine.accelerator_type === CPU_TYPE ? '' : machine.accelerator_type}
             disabled={locked('accelerator_type')}
             onChange={type => onChange({ ...machine, accelerator_type: type })}
-            options={[{ value: '', label: 'CPU cores' }, ...types.map(type => ({ value: type, label: acceleratorLabel(type) }))]}
+            options={[{ value: '', label: 'CPU cores' }, ...types.map(type => ({ value: type, label: labels.get(type) ?? resourceLabel(type) }))]}
           />
         </FormField>
         {(['cpu', 'memory', 'storage'] as const).map(field => (

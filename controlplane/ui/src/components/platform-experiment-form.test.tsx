@@ -177,11 +177,12 @@ describe('a new platform experiment', () => {
     })
   })
 
-  it('counts the budget in H100-hours, the rate of each type in its tip', async () => {
+  it('counts the budget in H100-hours and links to the rates', async () => {
     show()
     await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
     expect(await screen.findByLabelText('Budget (H100-hours)')).toBeTruthy()
-    expect(screen.getByRole('img', { name: 'Budgets are counted in H100-hours. An hour on another type counts at its rate: NVIDIA-H100-80GB-HBM3 1, NVIDIA-GeForce-RTX-4090 0.25. Jobs on CPU count CPU core-hours. Memory and storage spend nothing.' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'Budgets are counted in H100-hours. An hour on another type counts at its rate. Jobs on CPU count CPU core-hours. Memory and storage spend nothing.' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Rates' })).toBeTruthy()
   })
 
   it('creates nothing without an executor in the team', async () => {

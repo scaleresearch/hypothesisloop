@@ -92,11 +92,12 @@ func (p *Provider) gpuOffers(ctx context.Context, spec provider.Spec) ([]offer, 
 		price, most = found.Price.Community, found.MaxCount.Community
 	}
 	o := offer{gpu: found.ID, gpus: spec.AcceleratorCount, pricePerHour: price * float64(spec.AcceleratorCount)}
+	ceiling, ceilingKey := p.cfg.maxPrice(accelerator, spec.AcceleratorCount)
 	switch {
 	case spec.AcceleratorCount > most:
 		return nil, fmt.Sprintf("Runpod has no machine with that many %s in its %s cloud", found.ID, p.cfg.Cloud), nil
-	case o.pricePerHour > p.cfg.MaxPricePerHour:
-		return nil, fmt.Sprintf("%d of %s cost $%.4f/h, more than this Runpod account's max_price_per_hour $%.4f", o.gpus, found.ID, o.pricePerHour, p.cfg.MaxPricePerHour), nil
+	case o.pricePerHour > ceiling:
+		return nil, fmt.Sprintf("%d of %s cost $%.4f/h, more than this Runpod account's %s allows, $%.4f", o.gpus, found.ID, o.pricePerHour, ceilingKey, ceiling), nil
 	}
 	o.dataCenters = p.stocked(found.DataCenters)
 	if len(o.dataCenters) == 0 {

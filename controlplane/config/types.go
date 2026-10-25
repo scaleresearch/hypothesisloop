@@ -4,14 +4,22 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// AcceleratorTypeConfig defines one priced type: its identity, its exchange rate and what every
-// node of a job on it needs beside the device.
+// AcceleratorTypeConfig defines one priced type: its identity, its exchange rate, what every
+// node of a job on it needs beside the device, and its names on the providers that rent it.
 type AcceleratorTypeConfig struct {
-	Name     string  `yaml:"name"`
+	Name string `yaml:"name"`
+	// Label is the type as a person reads it ("H100 SXM 80GB").
+	Label    string  `yaml:"label"`
 	AccHRate float64 `yaml:"acch_rate"`
+	// Providers is the type on each provider a cloud_compute entry rents it on, by the provider's
+	// name, in the provider's own words (vast: gpu_name; runpod: gpu_id), which only that
+	// provider's adapter reads.
+	Providers map[string]yaml.Node `yaml:"providers"`
 	// PodResources are resource requests every node of a job on this type gets, by the name the
 	// runtime knows them (hugepages-1Gi: 4Gi). No job states them.
 	PodResources map[string]string `yaml:"pod_resources"`
@@ -63,6 +71,9 @@ type QuotaConfig struct {
 	// platform's clusters its placed jobs, and each project's, may reserve. Required, 0 < project <= org.
 	DefaultOrgSharedAccHPerHour     float64 `yaml:"default_org_shared_acch_per_hour"`
 	DefaultProjectSharedAccHPerHour float64 `yaml:"default_project_shared_acch_per_hour"`
+	// SharedAccHPerCPUCore is what one core of a job on cores reserves of the platform compute
+	// limit (domain.SetCPUCoreSharedRate).
+	SharedAccHPerCPUCore float64 `yaml:"shared_acch_per_cpu_core"`
 
 	MaxAcceleratorCountPerJob int     `yaml:"max_accelerator_count_per_job"`
 	MaxCPUCoresPerJob         float64 `yaml:"max_cpu_cores_per_job"`
@@ -488,6 +499,7 @@ type Settings struct {
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName         map[string]float64           // accelerator name → AccH rate
 	PodResourcesByName map[string]map[string]string // accelerator name → pod_resources, where it has any
+	LabelByName        map[string]string            // accelerator name → label, where it has one
 }
 
 // ModelDefaults is the platform's model for an agent and for a coordinator that names none.
@@ -498,4 +510,21 @@ func (a AgentsConfig) ModelDefaults() domain.ModelDefaults {
 // NewOrgComputeLimit is the platform compute limit an org is created with.
 func (q QuotaConfig) NewOrgComputeLimit() domain.ComputeLimit {
 	return domain.ComputeLimit{Org: q.DefaultOrgSharedAccHPerHour, Project: q.DefaultProjectSharedAccHPerHour}
+}
+
+// Accelerators is every accelerator type a shape of cc rents, each with the catalog's entry for
+// cc's provider (accelerator_types[].providers), which the provider's adapter reads.
+func (c *Settings) Accelerators(cc CloudComputeConfig) map[string]yaml.Node {
+	out := map[string]yaml.Node{}
+	for _, shape := range cc.Shapes {
+		if shape.Accelerators == 0 {
+			continue
+		}
+		for _, t := range c.AcceleratorTypes {
+			if entry, named := t.Providers[cc.Provider]; named && t.Name == shape.AcceleratorType {
+				out[t.Name] = entry
+			}
+		}
+	}
+	return out
 }

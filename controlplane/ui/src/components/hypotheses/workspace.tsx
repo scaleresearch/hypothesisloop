@@ -35,7 +35,7 @@ import { keys } from '@/lib/keys'
 import { hypothesisStatusValues, type HypothesisGraph, type PlatformExperiment } from '@/types/api'
 
 /** The view a hypotheses page opens in, which the URL leaves out. */
-export const HYPOTHESES_VIEW = 'outline'
+export const HYPOTHESES_VIEW = 'graph'
 
 const STATUS_OPTIONS = hypothesisStatusValues.map(s => ({ value: s, label: s }))
 
@@ -125,8 +125,8 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
       <Inline gap="md" nowrap className="ml-auto">
         {action}
         <Inline gap="xs" nowrap role="group" aria-label="View">
-          <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
           <Chip active={view === 'graph'} onClick={() => setView('graph')}>Graph</Chip>
+          <Chip active={view === 'outline'} onClick={() => setView('outline')}>Outline</Chip>
         </Inline>
       </Inline>
     </Inline>}

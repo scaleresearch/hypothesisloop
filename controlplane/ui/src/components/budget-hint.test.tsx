@@ -48,16 +48,21 @@ describe('what a budget is counted in', () => {
   })
 
   it('names the reference accelerator, and core-hours for a run on CPU', () => {
-    const rates = acceleratorRates(CAPACITY)
-    expect(budgetExplained(undefined, 'H100', rates)).toBe('Budgets are counted in H100-hours. An hour on another type counts at its rate: NVIDIA-H100-80GB-HBM3 1, NVIDIA-GeForce-RTX-4090 0.25. Jobs on CPU count CPU core-hours. Memory and storage spend nothing.')
-    expect(budgetExplained('accelerator', 'H100', [])).toBe('Budgets are counted in H100-hours. An hour on another type counts at its rate. Memory and storage spend nothing.')
-    expect(budgetExplained('cpu', 'H100', rates)).toBe('Counted in CPU core-hours: a core for an hour counts 1. Memory and storage spend nothing.')
+    expect(budgetExplained(undefined, 'H100')).toBe('Budgets are counted in H100-hours. An hour on another type counts at its rate. Jobs on CPU count CPU core-hours. Memory and storage spend nothing.')
+    expect(budgetExplained('accelerator', 'H100')).toBe('Budgets are counted in H100-hours. An hour on another type counts at its rate. Memory and storage spend nothing.')
+    expect(budgetExplained('cpu', 'H100')).toBe('Counted in CPU core-hours: a core for an hour counts 1. Memory and storage spend nothing.')
   })
 
   it('converts the budget for the chosen type as it is typed', async () => {
     show(<BudgetHint budget="10" acceleratorType="nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090" />)
     expect(await screen.findByText('About 40 hours on NVIDIA-GeForce-RTX-4090, which counts 0.25 per hour.')).toBeTruthy()
     expect(screen.getByRole('img', { name: /^Budgets are counted in H100-hours\./ })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Rates' }).getAttribute('href')).toBe('/orgs/org_a/clusters#rates')
+  })
+
+  it('takes the catalog label of a type', () => {
+    const labelled = { budget_reference: 'H100', clusters: [{ cluster_name: 'a', hosts: 1, multi_node: false, accelerators: [{ ...accelerator('nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3', 1), label: 'H100 SXM 80GB' }] }] } as unknown as LiveCapacity
+    expect(acceleratorRates(labelled).map(r => r.label)).toEqual(['H100 SXM 80GB'])
   })
 
   it('shows only the tip with no type chosen', async () => {

@@ -96,9 +96,10 @@ func (c *Settings) build() error {
 	if c.BudgetReference == "" {
 		c.BudgetReference = domain.DefaultBudgetReference
 	}
-	c.AcceleratorTypes = append([]AcceleratorTypeConfig{{Name: string(domain.CPUType), AccHRate: cpuCoreAccHRate}}, c.AcceleratorTypes...)
+	c.AcceleratorTypes = append([]AcceleratorTypeConfig{{Name: string(domain.CPUType), Label: "CPU core", AccHRate: cpuCoreAccHRate}}, c.AcceleratorTypes...)
 	c.RateByName = make(map[string]float64, len(c.AcceleratorTypes))
 	c.PodResourcesByName = map[string]map[string]string{}
+	c.LabelByName = map[string]string{}
 
 	seenNames := map[string]bool{}
 	for _, g := range c.AcceleratorTypes {
@@ -113,6 +114,9 @@ func (c *Settings) build() error {
 		}
 		seenNames[g.Name] = true
 		c.RateByName[g.Name] = g.AccHRate
+		if g.Label != "" {
+			c.LabelByName[g.Name] = g.Label
+		}
 		for name, quantity := range g.PodResources {
 			if q, err := resource.ParseQuantity(quantity); name == "" || err != nil || q.Sign() <= 0 {
 				return fmt.Errorf("accelerator_type %q pod_resources[%q] must be a positive quantity, got %q", g.Name, name, quantity)
@@ -139,6 +143,7 @@ func (c *Settings) build() error {
 		{"max_cpu_cores_per_job", c.Quota.MaxCPUCoresPerJob},
 		{"max_ram_gb_per_job", c.Quota.MaxRAMGBPerJob},
 		{"max_storage_gb_per_job", c.Quota.MaxStorageGBPerJob},
+		{"shared_acch_per_cpu_core", c.Quota.SharedAccHPerCPUCore},
 	} {
 		if limit.value <= 0 {
 			return fmt.Errorf("quota %s is required and must be positive", limit.key)

@@ -214,7 +214,8 @@ offer.
 
 A line with limit platform_compute says how much of the platform's clusters the org's
 placed jobs may reserve (org) and each of its projects' (project), in accelerator hours per hour
-(acch_per_hour times accelerator_count of each placed job), and what they reserve now (org_held,
+(acch_per_hour times accelerator_count of each placed job, and acch_per_cpu_core times the
+cores of a job on cores), and what they reserve now (org_held,
 and project_held for a token bound to one project). A job that would pass either waits queued.
 
 The clusters are the ones one org's jobs can be placed on: its own and the platform's. An API

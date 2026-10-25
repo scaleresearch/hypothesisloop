@@ -30,7 +30,7 @@ import type { HypothesisStats, MetricDefinition, PlatformExperiment } from '@/ty
 
 // The experiments a project holds are few; past this many the newest are listed and the rest named.
 const EXPERIMENTS_LISTED = 50
-const VIEWS = [{ value: 'outline', label: 'Outline' }, { value: 'graph', label: 'Graph' }] as const
+const VIEWS = [{ value: 'graph', label: 'Graph' }, { value: 'outline', label: 'Outline' }] as const
 
 /**
  * The experiment with the most recent activity: an open or running one, the latest started first

@@ -47,9 +47,9 @@ func gpuSettings() Settings {
 		MinReliability:  0.98,
 		Regions:         []string{"SE", "NL"},
 		VerifiedOnly:    true,
-		Accelerators: []Accelerator{
-			{Product: "NVIDIA GeForce RTX 3060", GPUName: "RTX 3060"},
-			{Product: "NVIDIA GeForce RTX 4090", GPUName: "RTX 4090", MinGPURAMMB: 24000},
+		Accelerators: map[string]Accelerator{
+			"nvidia.com/gpu.product=NVIDIA-GeForce-RTX-3060": {GPUName: "RTX 3060"},
+			"nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090": {GPUName: "RTX 4090", MinGPURAMMB: 24000},
 		},
 	}
 }
@@ -631,3 +631,23 @@ func TestASpecOfAnArchitectureVastHasNoOffersOfIsRefusedBeforeAnySearch(t *testi
 		t.Fatalf("Architectures = %v", got)
 	}
 }
+
+// A model with a ceiling of its own is searched under it times its GPUs, and every other size
+// under the account's max_price_per_hour.
+func TestAModelsOwnCeilingReplacesTheAccountsTimesItsGPUs(t *testing.T) {
+	settings := gpuSettings()
+	settings.Accelerators["nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090"] = Accelerator{GPUName: "RTX 4090", MaxPricePerGPUHour: 2.5}
+	for spec, want := range map[*provider.Spec]float64{ptr(gpuSpec()): 5.0, ptr(cpuSpec()): 0.75} {
+		api := newFakeAPI(t)
+		rentable(api, spec.Name)
+		if _, err := newTestProvider(t, api, settings).Create(context.Background(), *spec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		search := api.sent(http.MethodPost, searchPath)
+		if got := search[0].Body["dph_total"]; !reflect.DeepEqual(got, map[string]any{"lte": want}) {
+			t.Errorf("%d GPUs: dph_total = %v, want lte %v", spec.AcceleratorCount, got, want)
+		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

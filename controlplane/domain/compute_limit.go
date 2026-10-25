@@ -30,8 +30,28 @@ type ClaimRefusal struct {
 	Held, Limit, Needs float64
 }
 
-// AccHPerHour is what a job of count units of t reserves while it is placed.
+// cpuCoreSharedRate is what one core of CPUType reserves of a ComputeLimit, set at startup from
+// quota.shared_acch_per_cpu_core. A core's acch_rate of 1 makes a budget read as core-hours,
+// which as a share of the platform's GPU-scale limit would hold a project to a few dozen cores.
+var cpuCoreSharedRate = 0.02
+
+// SetCPUCoreSharedRate registers quota.shared_acch_per_cpu_core. Call once at startup.
+func SetCPUCoreSharedRate(rate float64) {
+	if !(rate > 0) {
+		panic("shared_acch_per_cpu_core must be positive")
+	}
+	cpuCoreSharedRate = rate
+}
+
+// CPUCoreSharedRate is what one core reserves of a ComputeLimit.
+func CPUCoreSharedRate() float64 { return cpuCoreSharedRate }
+
+// AccHPerHour is what a job of count units of t reserves while it is placed: count times t's
+// acch_rate, and for cores count times cpuCoreSharedRate.
 func AccHPerHour(t AcceleratorType, count int) (float64, error) {
+	if t.Is(CPUType) {
+		return cpuCoreSharedRate * float64(count), nil
+	}
 	rate, ok := LookupAcceleratorCost(t)
 	if !ok {
 		return 0, errors.New("accelerator type " + string(t) + " has no configured acch_rate")

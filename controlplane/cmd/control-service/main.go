@@ -72,6 +72,8 @@ func main() {
 	defer graph.Close(context.Background()) //nolint:errcheck
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
+	domain.SetAcceleratorLabels(pcfg.LabelByName)
+	domain.SetCPUCoreSharedRate(pcfg.Quota.SharedAccHPerCPUCore)
 
 	quotaCfg := domain.QuotaConfig{
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,

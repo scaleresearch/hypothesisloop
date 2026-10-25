@@ -34,9 +34,9 @@ cloud_compute:
     reconcile_interval_seconds: 10
     # A push reads the output of every started instance, one after another, and vast.ai takes two
     # to four seconds to deliver each read, and a multi-node job's status costs one read per rank.
-    # Allow about three seconds per instance the shapes below can hold: 30 for these six, 60 for
-    # twenty.
-    status_interval_seconds: 30
+    # Allow about three seconds per instance started at once: 30 for ten, 60 for twenty. With
+    # GPU models from an RTX 4090 to a B200 to choose from, a team of agents runs twenty at once.
+    status_interval_seconds: 60
     # How long a job may wait for a machine to rent before it goes back to the queue as no_offer,
     # at no cost and with no failure counted against its agent, and how long a rented machine may
     # take to start the job before it is destroyed and another rented. The scheduler bounds each
@@ -51,11 +51,13 @@ cloud_compute:
       # The account's user id, as the vast.ai console shows it. With the provider and the
       # namespace it is the cluster's id, which per-cluster settings are keyed on.
       account_id: REPLACE-WITH-ACCOUNT-ID
-      # Offers above this price for the whole instance are never rented. Each rent takes the
-      # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In
-      # October 2026 a verified RTX 4090 of the shape below with reliability 0.98 cost $0.55 to
-      # $1.30 an hour in Europe and the US (median $0.76), an A100 80GB about $1.05, and any GPU
-      # machine with 8 cores and 32 GB from $0.09 (median $0.43).
+      # Offers above this price for the whole instance are never rented, unless the catalog gives
+      # the GPU model a max_price_per_gpu_hour of its own (accelerator_types[].providers.vast),
+      # as it does every model above $1.50. Each rent takes the cheapest offer that passes the
+      # filters, so this is a ceiling and not what is paid. In October 2026 a verified RTX 4090 of
+      # the shape below with reliability 0.98 cost $0.55 to $1.30 an hour in Europe and the US
+      # (median $0.76), an RTX 5090 $0.21 to $1.07, and any GPU machine with 8 cores and 32 GB
+      # from $0.09 (median $0.43).
       max_price_per_hour: 1.50
       # The vendor's own score of a host, 0 to 1.
       min_reliability: 0.98
@@ -68,31 +70,23 @@ cloud_compute:
       # instance that is slow to start, with what the host says; a machine that keeps failing to
       # start instances goes here.
       excluded_machines: []
-      # Every GPU model a shape below names, under both of its names: product as the NVIDIA
-      # driver reports it, which is what the catalog string is made from, and gpu_name as
-      # vast.ai's offer search returns it. min_gpu_ram_mb tells apart models vast.ai sells under
-      # one name.
-      accelerators:
-        - product: NVIDIA GeForce RTX 4090
-          gpu_name: RTX 4090
-        - product: NVIDIA A100 80GB PCIe
-          gpu_name: A100 PCIE
-          min_gpu_ram_mb: 80000
 
     # What this account may rent. Each of a shape's max_instances is reported as a node that holds
     # one job, so the scheduler needs no provider settings of its own. A job is admitted to a shape
     # with exactly the accelerators it asks for and at least the cpu, memory and storage, the
     # smallest such shape first, and is rented and counted at the shape's whole size. name is 1 to
     # 16 lowercase letters and digits. accelerator_type is the resource catalog string, written
-    # exactly as jobs request it and as it is priced in accelerator_types. A shape without
+    # exactly as jobs request it and as it is priced in accelerator_types, which names the model
+    # in the provider's own words (providers.vast or providers.runpod). A shape without
     # accelerators offers its whole cores as units of hypothesisloop.dev/cpu=core. On a provider
     # that rents out other people's offers (vast.ai) a node is reported free only while an offer
     # passes the filters above for it, so the free capacity shown is what can be rented now.
     #
     # max_instances is set far above what experiments ask for at once, so it is no limit on how
     # much is rented: what bounds the spend is each experiment's budget, each agent's quota, the
-    # experiment's concurrency limit and max_price_per_hour. Every instance of the maximum is
-    # reported as a node on every poll, which is the one reason the number is not larger.
+    # experiment's concurrency limit, the platform compute limit and the price ceilings. Every
+    # instance of the maximum is reported as a node on every poll, which is the one reason the
+    # number is not larger, and why a model rarely rented has a smaller one.
     shapes:
       - name: rtx4090
         accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
@@ -101,6 +95,27 @@ cloud_compute:
         memory: 32Gi
         storage: 100Gi
         max_instances: 200
+      - name: rtx5090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-5090
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 100
+      - name: a6000
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-RTX-A6000
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 50
+      - name: l40s
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-L40S
+        accelerators: 1
+        cpu: "8"
+        memory: 64Gi
+        storage: 200Gi
+        max_instances: 50
       - name: a100
         accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
         accelerators: 1
@@ -108,6 +123,48 @@ cloud_compute:
         memory: 64Gi
         storage: 200Gi
         max_instances: 200
+      - name: a100sxm
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-SXM4-80GB
+        accelerators: 1
+        cpu: "8"
+        memory: 64Gi
+        storage: 200Gi
+        max_instances: 50
+      - name: h100
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+        accelerators: 1
+        cpu: "16"
+        memory: 128Gi
+        storage: 300Gi
+        max_instances: 50
+      - name: h100pcie
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-PCIe
+        accelerators: 1
+        cpu: "16"
+        memory: 128Gi
+        storage: 300Gi
+        max_instances: 20
+      - name: h100nvl
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-NVL
+        accelerators: 1
+        cpu: "16"
+        memory: 128Gi
+        storage: 300Gi
+        max_instances: 20
+      - name: h200
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H200
+        accelerators: 1
+        cpu: "16"
+        memory: 192Gi
+        storage: 500Gi
+        max_instances: 20
+      - name: b200
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-B200
+        accelerators: 1
+        cpu: "16"
+        memory: 192Gi
+        storage: 500Gi
+        max_instances: 20
       # vast.ai rents no machine without a GPU, so this is the cheapest offer of any GPU model
       # with the cores, memory and disk, within the filters above.
       - name: cpu
@@ -134,9 +191,11 @@ cloud_compute:
       # The account's user id, as the Runpod console shows it. With the provider and the
       # namespace it is the cluster's id.
       account_id: REPLACE-WITH-ACCOUNT-ID
-      # Pods above this price for the whole pod are never rented. In October 2026 an RTX 4090
-      # cost $0.89 an hour on the SECURE cloud and $0.34 on COMMUNITY, an A100 80GB PCIe $1.79
-      # and $1.19, and a CPU pod of 8 vCPUs and 16 GB from $0.24.
+      # Pods above this price for the whole pod are never rented, unless the catalog gives the
+      # GPU model a max_price_per_gpu_hour of its own (accelerator_types[].providers.runpod), as
+      # it does every model above $1.50. In October 2026 an RTX 4090 cost $0.89 an hour on the
+      # SECURE cloud and $0.34 on COMMUNITY, an RTX 5090 $1.19 and $0.69, and a CPU pod of 8
+      # vCPUs and 16 GB from $0.24.
       max_price_per_hour: 1.50
       # The tier GPU pods are rented on: SECURE, the vendor's own data centers, or COMMUNITY.
       # CPU pods are always SECURE.
@@ -146,16 +205,10 @@ cloud_compute:
       # The CPU flavor ids a pod without a GPU is rented as, the cheapest that fits first. Leave
       # empty for any.
       cpu_flavors: []
-      # Every GPU model a shape below names, under both of its names: product as the NVIDIA
-      # driver reports it, which is what the catalog string is made from, and gpu_id as Runpod's
-      # GPU catalog lists it.
-      accelerators:
-        - product: NVIDIA GeForce RTX 4090
-          gpu_id: NVIDIA GeForce RTX 4090
-        - product: NVIDIA A100 80GB PCIe
-          gpu_id: NVIDIA A100 80GB PCIe
 
-    # The same shapes as vast's, which jobs are admitted to as they are there.
+    # The same shapes as vast's, which jobs are admitted to as they are there, and the AMD
+    # Instinct MI300X, which of the two only Runpod rents. A job on it needs an image built for
+    # ROCm.
     shapes:
       - name: rtx4090
         accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
@@ -164,6 +217,27 @@ cloud_compute:
         memory: 32Gi
         storage: 100Gi
         max_instances: 200
+      - name: rtx5090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-5090
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 100
+      - name: a6000
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-RTX-A6000
+        accelerators: 1
+        cpu: "8"
+        memory: 32Gi
+        storage: 100Gi
+        max_instances: 50
+      - name: l40s
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-L40S
+        accelerators: 1
+        cpu: "8"
+        memory: 64Gi
+        storage: 200Gi
+        max_instances: 50
       - name: a100
         accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
         accelerators: 1
@@ -171,6 +245,55 @@ cloud_compute:
         memory: 64Gi
         storage: 200Gi
         max_instances: 200
+      - name: a100sxm
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-SXM4-80GB
+        accelerators: 1
+        cpu: "8"
+        memory: 64Gi
+        storage: 200Gi
+        max_instances: 50
+      - name: h100
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
+        accelerators: 1
+        cpu: "16"
+        memory: 128Gi
+        storage: 300Gi
+        max_instances: 50
+      - name: h100pcie
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-PCIe
+        accelerators: 1
+        cpu: "16"
+        memory: 128Gi
+        storage: 300Gi
+        max_instances: 20
+      - name: h100nvl
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H100-NVL
+        accelerators: 1
+        cpu: "16"
+        memory: 128Gi
+        storage: 300Gi
+        max_instances: 20
+      - name: h200
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-H200
+        accelerators: 1
+        cpu: "16"
+        memory: 192Gi
+        storage: 500Gi
+        max_instances: 20
+      - name: b200
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-B200
+        accelerators: 1
+        cpu: "16"
+        memory: 192Gi
+        storage: 500Gi
+        max_instances: 20
+      - name: mi300x
+        accelerator_type: amd.com/gpu.product-name=AMD_Instinct_MI300X
+        accelerators: 1
+        cpu: "16"
+        memory: 192Gi
+        storage: 500Gi
+        max_instances: 20
       # A CPU pod, of the cpu_flavors above.
       - name: cpu
         cpu: "8"

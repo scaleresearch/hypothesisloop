@@ -1,10 +1,13 @@
 'use client'
 
 import useSWR from 'swr'
+import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/react'
+import { ChevronRight } from 'lucide-react'
 import { fetchAllClusters, fetchOrgClusters, fetchResourceCapacity } from '@/lib/api/clusters'
 import { clusterLabel } from '@/lib/clusters'
 import { useTenant } from '@/lib/tenant'
-import { budgetUnit, unitCount, unitRate } from '@/lib/units'
+import { budgetUnit, unitCount } from '@/lib/units'
+import { acceleratorRates } from '@/components/budget-hint'
 import { OrgClusters } from '@/components/clusters/org-clusters'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Page } from '@/components/ui/page'
@@ -141,61 +144,99 @@ function LiveCapacity() {
         )}
         <Stack gap="xl">
         {data?.platform_compute_limit && <PlatformComputeLimit limit={data.platform_compute_limit} reference={reference} />}
-        {clusters.map(cluster => (
-          <Stack as="section" gap="sm" key={cluster.cluster_name} aria-label={cluster.cluster_name} className="border-t pt-5 first:border-t-0 first:pt-0">
-            {providers.get(cluster.cluster_name)
-              ? (
-                  <Heading level={3}>
-                    {clusterLabel({ name: cluster.cluster_name, provider: providers.get(cluster.cluster_name) })}
-                    <Text as="span" variant="meta" className="ml-2 font-mono">{cluster.cluster_name}</Text>
-                  </Heading>
-                )
-              : <Heading level={3} className="font-mono">{cluster.cluster_name}</Heading>}
-            <Text variant="note">
-              {cluster.on_demand ? 'On demand' : `${cluster.hosts} ${cluster.hosts === 1 ? 'node' : 'nodes'}`}
-              {' · '}{cluster.multi_node ? 'multi-node jobs' : 'single-node jobs only'}
-              <InfoTip>A multi-node job runs only on a multi-node cluster. With topology.spread_across_hosts, the cluster needs at least as many nodes as the job.</InfoTip>
-            </Text>
-            {!cluster.on_demand && cluster.resources && (
-              <Text variant="note">
-                {round(cluster.resources.cpu_cores_available, 1)} of {unitCount('cpu', cluster.resources.cpu_cores_total)} free
-                {' · '}{gib(cluster.resources.memory_bytes_available)} of {gib(cluster.resources.memory_bytes_total)} GiB memory free
-              </Text>
-            )}
-            {cluster.accelerators.length === 0 && <Text variant="note">No resources available.</Text>}
-            {cluster.accelerators.length > 0 && (
-              <Table className="mt-1 max-w-2xl">
-                <thead>
-                  <tr>
-                    <th title="An accelerator type, or CPU cores">Type</th>
-                    {cluster.on_demand
-                      ? <th title="Rented when a job needs it, up to this many at once">On demand</th>
-                      : <th>Free / total</th>}
-                    <th className="text-right" title={`Budget per accelerator or CPU core per hour, in ${budgetUnit('accelerator', 'long', reference)}`}>Budget per hour</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cluster.accelerators.map(a => (
-                    <tr key={a.accelerator_type}>
-                      <td className="font-medium" title={a.accelerator_type}>{resourceLabel(a.accelerator_type)}</td>
-                      {cluster.on_demand ? (
-                        // available counts only what a market read for waiting jobs found, so it says nothing of what is rented.
-                        <td className="tabular-nums">up to {unitCount(a.kind, a.total)}</td>
-                      ) : (
-                        <td className="tabular-nums">
-                          <span className={a.available > 0 ? 'text-success' : 'text-danger'}>{a.available}</span>
-                          <span className="text-muted"> / {unitCount(a.kind, a.total)}</span>
-                        </td>
-                      )}
-                      <td className="text-right tabular-nums">{unitRate(a.kind, a.acch_per_hour ?? 0, reference)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            )}
-          </Stack>
-        ))}
+        {clusters.length > 0 && (
+          <div className="divide-y rounded border">
+            {clusters.map(cluster => {
+              const provider = providers.get(cluster.cluster_name)
+              const types = cluster.accelerators.length
+              return (
+                <Disclosure as="section" key={cluster.cluster_name} aria-label={cluster.cluster_name}>
+                  <DisclosureButton className="group flex w-full items-center gap-2 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-inset">
+                    <ChevronRight aria-hidden="true" size={14} className="shrink-0 text-muted transition-transform group-data-open:rotate-90" />
+                    <span className="font-medium">{provider ? clusterLabel({ name: cluster.cluster_name, provider }) : cluster.cluster_name}</span>
+                    <span className="ml-auto text-muted">
+                      {cluster.on_demand ? 'On demand' : `${cluster.hosts} ${cluster.hosts === 1 ? 'node' : 'nodes'}`}
+                      {' · '}{types} {types === 1 ? 'type' : 'types'}
+                    </span>
+                  </DisclosureButton>
+                  <DisclosurePanel className="grid gap-2 px-4 pb-4 pl-10">
+                    <Text variant="note">
+                      {provider && <span className="font-mono">{cluster.cluster_name} · </span>}
+                      {cluster.multi_node ? 'multi-node jobs' : 'single-node jobs only'}
+                      <InfoTip>A multi-node job runs only on a multi-node cluster. With topology.spread_across_hosts, the cluster needs at least as many nodes as the job.</InfoTip>
+                    </Text>
+                    {!cluster.on_demand && cluster.resources && (
+                      <Text variant="note">
+                        {round(cluster.resources.cpu_cores_available, 1)} of {unitCount('cpu', cluster.resources.cpu_cores_total)} free
+                        {' · '}{gib(cluster.resources.memory_bytes_available)} of {gib(cluster.resources.memory_bytes_total)} GiB memory free
+                      </Text>
+                    )}
+                    {types === 0 && <Text variant="note">No resources available.</Text>}
+                    {types > 0 && (
+                      <Table className="max-w-2xl">
+                        <thead>
+                          <tr>
+                            <th title="An accelerator type, or CPU cores">Type</th>
+                            {cluster.on_demand
+                              ? <th title="Rented when a job needs it, up to this many at once">On demand</th>
+                              : <th>Free / total</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cluster.accelerators.map(a => (
+                            <tr key={a.accelerator_type}>
+                              <td className="font-medium" title={a.accelerator_type}>{a.label || resourceLabel(a.accelerator_type)}</td>
+                              {cluster.on_demand ? (
+                                // available counts only what a market read for waiting jobs found, so it says nothing of what is rented.
+                                <td className="tabular-nums">up to {unitCount(a.kind, a.total)}</td>
+                              ) : (
+                                <td className="tabular-nums">
+                                  <span className={a.available > 0 ? 'text-success' : 'text-danger'}>{a.available}</span>
+                                  <span className="text-muted"> / {unitCount(a.kind, a.total)}</span>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </Table>
+                    )}
+                  </DisclosurePanel>
+                </Disclosure>
+              )
+            })}
+          </div>
+        )}
         </Stack>
+    </Section>
+  )
+}
+
+// What an hour on each accelerator type counts against a budget, one row per type, from the platform's catalog.
+function Rates() {
+  const { org } = useTenant()
+  const { data } = useSWR(keys.resourceCapacity(org.id), () => fetchResourceCapacity(org.id), { refreshInterval: POLL.live })
+  const rates = acceleratorRates(data)
+  if (rates.length === 0) return null
+  const unit = budgetUnit('accelerator', 'long', data?.budget_reference || undefined)
+  return (
+    <Section id="rates" className="scroll-mt-6" title="Rates" note="what an hour on each type counts">
+      <Table className="max-w-md">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th className="text-right">{unit}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rates.map(r => (
+            <tr key={r.type}>
+              <td className="font-medium" title={r.type}>{r.label}</td>
+              <td className="text-right tabular-nums">{r.rate}</td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+      <Text variant="note" className="mt-3">Jobs on CPU count {budgetUnit('cpu', 'long')}. Memory and storage spend nothing.</Text>
     </Section>
   )
 }
@@ -208,6 +249,7 @@ export default function ClusterPage() {
         <OrgClusters />
       </Section>
       <LiveCapacity />
+      <Rates />
       {staff && <AllClusters />}
     </Page>
   )

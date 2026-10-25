@@ -92,13 +92,13 @@ func problem(status int, detail string) http.HandlerFunc {
 func testSettings() Settings {
 	return Settings{
 		AccountID: "acct", MaxPricePerHour: 0.9, Cloud: "SECURE",
-		Accelerators: []Accelerator{{Product: "NVIDIA RTX A4500", GPUID: "NVIDIA RTX A4500"}},
+		Accelerators: map[string]Accelerator{"nvidia.com/gpu.product=NVIDIA-RTX-A4500": {GPUID: "NVIDIA RTX A4500"}},
 	}
 }
 
 func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 	t.Helper()
-	p, err := New(cfg, testKey, nil, t.Logf)
+	p, err := New(cfg, testKey, cfg.Accelerators, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

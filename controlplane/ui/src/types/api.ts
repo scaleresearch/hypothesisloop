@@ -2030,7 +2030,7 @@ export interface paths {
         };
         /**
          * Get live per-cluster accelerator capacity
-         * @description Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own clusters and the ones the platform shares, without the ones the org turned off for its jobs. The org is the one your token is bound to: every API key, agent and coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, and is answered 422 naming org_id without it. An org you do not reach is not found. Staff read one org with org_id and every cluster that reports without it. accelerator_type is the exact driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed and free now, and per_node_available on a type the most of it free on one node now. hosts is how many nodes a cluster has and multi_node whether it runs one job over several: a job of more than one node, by num_nodes or groups, is placed only where multi_node is true, and with topology.spread_across_hosts, the default, only where hosts is at least its node count. startup_seconds on a cluster that rents on demand is how long a rented machine may take to start a job, the least a rendezvous timeout of a job of several nodes there should be. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only currently-schedulable nodes count — powered-off hardware never appears. platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour (acch_per_hour of the type times accelerator_count), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, and one that alone passes the project's where no cluster of the org's own can hold it is refused 422 exceeds_project_compute_limit.
+         * @description Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own clusters and the ones the platform shares, without the ones the org turned off for its jobs. The org is the one your token is bound to: every API key, agent and coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, and is answered 422 naming org_id without it. An org you do not reach is not found. Staff read one org with org_id and every cluster that reports without it. accelerator_type is the exact driver-published string a job spec takes, so what you read here is what you submit, and label the type as a person reads it. pod_resources on a type is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed and free now, and per_node_available on a type the most of it free on one node now. hosts is how many nodes a cluster has and multi_node whether it runs one job over several: a job of more than one node, by num_nodes or groups, is placed only where multi_node is true, and with topology.spread_across_hosts, the default, only where hosts is at least its node count. startup_seconds on a cluster that rents on demand is how long a rented machine may take to start a job, the least a rendezvous timeout of a job of several nodes there should be. Check before choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only currently-schedulable nodes count — powered-off hardware never appears. platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour (acch_per_hour of the type times accelerator_count, and for a job on cores acch_per_cpu_core times its cores), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, and one that alone passes the project's where no cluster of the org's own can hold it is refused 422 exceeds_project_compute_limit.
          */
         get: operations["get-resource-capacity"];
         put?: never;
@@ -2097,6 +2097,8 @@ export interface components {
             /** Format: int64 */
             available: number;
             kind: components["schemas"]["TypeKind"];
+            /** @description The type as a person reads it, from the settings' catalog (accelerator_types[].label): H100 SXM 80GB. Absent where the catalog gives none. */
+            label?: string;
             /** Format: int64 */
             per_node_available: number;
             /** @description What the platform adds to every node of a job on this type, by Kubernetes resource name, such as the hugepages a Tenstorrent Blackhole chip's driver maps. A job states none of it. */
@@ -3956,12 +3958,17 @@ export interface components {
         PlatformComputeLimit: {
             /**
              * Format: double
+             * @description What one core of a job on cores reserves of the limits, in accelerator hours per hour: its share of the reference accelerator. A core's budget rate stays 1, a core-hour.
+             */
+            acch_per_cpu_core: number;
+            /**
+             * Format: double
              * @description Accelerator hours per hour of the platform's clusters the org's placed jobs may reserve together.
              */
             org: number;
             /**
              * Format: double
-             * @description What the org's placed jobs on the platform's shared clusters reserve now: acch_rate times accelerator_count of each.
+             * @description What the org's placed jobs on the platform's shared clusters reserve now: acch_rate times accelerator_count of each, and acch_per_cpu_core times the cores of a job on cores.
              */
             org_held: number;
             /**

@@ -13,7 +13,7 @@ import (
 // end-to-end test runs a real process against a real control plane and rents nothing. No image
 // is built with the tag.
 func init() {
-	byName["fake"] = func(yaml.Node, string, []string, func(string, ...any)) (provider.Provider, error) {
+	byName["fake"] = func(yaml.Node, string, map[string]yaml.Node, func(string, ...any)) (provider.Provider, error) {
 		return fake.New(), nil
 	}
 }

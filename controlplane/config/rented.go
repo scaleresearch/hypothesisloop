@@ -202,6 +202,9 @@ func (c *Settings) buildRented() error {
 			if _, priced := c.RateByName[shape.AcceleratorType]; !priced {
 				return fmt.Errorf("cloud_compute %s shape %q: accelerator_type %q is not priced in accelerator_types, so no job could be admitted to it", cc.ClusterName, shape.Name, shape.AcceleratorType)
 			}
+			if _, named := c.Accelerators(cc)[shape.AcceleratorType]; shape.Accelerators > 0 && !named {
+				return fmt.Errorf("cloud_compute %s shape %q: accelerator_type %q has no providers.%s entry in accelerator_types, so %s has no name to rent it by", cc.ClusterName, shape.Name, shape.AcceleratorType, cc.Provider, cc.Provider)
+			}
 		}
 	}
 	return nil

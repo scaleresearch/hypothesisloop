@@ -112,6 +112,7 @@ type ResourceCapacity struct {
 // an agent reads this and submits the same string with nothing in between to get wrong.
 type AcceleratorCapacity struct {
 	AcceleratorType string `json:"accelerator_type"`
+	Label           string `json:"label,omitempty" doc:"The type as a person reads it, from the settings' catalog (accelerator_types[].label): H100 SXM 80GB. Absent where the catalog gives none."`
 	// Kind is what available and total count: devices, or for cpu cores.
 	Kind      domain.TypeKind `json:"kind"`
 	Available int64           `json:"available"`
@@ -352,6 +353,7 @@ func buildClusterCapacity(available, total map[string]map[string]int64, podResou
 			rate, _ := domain.LookupAcceleratorCost(domain.AcceleratorType(t))
 			accelerators = append(accelerators, AcceleratorCapacity{
 				AcceleratorType: t,
+				Label:           domain.AcceleratorLabel(domain.AcceleratorType(t)),
 				Kind:            domain.AcceleratorType(t).Kind(),
 				Available:       available[cluster][t],
 				Total:           total[cluster][t],
@@ -386,8 +388,10 @@ func (s *Service) refusal(op string, err error) error {
 // jobs on shared clusters reserve of it, in accelerator hours per hour.
 type PlatformComputeLimit struct {
 	domain.ComputeLimit
-	OrgHeld     float64  `json:"org_held" doc:"What the org's placed jobs on the platform's shared clusters reserve now: acch_rate times accelerator_count of each."`
-	ProjectHeld *float64 `json:"project_held,omitempty" doc:"What the placed jobs of the caller's project reserve there now, for a caller bound to one project: an API key of a project, an agent or a coordinator."`
+	OrgHeld float64 `json:"org_held" doc:"What the org's placed jobs on the platform's shared clusters reserve now: acch_rate times accelerator_count of each, and acch_per_cpu_core times the cores of a job on cores."`
+	// AccHPerCPUCore is domain.CPUCoreSharedRate.
+	AccHPerCPUCore float64  `json:"acch_per_cpu_core" doc:"What one core of a job on cores reserves of the limits, in accelerator hours per hour: its share of the reference accelerator. A core's budget rate stays 1, a core-hour."`
+	ProjectHeld    *float64 `json:"project_held,omitempty" doc:"What the placed jobs of the caller's project reserve there now, for a caller bound to one project: an API key of a project, an agent or a coordinator."`
 }
 
 // ComputeLimit is orgID's platform compute limit and what it holds, with what projectID holds
@@ -400,7 +404,7 @@ func (s *Service) ComputeLimit(ctx context.Context, orgID, projectID string) (*P
 	if err != nil {
 		return nil, err
 	}
-	answer := &PlatformComputeLimit{ComputeLimit: limit, OrgHeld: orgHeld}
+	answer := &PlatformComputeLimit{ComputeLimit: limit, OrgHeld: orgHeld, AccHPerCPUCore: domain.CPUCoreSharedRate()}
 	if projectID != "" {
 		answer.ProjectHeld = &projectHeld
 	}

@@ -62,9 +62,6 @@ cloudCompute:
       min_reliability: 0.98
       regions: [SE, NL, DE]
       verified_only: true
-      accelerators:
-        - product: NVIDIA GeForce RTX 4090
-          gpu_name: RTX 4090
     shapes:
       - name: rtx4090
         accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090

@@ -38,6 +38,20 @@ func SetAcceleratorRates(rates map[string]float64) {
 	acceleratorRateRegistry = next
 }
 
+// acceleratorLabelRegistry is each type's label as a person reads it, set by SetAcceleratorLabels
+// at startup from the catalog's labels.
+var acceleratorLabelRegistry = map[string]string{}
+
+// SetAcceleratorLabels registers the catalog's labels. Call once at startup.
+func SetAcceleratorLabels(labels map[string]string) {
+	acceleratorLabelRegistry = labels
+}
+
+// AcceleratorLabel is t as a person reads it ("H100 SXM 80GB"), "" where the catalog gives none.
+func AcceleratorLabel(t AcceleratorType) string {
+	return acceleratorLabelRegistry[string(t)]
+}
+
 // PodResources is what every node of a job on a type needs beside the device, such as the
 // hugepages a Tenstorrent chip's driver maps, by type as the settings' catalog names it.
 type PodResources map[string]map[string]string

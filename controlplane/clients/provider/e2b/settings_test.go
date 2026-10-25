@@ -33,7 +33,7 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 }
 
 func TestNewRefusesAnyAcceleratorType(t *testing.T) {
-	_, err := New(Settings{LifetimeSeconds: 3600}, testKey, []string{"nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
+	_, err := New(Settings{LifetimeSeconds: 3600}, testKey, map[string]struct{}{"nvidia.com/gpu.product=NVIDIA-H200": {}}, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {
 		t.Fatalf("err = %v, want one naming the accelerator type a shape asks for", err)
 	}

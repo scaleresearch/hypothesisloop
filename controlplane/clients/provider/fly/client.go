@@ -26,7 +26,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
@@ -41,6 +43,12 @@ const (
 	defaultLogsURL = "https://api.fly.io"
 	requestTimeout = 30 * time.Second
 	pollInterval   = time.Second
+
+	// A request that times out leaves its HTTP/2 connection open, and every later request is
+	// sent on it. When the path to the vendor dies, as one did for good, every request then
+	// times out. A connection silent this long is pinged and closed if the ping goes unanswered.
+	idlePing    = 15 * time.Second
+	pingTimeout = 10 * time.Second
 
 	// confirmWindow is how long Create waits to see the Machine it made in the list.
 	confirmWindow = 30 * time.Second
@@ -65,15 +73,15 @@ type Provider struct {
 
 // New refuses any accelerator type: the adapter rents CPU-only Machines, so a shape that asks
 // for an accelerator stops the process at startup instead of a job at Create.
-func New(cfg Settings, token string, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
+func New(cfg Settings, token string, accelerators map[string]struct{}, log func(format string, args ...any)) (*Provider, error) {
 	if log == nil {
 		return nil, errors.New("fly: a log is required")
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	if len(acceleratorTypes) > 0 {
-		return nil, fmt.Errorf("fly: this adapter rents no accelerators, and a shape asks for %q", acceleratorTypes[0])
+	if len(accelerators) > 0 {
+		return nil, fmt.Errorf("fly: this adapter rents no accelerators, and a shape asks for %q", slices.Sorted(maps.Keys(accelerators))[0])
 	}
 	if err := checkToken(token); err != nil {
 		return nil, err
@@ -84,7 +92,7 @@ func New(cfg Settings, token string, acceleratorTypes []string, log func(format 
 		token:       token,
 		machinesURL: defaultMachinesURL,
 		logsURL:     defaultLogsURL,
-		http:        &http.Client{Timeout: requestTimeout},
+		http:        newHTTPClient(requestTimeout, idlePing, pingTimeout),
 		poll:        pollInterval,
 		confirm:     confirmWindow,
 		suffix:      randomSuffix,
@@ -114,6 +122,12 @@ func hasStatus(err error, statuses ...int) bool {
 
 // call sends one authenticated JSON request and decodes a 2xx answer into out. A nil out is for
 // an answer with nothing to read.
+func newHTTPClient(timeout, idlePing, pingTimeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.HTTP2 = &http.HTTP2Config{SendPingTimeout: idlePing, PingTimeout: pingTimeout, WriteByteTimeout: pingTimeout}
+	return &http.Client{Timeout: timeout, Transport: transport}
+}
+
 func (p *Provider) call(ctx context.Context, method, url string, body, out any) (http.Header, error) {
 	var payload io.Reader
 	if body != nil {

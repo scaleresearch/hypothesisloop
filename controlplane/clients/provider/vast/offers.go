@@ -92,7 +92,8 @@ func (p *Provider) offerQuery(spec provider.Spec) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	query["dph_total"] = map[string]any{"lte": p.cfg.MaxPricePerHour}
+	ceiling, _ := p.cfg.maxPrice(spec)
+	query["dph_total"] = map[string]any{"lte": ceiling}
 	query["reliability2"] = map[string]any{"gte": p.cfg.MinReliability}
 	excluded := append([]int64(nil), p.cfg.ExcludedMachines...)
 	for _, host := range spec.AvoidHosts {
@@ -423,7 +424,7 @@ func (p *Provider) shortfall(ctx context.Context, spec provider.Spec) (provider.
 		log("nothing to rent: %s", why)
 		return provider.Supply{Why: why}, nil
 	}
-	filters := p.cfg.filters()
+	filters := p.cfg.filters(spec)
 	var failing, counts []string
 	for _, f := range filters {
 		out := 0
@@ -465,7 +466,8 @@ type filter struct {
 	passes func(offer) bool
 }
 
-func (c Settings) filters() []filter {
+func (c Settings) filters(spec provider.Spec) []filter {
+	ceiling, ceilingKey := c.maxPrice(spec)
 	excluded := map[int64]bool{}
 	for _, machine := range c.ExcludedMachines {
 		excluded[machine] = true
@@ -476,7 +478,7 @@ func (c Settings) filters() []filter {
 	}
 	return []filter{
 		{"regions", func(o offer) bool { return len(regions) == 0 || regions[country(o.Geolocation)] }},
-		{"max_price_per_hour", func(o offer) bool { return o.PricePerHour <= c.MaxPricePerHour }},
+		{ceilingKey, func(o offer) bool { return o.PricePerHour <= ceiling }},
 		{"min_reliability", func(o offer) bool { return o.Reliability >= c.MinReliability }},
 		{"verified_only", func(o offer) bool { return !c.VerifiedOnly || o.Verification == "verified" }},
 		{"excluded_machines", func(o offer) bool { return !excluded[o.MachineID] }},

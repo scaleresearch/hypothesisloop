@@ -29,7 +29,7 @@ func TestTheTemplateExperimentFileIsASpecOnceFilledIn(t *testing.T) {
 		if err := file.Spec.Validate(); err != nil {
 			t.Fatalf("%s: validate: %v", label, err)
 		}
-		if file.Name != "matmul-throughput" || len(file.Metrics) == 0 || file.Metrics[0].Key != "tflops" || file.BudgetAcceleratorHours != 10 || file.MaxAgents != 8 || file.DurationHours != 24 {
+		if file.Name != "matmul-throughput" || len(file.Metrics) == 0 || file.Metrics[0].Key != "tflops" || file.BudgetAcceleratorHours != 10 || file.Executors() != 8 || file.DurationHours != 24 {
 			t.Fatalf("%s: spec = %+v, want what was filled in", label, file.Spec)
 		}
 		models := []string{file.CoordinatorModel}

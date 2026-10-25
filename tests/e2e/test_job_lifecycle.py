@@ -21,9 +21,10 @@ from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
 
-# More cores than a node of any cluster the suite runs on has, and no more than the default
-# project compute limit (32 AccH/h) holds, so the job is refused for capacity and not for the limit.
-UNAVAILABLE_CORES = int(32 / TEST_CPU_ACCH_RATE)
+# More cores than a node of any cluster the suite runs on has, within quota.max_cpu_cores_per_job
+# (64) and far within the default project compute limit (256 AccH/h at 0.02 a core), so the job is
+# refused for capacity and not for a limit.
+UNAVAILABLE_CORES = 32
 
 
 def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, experiment, run_id):
