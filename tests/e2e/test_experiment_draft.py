@@ -74,6 +74,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
     assert created.status_code == 201, created.text
     draft = created.json()
     pe_id = draft["id"]
+    api.record_platform_experiment(pe_id)
     try:
         # A draft has no budget: the proposal states one and the person accepts at a cost they state.
         assert draft["status"] == "draft" and draft["goal"] == GOAL and draft["budget_accelerator_hours"] == 0, draft
@@ -214,6 +215,7 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
     created = api.post("/platform-experiments/drafts", {"project_id": api.project_id, "goal": "Make it better"})
     assert created.status_code == 201, created.text
     pe_id = created.json()["id"]
+    api.record_platform_experiment(pe_id)
     try:
         assert _asked(_planner(api, pe_id))
         instance = _planner(api, pe_id)["instance"]
@@ -252,6 +254,7 @@ def test_a_draft_nobody_wants_is_closed(api: API):
     created = api.post("/platform-experiments/drafts", {"project_id": api.project_id, "goal": GOAL})
     assert created.status_code == 201, created.text
     pe_id = created.json()["id"]
+    api.record_platform_experiment(pe_id)
     api.close_platform_experiment(pe_id)
     assert api.get_json(f"/platform-experiments/{pe_id}")["status"] == "closed"
     empty = api.post("/platform-experiments/drafts", {"project_id": api.project_id, "goal": "  "})

@@ -281,7 +281,7 @@ def test_only_executors_count_toward_max_agents(api, run_id):
     r = _create(api, f"roles-team-{run_id}", max_agents=1, agents=[{"agent_type": "researcher", "count": 2}, {"agent_type": "generalist", "count": 1}])
     assert r.status_code == 201, f"a team of two researchers and one executor under max_agents 1: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
-    api.created_platform_experiments.append(pe_id)
+    api.record_platform_experiment(pe_id)
     try:
         stored = api.get_json(f"/platform-experiments/{pe_id}")
         assert [(e["agent_type"], e["count"]) for e in stored["agents"]] == [("researcher", 2), ("generalist", 1)], stored["agents"]
@@ -360,7 +360,7 @@ def test_a_team_spec_starts_its_researcher_beside_its_executor_on_the_coordinato
                 agents=[{"agent_type": "researcher", "count": 1}, {"agent_type": "generalist", "count": 1}])
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
-    api.created_platform_experiments.append(pe_id)
+    api.record_platform_experiment(pe_id)
     try:
         team = [a for a in api.agents(pe_id) if a["role"] != "baseline"]
         assert sorted((a["role"], a["agent_type"]) for a in team) == [("executor", "generalist"), ("researcher", "researcher")], team

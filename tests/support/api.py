@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import shutil
@@ -27,6 +28,10 @@ from . import admin
 from .wait import Deadline, eventually
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# One platform experiment id per line, appended when a test creates one and removed when the run
+# closes it, so a run that was killed leaves its ids for the next session to close.
+OPEN_EXPERIMENTS_FILE = REPO_ROOT / "localdev" / ".run" / "e2e-open-experiments.txt"
+log = logging.getLogger(__name__)
 # The subprotocol GET /watch speaks, offered beside the token.
 WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 
@@ -49,6 +54,29 @@ JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
 WORKLOAD_IMAGE = "python:3.13-bookworm"
 WORKLOAD_DIR = REPO_ROOT / "tests" / "workloads" / "generic"
 WORKLOAD_FILES = ("train.py", "train_distributed.py", "train_distributed_torch.py", "data_stage.py")
+
+
+def recorded_experiments() -> list[str]:
+    try:
+        return OPEN_EXPERIMENTS_FILE.read_text().split()
+    except FileNotFoundError:
+        return []
+
+
+def forget_experiments(ids: list[str] | None = None) -> None:
+    """Drops ids from the record, all of it when none are named."""
+    kept = [] if ids is None else [i for i in recorded_experiments() if i not in set(ids)]
+    OPEN_EXPERIMENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    OPEN_EXPERIMENTS_FILE.write_text("".join(f"{i}\n" for i in kept))
+
+
+def close_experiments(client: "API", ids: list[str]) -> None:
+    """Closes each id, logging a failure and going on."""
+    for pe_id in ids:
+        try:
+            client.close_platform_experiment(pe_id)
+        except Exception:
+            log.exception("could not close platform experiment %s", pe_id)
 
 
 def link(type_: str, to: str) -> dict:
@@ -394,8 +422,19 @@ class API:
         body["repository"] = repository or self.repository or self.sandbox_repository()
         body["branch"] = SANDBOX_BRANCH
         pe_id = self.post_json("/platform-experiments", body)["id"]
-        self.created_platform_experiments.append(pe_id)
+        self.record_platform_experiment(pe_id)
         return pe_id
+
+    def record_platform_experiment(self, pe_id: str) -> None:
+        """Lists an experiment this caller created for closing at session end, and in the file a
+        later session sweeps if this one is killed first."""
+        self.created_platform_experiments.append(pe_id)
+        try:
+            OPEN_EXPERIMENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with OPEN_EXPERIMENTS_FILE.open("a") as f:
+                f.write(pe_id + "\n")
+        except OSError:
+            log.exception("could not record platform experiment %s", pe_id)
 
     def signup(self, pe_id: str, agent_id: str, role: str | None = None, quota_tier: str | None = "guaranteed") -> requests.Response:
         # Default "guaranteed", not the server's own kind-based default: an e2e-registered agent

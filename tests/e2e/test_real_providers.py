@@ -70,7 +70,7 @@ def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines(org: API, run
     })
     assert created.status_code == 201, f"create: {created.status_code} {created.text}"
     pe_id = created.json()["id"]
-    org.created_platform_experiments.append(pe_id)
+    org.record_platform_experiment(pe_id)
     executors = [org.add_agents(pe_id, in_agentsandbox=True, agent_type=agent_type)[0]["agent_id"]
                    for agent_type in ("hyperparameter-search", "architecture-search")]
     everyone: list[str | None] = [None, *executors]

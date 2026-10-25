@@ -5,6 +5,7 @@ offers. Every resource a test creates is named with a UUID, so tests never colli
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -17,7 +18,7 @@ import pytest
 import requests
 
 from support import admin
-from support.api import API
+from support.api import API, close_experiments, forget_experiments, recorded_experiments
 from support.settings import setting
 from support.wait import Deadline
 
@@ -138,6 +139,23 @@ def api(preflight: None, run_id: str):
     if API.local_repository:
         for made in API.local_repository.parent.glob(f"*/{API.local_repository.name}"):
             shutil.rmtree(made)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def close_leaked_experiments(api: API):
+    """Closes the platform experiments an earlier run recorded and never closed because it was
+    killed, then this run's own at its end. Only ids the tests created are touched. Under xdist a
+    worker leaves the earlier ids alone: they may be another worker's live ones."""
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        close_experiments(api, recorded_experiments())
+        forget_experiments()
+    yield
+    own = list(api.created_platform_experiments)
+    close_experiments(api, own)
+    try:
+        forget_experiments(None if not os.environ.get("PYTEST_XDIST_WORKER") else own)
+    except OSError:
+        logging.getLogger(__name__).exception("could not update the record of open platform experiments")
 
 
 @pytest.fixture

@@ -30,7 +30,7 @@ def pe_id(api: API, run_id: str):
     r = _run(api, f"agents-{uuid.uuid4().hex[:8]}-{run_id}")
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
-    api.created_platform_experiments.append(pe_id)
+    api.record_platform_experiment(pe_id)
     yield pe_id
     api.close_platform_experiment(pe_id)
 
@@ -174,7 +174,7 @@ def test_the_sandboxes_of_one_platform_experiment_are_bounded_whatever_their_rol
     r = _run(api, f"sandboxed-bound-{run_id}", coordinator_in_agentsandbox=True, max_agents=1, repository=sandbox_repository, branch="main")
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id, bound = r.json()["id"], r.json()["max_agentsandboxes"]
-    api.created_platform_experiments.append(pe_id)
+    api.record_platform_experiment(pe_id)
     try:
         assert bound >= 3, f"max_agentsandboxes = {bound}: no room for an agent beside the coordinator and the baseline's sandbox"
         # max_agents counts executors, so reviewers are added until the sandboxes run out. One is
